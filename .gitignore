@@ -1,0 +1,71 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# Testing
+/coverage
+
+# Next.js build artifacts
+.next/
+/out/
+
+# Production
+/build
+
+# Misc
+.DS_Store
+*.pem
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Local development & Secret Configuration Files
+# Ensure these files containing secrets are NEVER committed
+.env
+.env*.local
+.env.development
+.env.production
+.env.test
+.npmrc
+
+# Editor directories and files
+.idea
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.sublime-workspace
+
+# Optional eslint cache
+.eslintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# Optional Prettier cache
+.prettiercache
+
+# Optional Typescript cache
+.tsbuildinfo
+
+# Optional: Turbo cache
+.turbo
+
+# System files
+Thumbs.db
+ehthumbs.db
+ehthumbs_vista.db
+
+# Misc local files
+lang_permissions.json

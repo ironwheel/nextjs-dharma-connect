@@ -1,0 +1,8 @@
+# Defines the workspaces for the pnpm package manager
+
+packages:
+  # Include all applications within the apps directory
+  - 'apps/*'
+  # Include all shared packages within the packages directory
+  - 'packages/*'
+

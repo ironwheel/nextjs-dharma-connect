@@ -1,0 +1,39 @@
+{
+  "name": "student-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@fingerprintjs/fingerprintjs": "^4.6.1",
+    "@fortawesome/fontawesome-svg-core": "^6.7.2",
+    "@fortawesome/pro-solid-svg-icons": "^6.7.2",
+    "@fortawesome/react-fontawesome": "^0.2.2",
+    "@react-pdf-viewer/core": "^3.12.0",
+    "@react-pdf-viewer/default-layout": "^3.12.0",
+    "@u-wave/react-vimeo": "^0.9.12",
+    "bootstrap": "^5.3.3",
+    "clientjs": "^0.2.1",
+    "dashjs": "^5.0.0",
+    "dotenv": "^16.4.7",
+    "mux-embed": "^5.9.0",
+    "next": "15.2.4",
+    "pdfjs-dist": "^3.11.174",
+    "public-ip": "^7.0.1",
+    "pusher-js": "^8.4.0",
+    "react": "19.1.0",
+    "react-bootstrap": "^2.10.9",
+    "react-dom": "19.1.0",
+    "react-srcdoc-iframe": "^1.0.3",
+    "@dharma/backend-core": "workspace:*",
+    "@dharma/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "eslint": "9.23.0",
+    "eslint-config-next": "15.2.4"
+  }
+}
