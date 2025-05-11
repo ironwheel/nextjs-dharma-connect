@@ -7,8 +7,8 @@ This repository contains a collection of Next.js applications related to the Dha
 This monorepo is organized into the following main directories:
 
 -   **/apps**: Contains the individual Next.js applications.
-    -   `student-dashboard`: The main dashboard interface for students.
-    -   `student-registration`: Handles the student registration process.
+    -   `student-dashboard`: Dashboard interface for students allowing access to upcoming events, video recordings of previous events, teaching materials (PDFs) access, and overall schedule.
+    -   `student-registration`: Handles event registration and payments using Stripe.
     -   `admin-dashboard`: Provides administrative functionalities.
 -   **/packages**: Contains shared code, utilities, components, or configurations used across multiple applications within this monorepo.
     -   `shared`: A package containing common utilities (like eligibility logic) and shared UI components and types.
