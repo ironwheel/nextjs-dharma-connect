@@ -1,19 +1,18 @@
 # Next.js Dharma Connect Projects
 
-This repository contains a collection of Next.js applications related to the Dharma Connect platform, managed as a monorepo using pnpm workspaces and potentially Turborepo for task orchestration.
+This repository contains a collection of Next.js applications related to the Dharma Connect platform, a suite of event registration and participant management tools managed as a monorepo.
 
 ## Repository Structure
 
 This monorepo is organized into the following main directories:
 
 -   **/apps**: Contains the individual Next.js applications.
-    -   `student-dashboard`: The main dashboard interface for students (formerly 'media').
+    -   `student-dashboard`: The main dashboard interface for students.
     -   `student-registration`: Handles the student registration process.
     -   `admin-dashboard`: Provides administrative functionalities.
-    -   *(Potentially other applications)*
 -   **/packages**: Contains shared code, utilities, components, or configurations used across multiple applications within this monorepo.
-    -   `shared`: A package containing common utilities (like eligibility logic) and potentially shared UI components or types.
-    -   *(Potentially other shared packages)*
+    -   `shared`: A package containing common utilities (like eligibility logic) and shared UI components and types.
+    -   `backend-core`: A package containing common AWS interface and authentication utilities.  
 
 ## Tech Stack
 
