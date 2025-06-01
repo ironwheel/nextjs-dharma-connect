@@ -28,4 +28,4 @@ export const getFingerprint = async () => {
         // or return a default/null value if appropriate for your error handling strategy.
         throw error;
     }
-};
+}; 

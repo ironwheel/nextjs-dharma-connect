@@ -15,7 +15,8 @@ import {
     sendConfirmationEmail,
     findParticipantForAuth,
     getPermissionsLogic,
-    TOKEN_ERROR_CODES
+    TOKEN_ERROR_CODES,
+    getPromptsForAid
 } from '@dharma/backend-core';
 
 const CORS_ALLOWED_ORIGINS_STRING = process.env.CORS_ALLOWED_ORIGINS || "";
@@ -66,25 +67,28 @@ export default async function authApiHandler(req, res) {
             }
         }
 
-        const { pid, ip, fingerprint, token, showcase } = body;
+        const { pid, ip, fingerprint, token, showcase, action } = body;
         const queryPid = req.query.pid;
-        const operation = req.query.op ? String(req.query.op).trim() : null;
 
-        console.log(`API Route /api/auth: Executing op: '${operation}'`);
+        if (!action) {
+            status = 400;
+            throw new Error("Missing 'action' in request body");
+        }
+
+        console.log(`API Route /api/auth: Executing action: '${action}'`);
 
         // Apply CSRF middleware selectively
         // Only apply to operations that are truly state-changing AND expect a CSRF token.
         // verifyAccess, confirm, getPermissions, getCsrfToken do not need incoming CSRF check.
         // verifyConfirm establishes the CSRF token.
-        if (req.method === 'POST' && !['verifyAccess', 'confirm', 'getCsrfToken', 'verifyConfirm'].includes(operation)) {
-            // Example: if you had an 'updatePassword' op, it would go here.
+        if (req.method === 'POST' && !['verifyAccess', 'confirm', 'getCsrfToken', 'verifyConfirm'].includes(action)) {
+            // Example: if you had an 'updatePassword' action, it would go here.
             // For now, most POST ops in auth either establish CSRF or don't need it.
             // await csrfMiddleware(req, res);
-            console.log(`CSRF middleware would apply here for state-changing POST op: ${operation} (if not excluded)`);
+            console.log(`CSRF middleware would apply here for state-changing POST action: ${action} (if not excluded)`);
         }
 
-
-        switch (operation) {
+        switch (action) {
             case 'verifyAccess': // POST, but does not change state, validates existing token. No CSRF check needed.
                 if (!pid || !fingerprint || !token) { status = 400; throw new Error("Missing parameters for verifyAccess."); }
                 try {
@@ -110,10 +114,9 @@ export default async function authApiHandler(req, res) {
                 }
                 break;
 
-            case 'confirm': // POST, sends email. No CSRF check needed.
-                if (!pid || !ip || !fingerprint) { status = 400; throw new Error("Missing parameters for confirm operation."); }
-                const participantForEmail = await findParticipantForAuth(pid);
-                responseData = await sendConfirmationEmail(participantForEmail, pid, ip, fingerprint, showcase);
+            case 'sendConfirmationEmail': // POST, sends email. No CSRF check needed.
+                if (!pid || !ip || !fingerprint) { status = 400; throw new Error("Missing parameters for sendConfirmationEmail operation."); }
+                responseData = await sendConfirmationEmail(pid, ip, fingerprint, showcase);
                 break;
 
             case 'getPermissions': // GET, no CSRF check needed.
@@ -128,12 +131,12 @@ export default async function authApiHandler(req, res) {
 
             default:
                 status = 400;
-                throw new Error(`Unknown auth API operation: '${operation}'`);
+                throw new Error(`Unknown auth API action: '${action}'`);
         }
 
     } catch (error) {
         if (res.headersSent) { return; }
-        console.error(`API /api/auth error (op: ${req.query.op}):`, error.message);
+        console.error(`API /api/auth error (action: ${req.body?.action}):`, error.message);
         if (error.message === 'CSRF_TOKEN_MISSING' || error.message === 'CSRF_TOKEN_MISMATCH') {
             status = 403;
         } else if (error.message === "PID_NOT_FOUND") {

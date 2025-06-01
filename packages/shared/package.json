@@ -11,5 +11,19 @@
   "keywords": [],
   "author": "Robert E. Taylor, Extropic Systems",
   "license": "MIT",
-  "devDependencies": {}
+  "peerDependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "dependencies": {
+    "@fortawesome/fontawesome-svg-core": "^6.5.1",
+    "@fortawesome/pro-solid-svg-icons": "^6.5.1",
+    "@fortawesome/react-fontawesome": "^0.2.0",
+    "react-bootstrap": "^2.10.1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.23.9",
+    "@babel/preset-react": "^7.23.9",
+    "@babel/preset-env": "^7.23.9"
+  }
 }

@@ -192,7 +192,6 @@ export async function verifyToken(pid, clientIp, clientFingerprint, expectedToke
  * Sends a confirmation email to the participant.
  * @async
  * @function sendConfirmationEmail
- * @param {object} participantData - Data of the participant (must include first, last, email, writtenLangPref).
  * @param {string} pid - Participant ID.
  * @param {string} clientIp - Client's IP address (can be null/undefined).
  * @param {string} clientFingerprint - Client's browser fingerprint (can be null/undefined).
@@ -200,7 +199,7 @@ export async function verifyToken(pid, clientIp, clientFingerprint, expectedToke
  * @returns {Promise<string>} Resolves with the participant's email address on success.
  * @throws {Error} If configuration is missing or sending fails.
  */
-export async function sendConfirmationEmail(participantData, pid, clientIp, clientFingerprint, showcase) {
+export async function sendConfirmationEmail(pid, clientIp, clientFingerprint, showcase) {
     // Check necessary configs at the start
     if (!RSA_PRIVATE_KEY_B64) throw new Error("RSA private key not configured for email sending.");
     if (!SMTP_USERNAME || !SMTP_PASSWORD) throw new Error("SMTP credentials not configured for email sending.");
@@ -209,6 +208,11 @@ export async function sendConfirmationEmail(participantData, pid, clientIp, clie
     if (!APP_DOMAIN) throw new Error("Application domain not configured for the current environment (for email sending).");
     if (!JWT_ISSUER) throw new Error(TOKEN_ERROR_CODES.CONFIG_ERROR + ': Missing JWT_ISSUER_NAME in environment for email sending.');
 
+    // Find participant data internally
+    const participantData = await findParticipantForAuth(pid);
+    if (!participantData) {
+        throw new Error("Participant not found");
+    }
 
     const privateKey = Buffer.from(RSA_PRIVATE_KEY_B64, 'base64').toString('utf-8');
     if (!privateKey) throw new Error("Invalid API_RSA_PRIVATE key for email sending.");
@@ -233,7 +237,6 @@ export async function sendConfirmationEmail(participantData, pid, clientIp, clie
             if (geoResponse.data) location = `${geoResponse.data.city || ''}, ${geoResponse.data.region || ''} (${geoResponse.data.country || 'N/A'})`.replace(/^, |, $/g, '');
         } catch (geoError) { console.warn(`auth-logic: Could not fetch geolocation for IP ${clientIp}:`, geoError.message); }
     }
-
 
     let confirmationUrl = `${APP_DOMAIN}confirm/?pid=${pid}&token=${confirmationToken}&language=${language}`;
     if (showcase) confirmationUrl += `&showcase=${encodeURIComponent(showcase)}`;
