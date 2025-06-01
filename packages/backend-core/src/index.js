@@ -44,8 +44,6 @@ export {
     JWT_VERSION,
     TOKEN_ERROR_CODES,
     DEFAULT_NO_PERMISSIONS,
-    getPromptsForAid, // Used by sendConfirmationEmail within auth-logic
-    findParticipantForAuth, // Used by sendConfirmationEmail within auth-logic
     verifyToken,
     sendConfirmationEmail,
     getPermissionsLogic

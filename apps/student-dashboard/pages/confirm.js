@@ -13,10 +13,11 @@ import { Container, Form, Row, Button, Col } from "react-bootstrap";
 import { publicIpv4 } from 'public-ip';
 
 // Shared utilities and components using '@/' alias
-import { getFingerprint } from '@/utils/fingerprint';
-import { dbgOut, dbgPrompt as studentDbgPrompt, dbgout as studentDbgout } from '@/utils/debugUtils';
-import { promptLookup as basePromptLookup } from '@/utils/promptUtils';
-import { TopNavBar, BottomNavBar } from '@/components/SharedLayout';
+import { getFingerprint } from '@dharma/shared';
+import { dbgOut, dbgPrompt as studentDbgPrompt, dbgout as studentDbgout } from '@dharma/shared';
+import { promptLookup as basePromptLookup } from '@dharma/shared';
+import { callDbApi, getPromptsFromDbApi, writeProgramError } from '@dharma/shared';
+import { TopNavBar, BottomNavBar } from "@dharma/shared";
 
 // Module-level variable to store fetched prompts
 let masterPrompts = [];
@@ -57,71 +58,14 @@ const Confirm = () => {
         setValue(v => v + 1);
     }, []);
 
-    /**
-     * Helper to call the generic /api/db endpoint.
-     * @async
-     * @function callDbApi
-     * @param {string} action - The action name for the backend handler.
-     * @param {object} payload - The data payload for the action.
-     * @returns {Promise<object>} The 'data' portion of the API response.
-     * @throws {Error} If the fetch fails, response is not ok, or data contains an error.
-     */
-    const callDbApi = async (action, payload) => {
-        console.log(`Calling DB API Action from Confirm page: ${action}`);
-        try {
-            const response = await fetch(`/api/db`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action, payload })
-            });
-
-            if (!response.ok) {
-                const errorText = await response.text().catch(() => response.statusText);
-                console.error(`DB API Error (${action}): ${response.status} ${errorText}`);
-                throw new Error(`API Error (${response.status}) for action ${action}: ${errorText}`);
-            }
-
-            const result = await response.json();
-            if (result.data?.err) {
-                console.error(`DB API Application Error (${action}): ${result.data.err}`);
-                throw new Error(`API returned error for action ${action}: ${result.data.err}`);
-            }
-            return result.data;
-        } catch (error) {
-            console.error(`Error in callDbApi (${action}):`, error);
-            // Re-throw the error to be caught by the calling function
-            throw error;
-        }
-    };
-
     useEffect(() => {
         if (!router.isReady) return;
-
-        /**
-         * Fetches prompts required for this page from the API using /api/db.
-         * @async
-         * @param {string} aid - The application ID (used in payload if needed by backend action).
-         * @returns {Promise<Array<object>>} Array of prompt objects.
-         */
-        const getPromptsFromDbApi = async (aid) => {
-            try {
-                // Assuming the 'getPrompts' action in db.js fetches all prompts
-                // or filters based on payload if necessary.
-                // For now, sending an empty payload to get all.
-                const prompts = await callDbApi('getPrompts', { aid: aid }); // Pass aid if needed by backend action
-                return prompts || [];
-            } catch (error) {
-                console.error("getPromptsFromDbApi error:", error);
-                setErrMsg(`Error loading essential resources: ${error.message}`);
-                return [];
-            }
-        };
 
         if (queryLanguage) {
             g_language = queryLanguage;
         }
 
-        // Fetch prompts using the new function
+        // Fetch prompts using the shared utility
         getPromptsFromDbApi('dashboard').then((apiPrompts) => {
             masterPrompts = apiPrompts;
             if (typeof token === 'undefined') {
@@ -133,34 +77,11 @@ const Confirm = () => {
                 setLoaded(true);
             }
             forceRender();
+        }).catch(error => {
+            setErrMsg(`Error loading essential resources: ${error.message}`);
         });
 
     }, [router.isReady, pid, token, queryLanguage, forceRender]); // Dependencies
-
-
-    /**
-     * Writes a "confirmation verification error" to the student's record via the /api/db endpoint.
-     * @async
-     * @function writeStudentConfirmVerifyError
-     * @param {string} localPid - The participant ID.
-     * @param {string | object} errorDetail - Details of the error.
-     * @returns {Promise<void>} Resolves when done, logs errors internally.
-     */
-    const writeStudentConfirmVerifyError = async (localPid, errorDetail) => {
-        const errorString = typeof errorDetail === 'string' ? errorDetail : JSON.stringify(errorDetail);
-        try {
-            // Use the existing callDbApi helper
-            await callDbApi('writeProgramError', {
-                id: localPid,
-                errorKey: 'confirmVerifyError',
-                errorTimeKey: 'confirmVerifyErrorTime',
-                errorValue: errorString
-            });
-            console.log(`Logged confirmVerifyError for PID ${localPid}`);
-        } catch (apiError) {
-            console.error("API Error logging confirm verify error via /api/db:", apiError);
-        }
-    };
 
     /**
      * Handles the confirmation button click. Uses /api/auth for verification.
@@ -168,7 +89,6 @@ const Confirm = () => {
      * @function handleConfirm
      */
     const handleConfirm = async () => {
-        // ... (handleConfirm logic remains the same, using fetch to /api/auth) ...
         if (!pid || !token) {
             setErrMsg(getPromptText('errMissingPIDOrToken'));
             return;
@@ -178,39 +98,49 @@ const Confirm = () => {
         try {
             const ip = await publicIpv4().catch(() => null);
             const fingerprintId = await getFingerprint().catch(() => null);
-            const body = { pid: pid, ip: ip, fingerprint: fingerprintId, token: token };
 
-            const response = await fetch("/api/auth/?op=verifyConfirm", { method: "POST", body: JSON.stringify(body) });
+            const response = await fetch("/api/auth", {
+                method: "POST",
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'verifyConfirm',
+                    pid,
+                    ip,
+                    fingerprint: fingerprintId,
+                    token
+                })
+            });
 
             if (!response.ok) {
                 console.error(`Verify Confirm API Error: ${response.status} ${response.statusText}`);
                 const errorData = await response.json().catch(() => ({ data: { err: `HTTP error ${response.status}` } }));
                 const reason = errorData.data?.reason ? `: ${errorData.data.reason}` : '';
                 setErrMsg(getPromptText('errVerificationFailed') + reason);
-                await writeStudentConfirmVerifyError(pid, `API Error ${response.status}${reason}`);
+                await writeProgramError(pid, 'confirmVerifyError', 'confirmVerifyErrorTime', `API Error ${response.status}${reason}`);
                 setLoadStatus('');
                 return;
             }
 
             const verifyResponse = await response.json();
 
-            if (typeof verifyResponse.data === 'string') {
+            if (verifyResponse.data?.accessToken) {
                 console.log("VERIFIED, received access token.");
-                localStorage.setItem('token', verifyResponse.data);
+                localStorage.setItem('token', verifyResponse.data.accessToken);
                 router.replace(`/?pid=${pid}${showcase ? `&showcase=${showcase}` : ''}`);
+            } else if (verifyResponse.data?.err) {
+                throw new Error(verifyResponse.data.err);
             } else {
-                throw new Error("Received unexpected success response from verification server.");
+                throw new Error("Received unexpected response format from verification server.");
             }
 
         } catch (error) {
             console.error("handleConfirm error during token verification process:", error);
             const errorMessage = error.message || "Unknown verification process error.";
             setErrMsg(getPromptText('errVerificationProcessFailed') + `: ${errorMessage}`);
-            await writeStudentConfirmVerifyError(pid, { message: "Client-side handleConfirm exception", detail: errorMessage });
+            await writeProgramError(pid, 'confirmVerifyError', 'confirmVerifyErrorTime', { message: "Client-side handleConfirm exception", detail: errorMessage });
             setLoadStatus('');
         }
     };
-
 
     // --- Render Logic (remains the same) ---
     if (!loaded && !errMsg) {

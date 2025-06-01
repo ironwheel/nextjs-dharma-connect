@@ -1,5 +1,5 @@
 /**
- * @file components/SharedLayout.js
+ * @file packages/shared/src/SharedLayout.js
  * @copyright Robert E. Taylor, Extropic Systems, 2025
  * @license MIT
  * @description Provides shared layout components like NavBars and language selection dropdowns
@@ -74,7 +74,6 @@ export const WrittenTranslationSelection = ({ currentLanguage, onLanguageChange,
  * @returns {React.Component} The rendered top navigation bar.
  */
 export const TopNavBar = ({ titlePromptKey, currentLanguage, onLanguageChange, getPromptText }) => {
-    // ... (TopNavBar implementation remains the same) ...
     return (
         <Navbar bg="primary" variant="dark" className="bg-primary justify-content-between px-3">
             <Navbar.Brand href="#home" className="eventTitle">
@@ -101,7 +100,6 @@ export const TopNavBar = ({ titlePromptKey, currentLanguage, onLanguageChange, g
  * @returns {React.Component} The rendered bottom navigation bar.
  */
 export const BottomNavBar = ({ scrollMsg, getPromptText }) => {
-    // ... (BottomNavBar implementation remains the same) ...
     const hasScrollMsg = scrollMsg && scrollMsg.length !== 0;
     const fontSize = hasScrollMsg ? 14 : 10;
 
@@ -133,4 +131,4 @@ export const BottomNavBar = ({ scrollMsg, getPromptText }) => {
             </Container>
         </Navbar>
     );
-};
+}; 

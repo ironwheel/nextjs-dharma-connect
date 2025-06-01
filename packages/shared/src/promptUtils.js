@@ -74,7 +74,7 @@ export const promptLookup = (promptsArray, promptKey, language, aid, debugFn = (
  * @param {string} [aidAlias] - An alias AID to also check if the primary AID prompt is not found.
  * @param {function} [debugFn] - Debug logging function.
  * @param {function} [loggerFn] - Logger function.
- * @returns {string} The localized prompt text.
+ * @returns {{ __html: string }} Object suitable for dangerouslySetInnerHTML.
  */
 export const promptLookupAIDSpecific = (promptsArray, key, language, targetAid, aidAlias, debugFn, loggerFn) => {
     let text = promptLookup(promptsArray, key, language, targetAid, debugFn, loggerFn);
@@ -83,7 +83,7 @@ export const promptLookupAIDSpecific = (promptsArray, key, language, targetAid, 
         if (debugFn) debugFn(`PROMPT AID_SPECIFIC: Trying alias AID '${aidAlias}' for key '${key}'`);
         text = promptLookup(promptsArray, key, language, aidAlias, debugFn, loggerFn);
     }
-    return text;
+    return { __html: text };
 }
 
 /**
@@ -230,4 +230,4 @@ export const promptLookupHTMLWithArgsAIDSpecific = (promptsArray, key, language,
     if (typeof arg3 !== 'undefined') text = text.replace(/\|\|arg3\|\|/g, arg3);
 
     return { __html: text };
-};
+}; 

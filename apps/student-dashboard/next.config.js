@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true, // Or your existing value
+  transpilePackages: ['@dharma/shared'],
   // Add the webpack configuration here:
   webpack: (config, { isServer, webpack }) => {
     // Fixes npm packages that depend on Node.js core modules
@@ -18,6 +19,18 @@ const nextConfig = {
         child_process: false, // Added fallback for 'child_process'
       };
     }
+
+    // Add rule for handling JSX in node_modules
+    config.module.rules.push({
+      test: /\.(js|jsx)$/,
+      include: [/node_modules\/@dharma\/shared/],
+      use: {
+        loader: 'babel-loader',
+        options: {
+          presets: ['@babel/preset-env', '@babel/preset-react']
+        }
+      }
+    });
 
     // Important: return the modified config
     return config;
