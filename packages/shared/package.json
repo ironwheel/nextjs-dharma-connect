@@ -19,7 +19,9 @@
     "@fortawesome/fontawesome-svg-core": "^6.5.1",
     "@fortawesome/pro-solid-svg-icons": "^6.5.1",
     "@fortawesome/react-fontawesome": "^0.2.0",
-    "react-bootstrap": "^2.10.1"
+    "react-bootstrap": "^2.10.1",
+    "public-ip": "^7.0.1",
+    "@fingerprintjs/fingerprintjs": "^4.6.1"
   },
   "devDependencies": {
     "@babel/core": "^7.23.9",
