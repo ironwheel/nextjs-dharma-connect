@@ -24,16 +24,25 @@ export {
 // Export from db-actions.js
 export {
     handleFindParticipant,
+    handleGetView,
+    handleFindConfig,
+    handleGetConfig,
     handleGetPersonalMantra,
     handlePutPersonalMantra,
     handleGetGlobalMantra,
     handleScanTable,
-    handleUpdateParticipant, // Use with caution; specific handlers are better
+    handleChunkedScanTable,
+    handleUpdateParticipant,
     handleUpdateEmailPreferences,
     handleWriteProgramError,
     handleWriteDashboardClick,
     handleInitializeDashboard,
-    handleWritePrompt
+    handleWritePrompt,
+    handleWriteAIDField,
+    handleWriteParticipantAID,
+    handleWriteOWYAALease,
+    handleWriteStudentAccessVerifyError,
+    handleTableCount
 } from './db-actions.js';
 
 // Export from auth-logic.js
@@ -46,7 +55,8 @@ export {
     DEFAULT_NO_PERMISSIONS,
     verifyToken,
     sendConfirmationEmail,
-    getPermissionsLogic
+    getPermissionsLogic,
+    handleCheckAccess
 } from './auth-logic.js';
 
 // Example of exporting a constant if needed by API routes directly

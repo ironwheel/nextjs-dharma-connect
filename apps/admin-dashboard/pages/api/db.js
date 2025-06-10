@@ -14,13 +14,20 @@ import {
     handlePutPersonalMantra,
     handleGetGlobalMantra,
     handleScanTable,
-    // handleUpdateParticipant, // Using specific handlers below is generally safer
+    handleChunkedScanTable,
+    handleUpdateParticipant,
     handleUpdateEmailPreferences,
     handleWriteProgramError,
     handleWriteDashboardClick,
     handleInitializeDashboard,
     handleWritePrompt,
-    handleWriteStudentAccessVerifyError
+    handleWriteAIDField,
+    handleWriteParticipantAID,
+    handleWriteOWYAALease,
+    handleWriteStudentAccessVerifyError,
+    handleGetConfig,
+    handleGetView,
+    handleTableCount
     // Add any other action handlers you've defined and exported from @dharma/backend-core
 } from '@dharma/backend-core';
 
@@ -30,13 +37,14 @@ const CORS_ALLOWED_ORIGINS_STRING = process.env.CORS_ALLOWED_ORIGINS || "";
 // Define which actions are read-only and should bypass CSRF
 // Ensure these action names exactly match the 'action' strings sent by the client
 const READ_ONLY_ACTIONS = [
-    'findParticipant',
-    'getPersonalMantra',
-    'getGlobalMantra',
+    'getParticipants',
+    'getParticipantsCount',
     'getEvents',
     'getPools',
     'getPrompts',
-    'getConfigPrompts'
+    'getConfigPrompts',
+    'getConfig',
+    'getView'
 ];
 
 /**
@@ -99,6 +107,12 @@ export default async function dbApiHandler(req, res) {
 
         // Route to the appropriate imported action handler
         switch (action) {
+            case 'getConfig':
+                responseData = await handleGetConfig(payload);
+                break;
+            case 'getView':
+                responseData = await handleGetView(payload);
+                break;
             case 'findParticipant':
                 responseData = await handleFindParticipant(payload);
                 break;
@@ -110,6 +124,14 @@ export default async function dbApiHandler(req, res) {
                 break;
             case 'getGlobalMantra':
                 responseData = await handleGetGlobalMantra(payload);
+                break;
+            case 'getParticipants':
+                responseData = await handleChunkedScanTable({
+                    tableNameKey: 'PARTICIPANTS',
+                    limit: payload.limit,
+                    lastEvaluatedKey: payload.lastEvaluatedKey,
+                    ...payload
+                });
                 break;
             case 'getEvents':
                 responseData = await handleScanTable({ tableNameKey: 'EVENTS', ...payload });
@@ -146,8 +168,20 @@ export default async function dbApiHandler(req, res) {
             case 'writePrompt': // State-changing, CSRF protected
                 responseData = await handleWritePrompt(payload);
                 break;
+            case 'writeAIDField': // State-changing, CSRF protected
+                responseData = await handleWriteAIDField(payload);
+                break;
+            case 'writeParticipantAID': // State-changing, CSRF protected
+                responseData = await handleWriteParticipantAID(payload);
+                break;
+            case 'writeOWYAALease': // State-changing, CSRF protected
+                responseData = await handleWriteOWYAALease(payload);
+                break;
             case 'writeStudentAccessVerifyError': // State-changing, CSRF protected
                 responseData = await handleWriteStudentAccessVerifyError(payload);
+                break;
+            case 'getParticipantsCount':
+                responseData = await handleTableCount({ tableNameKey: 'PARTICIPANTS' });
                 break;
             // Add cases for any other specific actions you defined in @dharma/backend-core/db-actions.js
             default:

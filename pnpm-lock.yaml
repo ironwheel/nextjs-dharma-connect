@@ -15,6 +15,94 @@ importers:
         specifier: ^15.3.3
         version: 15.3.3(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
 
+  apps/admin-dashboard:
+    dependencies:
+      '@dharma/backend-core':
+        specifier: workspace:*
+        version: link:../../packages/backend-core
+      '@dharma/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@fingerprintjs/fingerprintjs':
+        specifier: ^4.6.1
+        version: 4.6.2
+      '@fortawesome/fontawesome-svg-core':
+        specifier: ^6.7.2
+        version: 6.7.2
+      '@fortawesome/pro-solid-svg-icons':
+        specifier: ^6.7.2
+        version: 6.7.2
+      '@fortawesome/react-fontawesome':
+        specifier: ^0.2.2
+        version: 0.2.2(@fortawesome/fontawesome-svg-core@6.7.2)(react@18.3.1)
+      '@react-pdf-viewer/core':
+        specifier: ^3.12.0
+        version: 3.12.0(pdfjs-dist@3.11.174)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@react-pdf-viewer/default-layout':
+        specifier: ^3.12.0
+        version: 3.12.0(pdfjs-dist@3.11.174)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@u-wave/react-vimeo':
+        specifier: ^0.9.12
+        version: 0.9.12(react@18.3.1)
+      ag-grid-community:
+        specifier: ^31.1.1
+        version: 31.3.4
+      ag-grid-react:
+        specifier: ^31.1.1
+        version: 31.3.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      bootstrap:
+        specifier: ^5.3.3
+        version: 5.3.6(@popperjs/core@2.11.8)
+      clientjs:
+        specifier: ^0.2.1
+        version: 0.2.1
+      dashjs:
+        specifier: ^5.0.0
+        version: 5.0.1
+      dotenv:
+        specifier: ^16.4.7
+        version: 16.5.0
+      mux-embed:
+        specifier: ^5.9.0
+        version: 5.9.0
+      next:
+        specifier: 15.2.4
+        version: 15.2.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      pdfjs-dist:
+        specifier: ^3.11.174
+        version: 3.11.174
+      public-ip:
+        specifier: ^7.0.1
+        version: 7.0.1
+      pusher-js:
+        specifier: ^8.4.0
+        version: 8.4.0
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+      react-bootstrap:
+        specifier: ^2.10.9
+        version: 2.10.9(@types/react@19.1.3)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      react-device-detect:
+        specifier: ^2.2.3
+        version: 2.2.3(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      react-dom:
+        specifier: ^18.3.1
+        version: 18.3.1(react@18.3.1)
+      react-srcdoc-iframe:
+        specifier: ^1.0.3
+        version: 1.0.3
+      react-toastify:
+        specifier: ^10.0.4
+        version: 10.0.6(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+    devDependencies:
+      eslint:
+        specifier: 9.23.0
+        version: 9.23.0(jiti@1.21.7)
+      eslint-config-next:
+        specifier: 15.2.4
+        version: 15.2.4(eslint@9.23.0(jiti@1.21.7))(typescript@5.8.3)
+
   apps/student-dashboard:
     dependencies:
       '@dharma/backend-core':
@@ -1818,6 +1906,15 @@ packages:
     engines: {node: '>=0.4.0'}
     hasBin: true
 
+  ag-grid-community@31.3.4:
+    resolution: {integrity: sha512-jOxQO86C6eLnk1GdP24HB6aqaouFzMWizgfUwNY5MnetiWzz9ZaAmOGSnW/XBvdjXvC5Fpk3gSbvVKKQ7h9kBw==}
+
+  ag-grid-react@31.3.4:
+    resolution: {integrity: sha512-WmPASHRFGSTxCMRStWG5bRtln0Ugsdqbb3+Y8sEyGHeLw4hXqfpqie3lT9kqCOl7wPWUjCpwmFdXzRnWPmyyeg==}
+    peerDependencies:
+      react: ^16.3.0 || ^17.0.0 || ^18.0.0
+      react-dom: ^16.3.0 || ^17.0.0 || ^18.0.0
+
   agent-base@6.0.2:
     resolution: {integrity: sha512-RZNwNclF7+MS/8bDg70amg32dyeZGZxiDuQmZxKLAlQjr3jGyLx+4Kkk58UO7D2QdgFIQCovuSuZESne6RG6XQ==}
     engines: {node: '>= 6.0.0'}
@@ -2016,6 +2113,10 @@ packages:
   clone-regexp@3.0.0:
     resolution: {integrity: sha512-ujdnoq2Kxb8s3ItNBtnYeXdm07FcU0u8ARAT1lQ2YdMwQC+cdiXX8KoqMVuglztILivceTtp4ivqGSmEmhBUJw==}
     engines: {node: '>=12'}
+
+  clsx@2.1.1:
+    resolution: {integrity: sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA==}
+    engines: {node: '>=6'}
 
   codem-isoboxer@0.3.10:
     resolution: {integrity: sha512-eNk3TRV+xQMJ1PEj0FQGY8KD4m0GPxT487XJ+Iftm7mVa9WpPFDMWqPt+46buiP5j5Wzqe5oMIhqBcAeKfygSA==}
@@ -3166,6 +3267,12 @@ packages:
       '@types/react':
         optional: true
 
+  react-device-detect@2.2.3:
+    resolution: {integrity: sha512-buYY3qrCnQVlIFHrC5UcUoAj7iANs/+srdkwsnNjI7anr3Tt7UY6MqNxtMLlr0tMBied0O49UZVK8XKs3ZIiPw==}
+    peerDependencies:
+      react: '>= 0.14.0'
+      react-dom: '>= 0.14.0'
+
   react-dom@18.3.1:
     resolution: {integrity: sha512-5m4nQKp+rZRb09LNH59GM4BxTh9251/ylbKIbpe7TpGxfJ+9kv6BLkLBXIjjspbgbnIBNqlI23tRnTWT0snUIw==}
     peerDependencies:
@@ -3184,6 +3291,12 @@ packages:
 
   react-srcdoc-iframe@1.0.3:
     resolution: {integrity: sha512-WyqBvp0cZLcA7PM0DjBFKylo1AZFwf+s8tl1eYChknsT86LRQAk9Dva5cn4B+sZTFsFkLlVrJHgCMkXYeze2/Q==}
+
+  react-toastify@10.0.6:
+    resolution: {integrity: sha512-yYjp+omCDf9lhZcrZHKbSq7YMuK0zcYkDFTzfRFgTXkTFHZ1ToxwAonzA4JI5CxA91JpjFLmwEsZEgfYfOqI1A==}
+    peerDependencies:
+      react: '>=18'
+      react-dom: '>=18'
 
   react-transition-group@4.4.5:
     resolution: {integrity: sha512-pZcd1MCJoiKiBR2NRxeCRg13uCXbydPnmB4EOeRrY7480qNWO8IIgQG6zlDkm6uRMsURXPuKq0GWtiM59a5Q6g==}
@@ -5808,6 +5921,15 @@ snapshots:
 
   acorn@8.14.1: {}
 
+  ag-grid-community@31.3.4: {}
+
+  ag-grid-react@31.3.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
+    dependencies:
+      ag-grid-community: 31.3.4
+      prop-types: 15.8.1
+      react: 18.3.1
+      react-dom: 18.3.1(react@18.3.1)
+
   agent-base@6.0.2:
     dependencies:
       debug: 4.4.0
@@ -6066,6 +6188,8 @@ snapshots:
   clone-regexp@3.0.0:
     dependencies:
       is-regexp: 3.1.0
+
+  clsx@2.1.1: {}
 
   codem-isoboxer@0.3.10: {}
 
@@ -7426,6 +7550,12 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.1.3
 
+  react-device-detect@2.2.3(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
+    dependencies:
+      react: 18.3.1
+      react-dom: 18.3.1(react@18.3.1)
+      ua-parser-js: 1.0.40
+
   react-dom@18.3.1(react@18.3.1):
     dependencies:
       loose-envify: 1.4.0
@@ -7442,6 +7572,12 @@ snapshots:
   react-lifecycles-compat@3.0.4: {}
 
   react-srcdoc-iframe@1.0.3: {}
+
+  react-toastify@10.0.6(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
+    dependencies:
+      clsx: 2.1.1
+      react: 18.3.1
+      react-dom: 18.3.1(react@18.3.1)
 
   react-transition-group@4.4.5(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
     dependencies:
