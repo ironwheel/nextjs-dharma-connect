@@ -18,8 +18,14 @@ export { getFingerprint } from './fingerprint';
 export { dbgOut, dbgPrompt, dbgout } from './debugUtils';
 export { eligible } from './eligible';
 export {
-    callDbApi,
     getPromptsFromDbApi,
     writeProgramError
 } from './apiUtils';
+export {
+    callDbApi,
+    sendConfirmationEmail,
+    verifyAccess,
+    ensureCsrfToken,
+    clearCsrfToken
+} from './clientApi';
 export { ConfirmPage } from './ConfirmPage';
