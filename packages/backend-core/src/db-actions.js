@@ -73,13 +73,13 @@ async function handleFindParticipant(payload) {
  * @async
  * @function handleFindConfig
  * @param {object} payload - The request payload.
- * @param {string} payload.id - The view ID.
- * @returns {Promise<object>} The view data.
- * @throws {Error} If ID is missing, participant not found, or DB error.
- */
+ * @param {string} payload.key - The config key to look up.
+ * @returns {Promise<object>} The config data.
+ * @throws {Error} If key is missing, config not found, or DB error.
+*/
 async function handleFindConfig(payload) {
     const { key } = payload;
-    if (!id) throw new Error("Missing 'key' in payload for handleFindConfig.");
+    if (!key) throw new Error("Missing 'key' in payload for handleFindConfig.");
 
     const client = getDocClient();
     const params = {
