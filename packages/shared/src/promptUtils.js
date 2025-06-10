@@ -188,8 +188,8 @@ export const promptLookupHTMLWithArgs = (promptsArray, promptKey, language, aid,
     let text = promptLookup(promptsArray, promptKey, language, aid, debugFn, loggerFn);
 
     // Common placeholders
-    if (eventDetails.title) text = text.replace(/\|\|title\|\|/g, eventDetails.title);
-    if (student.email) text = text.replace(/\|\|email\|\|/g, student.email);
+    if (eventDetails && eventDetails.title) text = text.replace(/\|\|title\|\|/g, eventDetails.title);
+    if (student && student.email) text = text.replace(/\|\|email\|\|/g, student.email);
 
     // Argument placeholders
     if (typeof arg1 !== 'undefined') text = text.replace(/\|\|arg1\|\|/g, arg1);

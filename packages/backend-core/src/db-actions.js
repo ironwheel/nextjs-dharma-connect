@@ -15,6 +15,29 @@ import { getDocClient, getTableName } from "./db-client.js"; // Import from the 
 // --- Action Handlers ---
 // Each handler takes the payload and constructs the DynamoDB command params
 
+export {
+    handleFindParticipant,
+    handleFindConfig,
+    handleGetView,
+    handleGetPersonalMantra,
+    handlePutPersonalMantra,
+    handleGetGlobalMantra,
+    handleScanTable,
+    handleChunkedScanTable,
+    handleUpdateParticipant,
+    handleUpdateEmailPreferences,
+    handleWriteProgramError,
+    handleWriteDashboardClick,
+    handleInitializeDashboard,
+    handleWritePrompt,
+    handleWriteAIDField,
+    handleWriteParticipantAID,
+    handleWriteOWYAALease,
+    handleWriteStudentAccessVerifyError,
+    handleGetConfig,
+    handleTableCount
+};
+
 /**
  * Handles finding a participant by ID.
  * @async
@@ -24,7 +47,7 @@ import { getDocClient, getTableName } from "./db-client.js"; // Import from the 
  * @returns {Promise<object>} The participant data.
  * @throws {Error} If ID is missing, participant not found, or DB error.
  */
-export async function handleFindParticipant(payload) {
+async function handleFindParticipant(payload) {
     const { id } = payload;
     if (!id) throw new Error("Missing 'id' in payload for findParticipant.");
 
@@ -46,6 +69,64 @@ export async function handleFindParticipant(payload) {
 }
 
 /**
+ * Handles finding a config by name.
+ * @async
+ * @function handleFindConfig
+ * @param {object} payload - The request payload.
+ * @param {string} payload.id - The view ID.
+ * @returns {Promise<object>} The view data.
+ * @throws {Error} If ID is missing, participant not found, or DB error.
+ */
+async function handleFindConfig(payload) {
+    const { key } = payload;
+    if (!id) throw new Error("Missing 'key' in payload for handleFindConfig.");
+
+    const client = getDocClient();
+    const params = {
+        TableName: getTableName('CONFIG'),
+        KeyConditionExpression: "#key = :key",
+        ExpressionAttributeValues: { ":key": key },
+        ExpressionAttributeNames: { "#key": "key" },
+    };
+    const command = new QueryCommand(params);
+    const data = await client.send(command);
+    if (!data.Items || data.Items.length === 0) {
+        console.warn(`handleFindConfig: CONFIG_NOT_FOUND for key: ${key}`);
+        throw new Error("CONFIG_NOT_FOUND");
+    }
+    return data.Items[0];
+}
+
+/**
+ * Handles finding a view by name.
+ * @async
+ * @function handleGetView
+ * @param {object} payload - The request payload.
+ * @param {string} payload.name - The view name.
+ * @returns {Promise<object>} The view data.
+ * @throws {Error} If ID is missing, participant not found, or DB error.
+ */
+async function handleGetView(payload) {
+    const { name } = payload;
+    if (!name) throw new Error("Missing 'name' in payload for handleGetView.");
+
+    const client = getDocClient();
+    const params = {
+        TableName: getTableName('VIEWS'),
+        KeyConditionExpression: "#name = :name",
+        ExpressionAttributeValues: { ":name": name },
+        ExpressionAttributeNames: { "#name": "name" },
+    };
+    const command = new QueryCommand(params);
+    const data = await client.send(command);
+    if (!data.Items || data.Items.length === 0) {
+        console.warn(`handleGetView: VIEW_NOT_FOUND for name: ${name}`);
+        throw new Error("VIEW_NOT_FOUND");
+    }
+    return data.Items[0];
+}
+
+/**
  * Handles fetching personal mantra counts.
  * @async
  * @function handleGetPersonalMantra
@@ -54,7 +135,7 @@ export async function handleFindParticipant(payload) {
  * @returns {Promise<object>} Mantra counts.
  * @throws {Error} If ID is missing, record not found, or DB error.
  */
-export async function handleGetPersonalMantra(payload) {
+async function handleGetPersonalMantra(payload) {
     const { id } = payload;
     if (!id) throw new Error("Missing 'id' in payload for getPersonalMantra.");
 
@@ -88,7 +169,7 @@ export async function handleGetPersonalMantra(payload) {
  * @returns {Promise<object>} Success indicator.
  * @throws {Error} If required fields missing or DB error.
  */
-export async function handlePutPersonalMantra(payload) {
+async function handlePutPersonalMantra(payload) {
     const { id, mcount, c1count, c2count, c3count, c4count } = payload;
     if (id === undefined || mcount === undefined || c1count === undefined || c2count === undefined || c3count === undefined || c4count === undefined) {
         throw new Error("Missing required fields for putPersonalMantra.");
@@ -115,7 +196,7 @@ export async function handlePutPersonalMantra(payload) {
  * @returns {Promise<object>} Aggregated global counts.
  * @throws {Error} If no data found or DB error.
  */
-export async function handleGetGlobalMantra(payload) {
+async function handleGetGlobalMantra(payload) {
     const client = getDocClient();
     const params = {
         TableName: getTableName('MANTRA'),
@@ -156,7 +237,7 @@ export async function handleGetGlobalMantra(payload) {
  * @returns {Promise<Array<object>>} Array of items found.
  * @throws {Error} If tableNameKey missing or DB error.
  */
-export async function handleScanTable(payload) {
+async function handleScanTable(payload) {
     const { tableNameKey, scanParams = {} } = payload;
     if (!tableNameKey) throw new Error("Missing 'tableNameKey' for scanTable action.");
 
@@ -177,6 +258,42 @@ export async function handleScanTable(payload) {
 }
 
 /**
+ * Handles scanning a table with pagination support for large tables.
+ * @async
+ * @function handleChunkedScanTable
+ * @param {object} payload - The request payload.
+ * @param {string} payload.tableNameKey - The key for the table to scan (e.g., 'EVENTS', 'POOLS').
+ * @param {object} [payload.scanParams] - Optional additional parameters for the ScanCommand.
+ * @param {string} [payload.lastEvaluatedKey] - The LastEvaluatedKey from the previous scan.
+ * @param {number} [payload.limit] - Maximum number of items to return per chunk.
+ * @returns {Promise<object>} Object containing items and LastEvaluatedKey for pagination.
+ * @throws {Error} If tableNameKey missing or DB error.
+ */
+async function handleChunkedScanTable(payload) {
+    const { tableNameKey, scanParams = {}, lastEvaluatedKey, limit } = payload;
+    if (!tableNameKey) throw new Error("Missing 'tableNameKey' for chunkedScanTable action.");
+
+    const client = getDocClient();
+    const baseParams = {
+        TableName: getTableName(tableNameKey),
+        ...scanParams,
+        ...(limit && { Limit: limit })
+    };
+
+    const command = new ScanCommand({
+        ...baseParams,
+        ...(lastEvaluatedKey && { ExclusiveStartKey: lastEvaluatedKey })
+    });
+
+    const data = await client.send(command);
+    return {
+        items: data.Items || [],
+        lastEvaluatedKey: data.LastEvaluatedKey,
+        Count: data.Count
+    };
+}
+
+/**
  * Handles generic updates to a participant's record.
  * Consider creating more specific actions for better control and security.
  * @async
@@ -190,7 +307,7 @@ export async function handleScanTable(payload) {
  * @returns {Promise<object>} Update command result (or success indicator).
  * @throws {Error} If required fields missing or DB error.
  */
-export async function handleUpdateParticipant(payload) {
+async function handleUpdateParticipant(payload) {
     const { id, updateExpression, expressionAttributeNames, expressionAttributeValues, conditionExpression } = payload;
     if (!id || !updateExpression || !expressionAttributeValues) {
         throw new Error("Missing required fields for updateParticipant (id, updateExpression, expressionAttributeValues).");
@@ -233,7 +350,7 @@ export async function handleUpdateParticipant(payload) {
  * @param {object} payload.emailPreferences - The email preferences object.
  * @returns {Promise<object>} Success indicator.
  */
-export async function handleUpdateEmailPreferences(payload) {
+async function handleUpdateEmailPreferences(payload) {
     const { id, emailPreferences } = payload;
     if (!id || typeof emailPreferences !== 'object') {
         throw new Error("Missing id or emailPreferences for updateEmailPreferences action.");
@@ -256,7 +373,7 @@ export async function handleUpdateEmailPreferences(payload) {
  * @param {string} payload.errorValue - The error message.
  * @returns {Promise<object>} Success indicator.
  */
-export async function handleWriteProgramError(payload) {
+async function handleWriteProgramError(payload) {
     const { id, errorKey, errorTimeKey, errorValue } = payload;
     if (!id || !errorKey || !errorTimeKey || typeof errorValue === 'undefined') {
         throw new Error("Missing parameters for writeProgramError action.");
@@ -281,7 +398,7 @@ export async function handleWriteProgramError(payload) {
  * @param {string} payload.clickTime - Click timestamp.
  * @returns {Promise<object>} Success indicator.
  */
-export async function handleWriteDashboardClick(payload) {
+async function handleWriteDashboardClick(payload) {
     const { id, clickCount, clickTime } = payload;
     if (!id || typeof clickCount !== 'number' || !clickTime) {
         throw new Error("Missing parameters for writeDashboardClick action.");
@@ -302,7 +419,7 @@ export async function handleWriteDashboardClick(payload) {
  * @param {string} payload.id - Participant ID.
  * @returns {Promise<object>} Success indicator or specific outcome.
  */
-export async function handleInitializeDashboard(payload) {
+async function handleInitializeDashboard(payload) {
     const { id } = payload;
     if (!id) throw new Error("Missing id for initializeDashboard action.");
     try {
@@ -333,7 +450,7 @@ export async function handleInitializeDashboard(payload) {
  * @param {string} payload.lsb - Last saved by information.
  * @returns {Promise<object>} Success indicator.
  */
-export async function handleWritePrompt(payload) {
+async function handleWritePrompt(payload) {
     const { promptKey, language, aid, text, lsb } = payload;
     if (!promptKey || !language || !aid || typeof text !== 'string' || !lsb) {
         throw new Error("Missing parameters for writePrompt action.");
@@ -349,4 +466,220 @@ export async function handleWritePrompt(payload) {
     };
     await client.send(new UpdateCommand(params));
     return { success: true };
+}
+
+/**
+ * Handles writing a field to a participant's AID record.
+ * @async
+ * @function handleWriteAIDField
+ * @param {object} payload - The request payload.
+ * @param {string} payload.id - The participant ID.
+ * @param {string} payload.aid - The AID to write to.
+ * @param {string} payload.field - The field name to write.
+ * @param {any} payload.value - The value to write.
+ * @returns {Promise<object>} Success indicator.
+ * @throws {Error} If required fields missing or DB error.
+ */
+async function handleWriteAIDField(payload) {
+    const { id, aid, field, value } = payload;
+    if (!id || !aid || !field) {
+        throw new Error("Missing required fields for writeAIDField.");
+    }
+
+    const client = getDocClient();
+    const hashedField = '#' + field;
+    const params = {
+        TableName: getTableName('PARTICIPANTS'),
+        Key: { id },
+        UpdateExpression: `set programs.#aid.${hashedField} = :val, lastUpdatedAt = :now`,
+        ExpressionAttributeNames: {
+            '#aid': aid,
+            [hashedField]: field
+        },
+        ExpressionAttributeValues: {
+            ':val': value,
+            ':now': new Date().toISOString()
+        },
+        ReturnValues: "ALL_NEW"
+    };
+
+    try {
+        const result = await client.send(new UpdateCommand(params));
+        return result.Attributes;
+    } catch (error) {
+        console.error('Error in handleWriteAIDField:', error);
+        throw new Error(`Failed to write AID field: ${error.message}`);
+    }
+}
+
+/**
+ * Handles writing a participant's AID record.
+ * @async
+ * @function handleWriteParticipantAID
+ * @param {object} payload - The request payload.
+ * @param {string} payload.id - The participant ID.
+ * @param {string} payload.aid - The AID to write.
+ * @returns {Promise<object>} The updated participant record.
+ * @throws {Error} If required fields missing or DB error.
+ */
+async function handleWriteParticipantAID(payload) {
+    const { id, aid } = payload;
+    if (!id || !aid) {
+        throw new Error("Missing required fields for writeParticipantAID.");
+    }
+
+    const client = getDocClient();
+    const params = {
+        TableName: getTableName('PARTICIPANTS'),
+        Key: { id },
+        UpdateExpression: `set programs.#aid = if_not_exists(programs.#aid, :emptyMap), lastUpdatedAt = :now`,
+        ExpressionAttributeNames: {
+            '#aid': aid
+        },
+        ExpressionAttributeValues: {
+            ':emptyMap': {},
+            ':now': new Date().toISOString()
+        },
+        ReturnValues: "ALL_NEW"
+    };
+
+    try {
+        const result = await client.send(new UpdateCommand(params));
+        return result.Attributes;
+    } catch (error) {
+        console.error('Error in handleWriteParticipantAID:', error);
+        throw new Error(`Failed to write participant AID: ${error.message}`);
+    }
+}
+
+/**
+ * Handles writing a participant's OWYAA lease record.
+ * @async
+ * @function handleWriteOWYAALease
+ * @param {object} payload - The request payload.
+ * @param {string} payload.id - The participant ID.
+ * @param {string} payload.timestamp - The lease timestamp.
+ * @returns {Promise<object>} The updated participant record.
+ * @throws {Error} If required fields missing or DB error.
+ */
+async function handleWriteOWYAALease(payload) {
+    const { id, timestamp } = payload;
+    if (!id || !timestamp) {
+        throw new Error("Missing required fields for writeOWYAALease.");
+    }
+
+    const client = getDocClient();
+    const params = {
+        TableName: getTableName('PARTICIPANTS'),
+        Key: { id },
+        UpdateExpression: `set owyaaLease = :ts, lastUpdatedAt = :now`,
+        ExpressionAttributeValues: {
+            ':ts': timestamp,
+            ':now': new Date().toISOString()
+        },
+        ReturnValues: "ALL_NEW"
+    };
+
+    try {
+        const result = await client.send(new UpdateCommand(params));
+        return result.Attributes;
+    } catch (error) {
+        console.error('Error in handleWriteOWYAALease:', error);
+        throw new Error(`Failed to write OWYAA lease: ${error.message}`);
+    }
+}
+
+/**
+ * Handles writing a student's access verification error.
+ * @async
+ * @function handleWriteStudentAccessVerifyError
+ * @param {object} payload - The request payload.
+ * @param {string} payload.id - The student ID.
+ * @param {string} payload.errorString - The error message.
+ * @param {string} payload.errorTime - The error timestamp.
+ * @returns {Promise<object>} The updated participant record.
+ * @throws {Error} If required fields missing or DB error.
+ */
+async function handleWriteStudentAccessVerifyError(payload) {
+    const { id, errorString, errorTime } = payload;
+    if (!id || !errorString || !errorTime) {
+        throw new Error("Missing required fields for writeStudentAccessVerifyError.");
+    }
+
+    const client = getDocClient();
+    const params = {
+        TableName: getTableName('PARTICIPANTS'),
+        Key: { id },
+        UpdateExpression: `set verify.lastErrorString = :errStr, verify.lastErrorTime = :errTime, lastUpdatedAt = :now`,
+        ExpressionAttributeValues: {
+            ':errStr': errorString,
+            ':errTime': errorTime,
+            ':now': new Date().toISOString()
+        },
+        ReturnValues: "ALL_NEW"
+    };
+
+    try {
+        const result = await client.send(new UpdateCommand(params));
+        return result.Attributes;
+    } catch (error) {
+        console.error('Error in handleWriteStudentAccessVerifyError:', error);
+        throw new Error(`Failed to write student access verify error: ${error.message}`);
+    }
+}
+
+/**
+ * Handles getting a config by key.
+ * @async
+ * @function handleGetConfig
+ * @param {object} payload - The request payload.
+ * @param {string} payload.key - The config key.
+ * @returns {Promise<object>} The config data.
+ * @throws {Error} If key is missing, config not found, or DB error.
+ */
+async function handleGetConfig(payload) {
+    const { key } = payload;
+    if (!key) throw new Error("Missing 'key' in payload for getConfig.");
+
+    const client = getDocClient();
+    const params = {
+        TableName: getTableName('CONFIG'),
+        KeyConditionExpression: "#key = :key",
+        ExpressionAttributeValues: { ":key": key },
+        ExpressionAttributeNames: { "#key": "key" },
+    };
+    const command = new QueryCommand(params);
+    const data = await client.send(command);
+    if (!data.Items || data.Items.length === 0) {
+        console.warn(`handleGetConfig: CONFIG_NOT_FOUND for key: ${key}`);
+        throw new Error("CONFIG_NOT_FOUND");
+    }
+    return data.Items[0];
+}
+
+/**
+ * Handles counting all items in a table by paginating through all pages.
+ * @async
+ * @function handleTableCount
+ * @param {object} payload - The request payload.
+ * @param {string} payload.tableNameKey - The key for the table to count (e.g., 'PARTICIPANTS').
+ * @returns {Promise<object>} Object containing the total Count.
+ * @throws {Error} If tableNameKey missing or DB error.
+ */
+async function handleTableCount({ tableNameKey }) {
+    if (!tableNameKey) throw new Error("Missing 'tableNameKey' for count action.");
+    const client = getDocClient();
+    let total = 0;
+    let lastEvaluatedKey = undefined;
+    do {
+        const command = new ScanCommand({
+            TableName: getTableName(tableNameKey),
+            Select: 'COUNT',
+            ...(lastEvaluatedKey && { ExclusiveStartKey: lastEvaluatedKey })
+        });
+        const data = await client.send(command);
+        total += data.Count || 0;
+        lastEvaluatedKey = data.LastEvaluatedKey;
+    } while (lastEvaluatedKey);
+    return { Count: total };
 }

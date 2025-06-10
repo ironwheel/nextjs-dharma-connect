@@ -21,6 +21,9 @@ const TABLE_MAP = {
     EVENTS: process.env.DYNAMODB_TABLE_EVENTS,
     POOLS: process.env.DYNAMODB_TABLE_POOLS,
     PROMPTS: process.env.DYNAMODB_TABLE_PROMPTS,
+    VIEWS: process.env.DYNAMODB_TABLE_VIEWS,
+    CONFIG: process.env.DYNAMODB_TABLE_CONFIG,
+    AUTH: process.env.DYNAMODB_TABLE_AUTH,
 };
 
 let docClientInstance; // Singleton instance for the DynamoDB Document Client
@@ -29,32 +32,32 @@ let docClientInstance; // Singleton instance for the DynamoDB Document Client
  * Initializes and returns a singleton DynamoDBDocumentClient instance.
  * Checks for required environment variables (AWS_REGION, AWS_COGNITO_IDENTITY_POOL_ID).
  * @function getDocClient
+ * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable
  * @returns {DynamoDBDocumentClient} The initialized document client.
  * @throws {Error} If essential AWS configuration environment variables are not set or client fails to initialize.
  */
-export function getDocClient() {
-    if (!docClientInstance) {
-        if (!REGION) {
-            console.error("db-client: AWS_REGION environment variable is not set.");
-            throw new Error("Server configuration error: Missing AWS Region.");
-        }
-        if (!IDENTITY_POOL_ID) {
-            console.error("db-client: AWS_COGNITO_IDENTITY_POOL_ID environment variable is not set.");
-            throw new Error("Server configuration error: Missing AWS Cognito Identity Pool ID.");
-        }
+export function getDocClient(identityPoolIdOverride) {
+    const identityPoolId = identityPoolIdOverride || IDENTITY_POOL_ID;
+    if (!REGION) {
+        console.error("db-client: AWS_REGION environment variable is not set.");
+        throw new Error("Server configuration error: Missing AWS Region.");
+    }
+    if (!identityPoolId) {
+        console.error("db-client: AWS_COGNITO_IDENTITY_POOL_ID environment variable is not set.");
+        throw new Error("Server configuration error: Missing AWS Cognito Identity Pool ID.");
+    }
 
-        try {
-            const credentials = fromCognitoIdentityPool({
-                clientConfig: { region: REGION },
-                identityPoolId: IDENTITY_POOL_ID,
-            });
-            const ddbBaseClient = new DynamoDBClient({ region: REGION, credentials });
-            docClientInstance = DynamoDBDocumentClient.from(ddbBaseClient);
-            console.log("db-client: DynamoDBDocumentClient initialized successfully.");
-        } catch (error) {
-            console.error("db-client: Failed to initialize DynamoDBDocumentClient:", error);
-            throw new Error("Server configuration error: Could not initialize AWS client.");
-        }
+    try {
+        const credentials = fromCognitoIdentityPool({
+            clientConfig: { region: REGION },
+            identityPoolId,
+        });
+        const ddbBaseClient = new DynamoDBClient({ region: REGION, credentials });
+        docClientInstance = DynamoDBDocumentClient.from(ddbBaseClient);
+        console.log("db-client: DynamoDBDocumentClient initialized successfully.");
+    } catch (error) {
+        console.error("db-client: Failed to initialize DynamoDBDocumentClient:", error);
+        throw new Error("Server configuration error: Could not initialize AWS client.");
     }
     return docClientInstance;
 }

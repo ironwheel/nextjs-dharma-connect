@@ -9,6 +9,7 @@ import axios from 'axios';
 import nodemailer from 'nodemailer';
 import { QueryCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { getDocClient, getTableName } from "./db-client.js"; // For DB interactions
+import crypto from 'crypto';
 
 // --- Configuration from Environment Variables (Strict - No Defaults where applicable) ---
 // Note: DDB_PARTICIPANTS_TABLE and DDB_PROMPTS_TABLE are used by getTableName via db-client.js
@@ -238,7 +239,7 @@ export async function sendConfirmationEmail(pid, clientIp, clientFingerprint, sh
         } catch (geoError) { console.warn(`auth-logic: Could not fetch geolocation for IP ${clientIp}:`, geoError.message); }
     }
 
-    let confirmationUrl = `${APP_DOMAIN}confirm/?pid=${pid}&token=${confirmationToken}&language=${language}`;
+    let confirmationUrl = `${APP_DOMAIN}verify/?pid=${pid}&token=${confirmationToken}&language=${language}`;
     if (showcase) confirmationUrl += `&showcase=${encodeURIComponent(showcase)}`;
 
     let emailBody = getConfirmPrompt('email', language)
@@ -276,4 +277,61 @@ export function getPermissionsLogic(pid) {
         console.warn(`auth-logic: Permissions not found for PID: ${pid}. Returning default (all false).`);
         return { ...DEFAULT_NO_PERMISSIONS }; // Return a copy
     }
+}
+
+// --- Access Hash and Check Logic ---
+
+/**
+ * Generates an HMAC hash of a UUID using a secret key.
+ *
+ * @param {string} guid - UUID string in standard uuid4 format
+ * @param {string} secretKeyHex - 64-character hexadecimal secret key
+ * @returns {string} HMAC-SHA256 hash as a hex string
+ */
+export function generateAuthHash(guid, secretKeyHex) {
+    if (!/^[0-9a-f]{64}$/i.test(secretKeyHex)) {
+        throw new Error('Secret key must be a 64-character hexadecimal string');
+    }
+    const secretKeyBuffer = Buffer.from(secretKeyHex, 'hex');
+    const hmac = crypto.createHmac('sha256', secretKeyBuffer);
+    hmac.update(guid);
+    return hmac.digest('hex');
+}
+
+/**
+ * Checks access for a participant and URL using a hash and a secret from APP_ACCESS_JSON.
+ *
+ * @param {string} pid - Participant ID
+ * @param {string} hash - Hash value to check
+ * @param {string} url - URL of the calling app
+ * @returns {Promise<object>} Empty object if authorized
+ * @throws {Error} Various errors as described
+ */
+export async function handleCheckAccess(pid, hash, url) {
+    const accessJson = process.env.APP_ACCESS_JSON;
+    if (!accessJson) throw new Error('APP_ACCESS_JSON environment variable not set');
+    let accessList;
+    try {
+        accessList = JSON.parse(accessJson);
+    } catch (e) {
+        throw new Error('APP_ACCESS_JSON is not valid JSON');
+    }
+    console.log("accessList:", accessList, url)
+    const entry = accessList.find(e => e.url === url);
+    if (!entry) throw new Error('UNKNOWN_URL');
+    if (entry.secret === 'none') return {};
+    // Check hash
+    const expectedHash = generateAuthHash(pid, entry.secret);
+    if (expectedHash !== hash) throw new Error('BAD_HASH');
+    // Lookup in AUTH table
+    const AUTH_IDENTITY_POOL_ID = process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID;
+    const tableName = getTableName('AUTH');
+    const client = getDocClient(AUTH_IDENTITY_POOL_ID);
+    const { GetCommand } = await import('@aws-sdk/lib-dynamodb');
+    const command = new GetCommand({ TableName: tableName, Key: { pid } });
+    const data = await client.send(command);
+    if (!data.Item) throw new Error('AUTH_PID_NOT_FOUND');
+    const permittedUrls = data.Item['permitted-urls'] || [];
+    if (!permittedUrls.includes(url)) throw new Error('AUTH_URL_NOT_FOUND');
+    return {};
 }

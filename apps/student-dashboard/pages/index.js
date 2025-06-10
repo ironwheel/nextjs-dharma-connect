@@ -209,7 +209,6 @@ const Home = () => {
     try {
       // Ensure we have a CSRF token before making the request
       if (!csrfToken) {
-        console.log('No CSRF token found, attempting to get one...');
         const tokenResponse = await fetch('/api/auth', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -485,7 +484,6 @@ const Home = () => {
     // Initialize CSRF token early
     ensureCsrfToken().then(token => {
       if (token) {
-        console.log("CSRF token initialized successfully");
       } else {
         console.warn("Failed to initialize CSRF token");
       }
