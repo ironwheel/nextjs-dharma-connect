@@ -222,7 +222,8 @@ const Home = () => {
           pid,
           aid,
           ip,
-          fingerprint
+          fingerprint,
+          url: window.location.hostname
         })
       });
 
@@ -356,8 +357,10 @@ const Home = () => {
       try {
         await checkAccess(pid, hash, window.location.hostname);
       } catch (error) {
-        console.error('Error in checkAccess:', error);
-        setLoadingProgress(prev => ({ ...prev, message: `Error: ${error?.message || 'Unknown error'}.` }));
+        console.log('checkAccess() catch: Error in checkAccess:', error);
+        setLoadingProgress(prev => ({ ...prev, message: `Access error: ${error?.message || 'Unknown error'}` }));
+        setLoaded(true);
+        console.log('checkAccess() catch complete');
         return;
       }
 
@@ -550,7 +553,11 @@ const Home = () => {
     if (verifyEmail || initialLoadStarted.current || !pid) return;
 
     initialLoadStarted.current = true;
-    loadInitialData();
+    loadInitialData().catch((err) => {
+      console.error('Unhandled error in loadInitialData:', err);
+      setLoadingProgress(prev => ({ ...prev, message: `Fatal error: ${err?.message || 'Unknown error'}` }));
+      setLoaded(true);
+    });
   }, [router.isReady, pid, verifyEmail]);
 
   function headerHeightGetter() {
@@ -688,6 +695,7 @@ const Home = () => {
       eligibleParticipants.push(el)
       return
     }
+
     if (eligible(currentEvent.config.pool, el, currentEvent.aid, allPools))
       eligibleParticipants.push(el)
   }
@@ -1107,7 +1115,7 @@ const Home = () => {
           }
         }
       } else if (viewConditions[i].name === 'poolMember') {
-        if (!eligible(viewConditions[i].pool, el)) {
+        if (!eligible(viewConditions[i].pool, el, currentEvent.aid, allPools)) {
           return null
         }
       } else if (viewConditions[i].name === 'offering' || viewConditions[i].name === 'deposit') {
@@ -1285,7 +1293,7 @@ const Home = () => {
         }
         rowValues[field] = count
       } else if (field.includes('poolMember')) {
-        rowValues[field] = eligible(columnMetaData[field].pool, el)
+        rowValues[field] = eligible(columnMetaData[field].pool, el, currentEvent.aid, allPools)
       } else if (field.includes('emailSent')) {
         try {
           rowValues[field] = el.emails[columnMetaData[field].campaign]
@@ -1874,8 +1882,6 @@ const Home = () => {
     checkboxRenderer: CheckboxRenderer
   };
 
-  //fillLarge()
-
   var width
   if (isMobile) {
     width = 800
@@ -1942,6 +1948,7 @@ const Home = () => {
       </>
     )
   }
+
   return (
     <>
       <PlainSearchHeader />

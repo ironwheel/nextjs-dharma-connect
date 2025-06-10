@@ -151,7 +151,8 @@ const Home = () => {
           pid,
           aid,
           ip,
-          fingerprint
+          fingerprint,
+          url: window.location.hostname
         })
       });
 

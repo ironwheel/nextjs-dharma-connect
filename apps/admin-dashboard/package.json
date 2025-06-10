@@ -9,6 +9,8 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@dharma/backend-core": "workspace:*",
+    "@dharma/shared": "workspace:*",
     "@fingerprintjs/fingerprintjs": "^4.6.1",
     "@fortawesome/fontawesome-svg-core": "^6.7.2",
     "@fortawesome/pro-solid-svg-icons": "^6.7.2",
@@ -23,7 +25,7 @@
     "dashjs": "^5.0.0",
     "dotenv": "^16.4.7",
     "mux-embed": "^5.9.0",
-    "next": "15.2.4",
+    "next": "15.3.3",
     "pdfjs-dist": "^3.11.174",
     "public-ip": "^7.0.1",
     "pusher-js": "^8.4.0",
@@ -32,9 +34,7 @@
     "react-device-detect": "^2.2.3",
     "react-dom": "^18.3.1",
     "react-srcdoc-iframe": "^1.0.3",
-    "react-toastify": "^10.0.4",
-    "@dharma/backend-core": "workspace:*",
-    "@dharma/shared": "workspace:*"
+    "react-toastify": "^10.0.4"
   },
   "devDependencies": {
     "eslint": "9.23.0",
