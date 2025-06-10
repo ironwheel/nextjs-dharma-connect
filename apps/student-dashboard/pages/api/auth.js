@@ -116,7 +116,7 @@ export default async function authApiHandler(req, res) {
 
             case 'sendConfirmationEmail': // POST, sends email. No CSRF check needed.
                 if (!pid || !ip || !fingerprint) { status = 400; throw new Error("Missing parameters for sendConfirmationEmail operation."); }
-                responseData = await sendConfirmationEmail(pid, ip, fingerprint, showcase);
+                responseData = await sendConfirmationEmail(pid, ip, fingerprint, showcase, body.url || req.headers.host);
                 break;
 
             case 'getPermissions': // GET, no CSRF check needed.

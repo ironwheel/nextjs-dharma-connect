@@ -197,10 +197,11 @@ export async function verifyToken(pid, clientIp, clientFingerprint, expectedToke
  * @param {string} clientIp - Client's IP address (can be null/undefined).
  * @param {string} clientFingerprint - Client's browser fingerprint (can be null/undefined).
  * @param {string|boolean} [showcase] - Optional showcase identifier.
+ * @param {string} [url] - Optional app url for hash logic.
  * @returns {Promise<string>} Resolves with the participant's email address on success.
  * @throws {Error} If configuration is missing or sending fails.
  */
-export async function sendConfirmationEmail(pid, clientIp, clientFingerprint, showcase) {
+export async function sendConfirmationEmail(pid, clientIp, clientFingerprint, showcase, url) {
     // Check necessary configs at the start
     if (!RSA_PRIVATE_KEY_B64) throw new Error("RSA private key not configured for email sending.");
     if (!SMTP_USERNAME || !SMTP_PASSWORD) throw new Error("SMTP credentials not configured for email sending.");
@@ -241,6 +242,20 @@ export async function sendConfirmationEmail(pid, clientIp, clientFingerprint, sh
 
     let confirmationUrl = `${APP_DOMAIN}verify/?pid=${pid}&token=${confirmationToken}&language=${language}`;
     if (showcase) confirmationUrl += `&showcase=${encodeURIComponent(showcase)}`;
+
+    // --- Hash logic for APP_ACCESS_JSON ---
+    if (url && process.env.APP_ACCESS_JSON) {
+        try {
+            const accessList = JSON.parse(process.env.APP_ACCESS_JSON);
+            const entry = accessList.find(e => e.url === url);
+            if (entry && entry.secret !== 'none') {
+                const hash = generateAuthHash(pid, entry.secret);
+                confirmationUrl += `&hash=${hash}`;
+            }
+        } catch (e) {
+            console.warn('Could not parse APP_ACCESS_JSON or find url entry:', e);
+        }
+    }
 
     let emailBody = getConfirmPrompt('email', language)
         .replace(/\|\|name\|\|/g, `${participantData.first} ${participantData.last}`)
@@ -322,13 +337,15 @@ export async function handleCheckAccess(pid, hash, url) {
     if (entry.secret === 'none') return {};
     // Check hash
     const expectedHash = generateAuthHash(pid, entry.secret);
+    console.log(`[handleCheckAccess] For pid=${pid}, url=${url}, expected hash: ${expectedHash}`);
     if (expectedHash !== hash) throw new Error('BAD_HASH');
     // Lookup in AUTH table
     const AUTH_IDENTITY_POOL_ID = process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID;
+    if (!AUTH_IDENTITY_POOL_ID) throw new Error('Server configuration error: Missing AWS_COGNITO_AUTH_IDENTITY_POOL_ID.');
     const tableName = getTableName('AUTH');
     const client = getDocClient(AUTH_IDENTITY_POOL_ID);
     const { GetCommand } = await import('@aws-sdk/lib-dynamodb');
-    const command = new GetCommand({ TableName: tableName, Key: { pid } });
+    const command = new GetCommand({ TableName: tableName, Key: { id: pid } });
     const data = await client.send(command);
     if (!data.Item) throw new Error('AUTH_PID_NOT_FOUND');
     const permittedUrls = data.Item['permitted-urls'] || [];
