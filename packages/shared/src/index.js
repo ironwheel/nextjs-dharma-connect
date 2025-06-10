@@ -22,3 +22,4 @@ export {
     getPromptsFromDbApi,
     writeProgramError
 } from './apiUtils';
+export { ConfirmPage } from './ConfirmPage';
