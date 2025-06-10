@@ -9,7 +9,6 @@
 import React, { useState, useEffect, useCallback, Fragment, useRef } from "react";
 import { useRouter } from 'next/router';
 import { Container, Row, Col, Form, Card, Button } from "react-bootstrap";
-import { publicIpv4 } from 'public-ip';
 import packageJson from '../package.json';
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faGlobe, faPlus, faMinus, faTimes, faPlusCircle, faMinusCircle, faUser, faCheck, faXmark } from "@fortawesome/pro-solid-svg-icons";
@@ -39,6 +38,13 @@ import {
 } from '@dharma/shared';
 import { TopNavBar, BottomNavBar } from "@dharma/shared";
 import { eligible } from '@dharma/shared';
+import {
+  callDbApi,
+  sendConfirmationEmail,
+  verifyAccess,
+  ensureCsrfToken,
+  clearCsrfToken
+} from '@dharma/shared';
 import { CSRF_HEADER_NAME } from '@dharma/backend-core'; // Import CSRF header name
 
 
@@ -137,7 +143,6 @@ const Home = () => {
   const [name, setName] = useState("Unknown");
   const [verifyEmail, setVerifyEmail] = useState(false);
   const [forceRenderValue, setForceRenderValue] = useState(0);
-  const [csrfToken, setCsrfToken] = useState(null);
   const [currentEventAid, setCurrentEventAid] = useState('admin-dashboard');
   const [value, setValue] = useState(false)
   const [errMsg, setErrMsg] = useState(false)
@@ -155,89 +160,6 @@ const Home = () => {
   const initialLoadStarted = useRef(false);
 
   // Component-specific helper functions
-  const callDbApi = async (action, args = {}) => {
-    try {
-      // Ensure we have a CSRF token before making the request
-      if (!csrfToken) {
-        const tokenResponse = await fetch('/api/auth', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'getCsrfToken' })
-        });
-
-        if (!tokenResponse.ok) {
-          throw new Error('Failed to get CSRF token');
-        }
-
-        const tokenResult = await tokenResponse.json();
-        if (!tokenResult.data?.csrfToken) {
-          throw new Error('No CSRF token in response');
-        }
-
-        setCsrfToken(tokenResult.data.csrfToken);
-      }
-
-      const response = await fetch('/api/db', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(csrfToken && { [CSRF_HEADER_NAME]: csrfToken })
-        },
-        body: JSON.stringify({
-          action,
-          payload: args
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        if (errorData.data?.err === 'CSRF_TOKEN_MISSING' || errorData.data?.err === 'CSRF_TOKEN_MISMATCH') {
-          // If CSRF token is invalid, clear it and retry once
-          setCsrfToken(null);
-          return callDbApi(action, args);
-        }
-        throw new Error(errorData.data?.err || `API call failed with status ${response.status}`);
-      }
-
-      const result = await response.json();
-
-      // Return the data property if it exists, otherwise return the whole result
-      return result?.data || result;
-    } catch (error) {
-      console.error(`Error in callDbApi(${action}):`, error);
-      throw error;
-    }
-  };
-
-  const sendConfirmationEmail = async (pid, aid) => {
-    try {
-      console.log('Sending confirmation email with:', { pid, aid });
-      const ip = await publicIpv4();
-      const fingerprint = await getFingerprint();
-      const response = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'sendConfirmationEmail',
-          pid,
-          aid,
-          ip,
-          fingerprint,
-          url: window.location.hostname
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.data?.err || `Confirmation email request failed with status ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error sending confirmation email:', error);
-      throw error;
-    }
-  };
 
   const forceRender = useCallback(() => setForceRenderValue(v => v + 1), []);
   const updateDisplayPrompts = useCallback(() => { displayPrompts = [...masterPrompts]; }, []);
@@ -292,33 +214,6 @@ const Home = () => {
     }
   };
 
-  const verifyAccess = async (pid, token) => {
-    try {
-      const ip = await publicIpv4();
-      const fingerprint = await getFingerprint();
-      const response = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'verifyAccess',
-          pid,
-          token,
-          ip,
-          fingerprint
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.data?.err || `Access verification failed with status ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error verifying access:', error);
-      throw error;
-    }
-  };
 
   const checkAccess = async (pid, hash, url) => {
     try {
@@ -375,33 +270,6 @@ const Home = () => {
           console.warn("No prompts loaded, but continuing with initialization");
         }
         updateDisplayPrompts();
-      } catch (error) {
-        console.error("Error fetching prompts:", error);
-        setLoadingProgress(prev => ({ ...prev, message: "Warning: Could not load prompts, but continuing..." }));
-      }
-
-      // If no session token, request email verification
-      if (!token) {
-        setLoadingProgress(prev => ({ ...prev, message: "Requesting email verification..." }));
-        try {
-          const confirmResp = await sendConfirmationEmail(pid, 'dashboard');
-          if (confirmResp.data?.err) {
-            throw new Error(`Confirmation email error: ${confirmResp.data.err}`);
-          }
-          setVerifyEmail(confirmResp.data || 'unknown email');
-          setLoaded(true);
-          return;
-        } catch (error) {
-          console.error("Error sending confirmation email:", error);
-          setLoadingProgress(prev => ({ ...prev, message: `Error: ${error.message}.` }));
-          return;
-        }
-      }
-
-      // If we have a token, proceed with full initialization
-      setLoadingProgress(prev => ({ ...prev, message: "Initializing secure session..." }));
-      let initialCsrfToken = null;
-      try {
         initialCsrfToken = await ensureCsrfToken();
       } catch (error) {
         console.error("Failed to initialize CSRF token:", error);
@@ -415,7 +283,7 @@ const Home = () => {
 
       if (verifyResponse?.data?.err === 'INVALID_SESSION_TOKEN') {
         console.warn(`Invalid session token detected: ${verifyResponse.data.reason}. Requesting re-confirmation.`);
-        initialCsrfToken = null; setCsrfToken(null);
+        initialCsrfToken = null; clearCsrfToken();
         await writeStudentAccessVerifyError(pid, `INVALID_SESSION_TOKEN: ${verifyResponse.data.reason}`, initialCsrfToken).catch(e => console.error("Failed to log INVALID_SESSION_TOKEN error:", e));
         localStorage.removeItem('token');
         setLoadingProgress(prev => ({ ...prev, message: "Requesting new email verification..." }));
@@ -508,43 +376,6 @@ const Home = () => {
     }
   }
 
-  const ensureCsrfToken = async () => {
-    if (csrfToken) return csrfToken;
-    const sessionToken = localStorage.getItem('token');
-    if (!sessionToken) {
-      console.log("No session token found, skipping CSRF token initialization");
-      return null;
-    }
-
-    try {
-      const response = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getCsrfToken' })
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        const errorMsg = `Failed to get CSRF token (${response.status}): ${errData.data?.err || response.statusText}`;
-        console.error(errorMsg);
-        throw new Error(errorMsg);
-      }
-
-      const result = await response.json();
-      if (!result.data?.csrfToken) {
-        const errorMsg = "CSRF token not found in response from getCsrfToken.";
-        console.error(errorMsg);
-        throw new Error(errorMsg);
-      }
-
-      setCsrfToken(result.data.csrfToken);
-      return result.data.csrfToken;
-    } catch (error) {
-      console.error("Error fetching initial CSRF token:", error);
-      setLoadStatus(`Error initializing secure session: ${error.message}. Try refreshing.`);
-      throw error;
-    }
-  };
 
   // Main initialization effect
   useEffect(() => {
@@ -612,16 +443,14 @@ const Home = () => {
 
   const writeParticipantOWYAALease = async (id, timestamp) => {
     try {
+      const token = await ensureCsrfToken();
       const response = await fetch('/api/writeParticipantOWYAALease', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken
+          ...(token && { 'X-CSRF-Token': token })
         },
-        body: JSON.stringify({
-          id,
-          timestamp
-        })
+        body: JSON.stringify({ id, timestamp })
       });
 
       if (!response.ok) {
@@ -638,11 +467,12 @@ const Home = () => {
 
   const writeStudentAccessVerifyError = async (pid, errorString, errorTime) => {
     try {
+      const token = await ensureCsrfToken();
       const response = await fetch('/api/writeStudentAccessVerifyError', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken
+          ...(token && { 'X-CSRF-Token': token })
         },
         body: JSON.stringify({
           id: pid,

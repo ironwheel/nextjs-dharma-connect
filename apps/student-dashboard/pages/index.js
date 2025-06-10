@@ -11,7 +11,6 @@ import { useRouter } from 'next/router';
 import { createPortal } from 'react-dom';
 import { Container, Row, Col, Form, Card, Button } from "react-bootstrap";
 import ReactSrcDocIframe from 'react-srcdoc-iframe';
-import { publicIpv4 } from 'public-ip';
 import { Viewer, Worker } from '@react-pdf-viewer/core';
 import { defaultLayoutPlugin } from '@react-pdf-viewer/default-layout';
 import packageJson from '../package.json';
@@ -20,7 +19,6 @@ import { faGlobe, faPlus, faMinus, faTimes, faPlusCircle, faMinusCircle, faUser,
 import Pusher from 'pusher-js';
 
 // Shared utilities and components using '@/' alias
-import { getFingerprint } from '@dharma/shared';
 import { dbgOut as studentDbgOut, dbgPrompt as studentDbgPrompt, dbgout as studentDbgout } from '@dharma/shared';
 import {
   promptLookup,
@@ -32,6 +30,13 @@ import {
 } from '@dharma/shared';
 import { TopNavBar, BottomNavBar } from "@dharma/shared";
 import { eligible } from '@dharma/shared';
+import {
+  callDbApi,
+  sendConfirmationEmail,
+  verifyAccess,
+  ensureCsrfToken,
+  clearCsrfToken
+} from '@dharma/shared';
 import { CSRF_HEADER_NAME } from '@dharma/backend-core'; // Import CSRF header name
 
 const VIDEO_INDENT = 16;
@@ -77,93 +82,9 @@ const Home = () => {
   const [verifyEmail, setVerifyEmail] = useState(false);
   const [forceRenderValue, setForceRenderValue] = useState(0);
   const [initialLoadAttempted, setInitialLoadAttempted] = useState(false);
-  const [csrfToken, setCsrfToken] = useState(null);
   const [currentEventAid, setCurrentEventAid] = useState('dashboard');
 
   // Component-specific helper functions
-  const callDbApi = async (action, args = {}) => {
-    try {
-      // Ensure we have a CSRF token before making the request
-      if (!csrfToken) {
-        console.log('No CSRF token found, attempting to get one...');
-        const tokenResponse = await fetch('/api/auth', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'getCsrfToken' })
-        });
-
-        if (!tokenResponse.ok) {
-          throw new Error('Failed to get CSRF token');
-        }
-
-        const tokenResult = await tokenResponse.json();
-        if (!tokenResult.data?.csrfToken) {
-          throw new Error('No CSRF token in response');
-        }
-
-        setCsrfToken(tokenResult.data.csrfToken);
-      }
-
-      const response = await fetch('/api/db', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(csrfToken && { [CSRF_HEADER_NAME]: csrfToken })
-        },
-        body: JSON.stringify({
-          action,
-          payload: args
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        if (errorData.data?.err === 'CSRF_TOKEN_MISSING' || errorData.data?.err === 'CSRF_TOKEN_MISMATCH') {
-          // If CSRF token is invalid, clear it and retry once
-          console.log('CSRF token invalid, clearing and retry once...');
-          setCsrfToken(null);
-          return callDbApi(action, args);
-        }
-        throw new Error(errorData.data?.err || `API call failed with status ${response.status}`);
-      }
-
-      const result = await response.json();
-      console.log(`API response for ${action}:`, result);
-
-      // Return the data property if it exists, otherwise return the whole result
-      return result?.data || result;
-    } catch (error) {
-      console.error(`Error in callDbApi(${action}):`, error);
-      throw error;
-    }
-  };
-
-  const sendConfirmationEmail = async (pid, aid) => {
-    try {
-      console.log('Sending confirmation email with:', { pid, aid });
-      const ip = await publicIpv4();
-      const fingerprint = await getFingerprint();
-      const response = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'sendConfirmationEmail',
-          pid,
-          aid,
-          ip,
-          fingerprint,
-          url: window.location.hostname
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.data?.err || `Confirmation email request failed with status ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error sending confirmation email:', error);
       throw error;
     }
   };
@@ -206,34 +127,14 @@ const Home = () => {
     }
   };
 
-  const writeStudentClickCount = async (pid, clickCount, clickTime, csrfToken) => {
+  const writeStudentClickCount = async (pid, clickCount, clickTime) => {
     try {
-      // Ensure we have a CSRF token before making the request
-      if (!csrfToken) {
-        const tokenResponse = await fetch('/api/auth', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'getCsrfToken' })
-        });
-
-        if (!tokenResponse.ok) {
-          throw new Error('Failed to get CSRF token');
-        }
-
-        const tokenResult = await tokenResponse.json();
-        if (!tokenResult.data?.csrfToken) {
-          throw new Error('No CSRF token in response');
-        }
-
-        csrfToken = tokenResult.data.csrfToken;
-        setCsrfToken(csrfToken);
-      }
-
+      const token = await ensureCsrfToken();
       const response = await fetch('/api/db', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          [CSRF_HEADER_NAME]: csrfToken
+          ...(token && { [CSRF_HEADER_NAME]: token })
         },
         body: JSON.stringify({
           action: 'writeDashboardClick',
@@ -248,10 +149,8 @@ const Home = () => {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         if (errorData.data?.err === 'CSRF_TOKEN_MISSING' || errorData.data?.err === 'CSRF_TOKEN_MISMATCH') {
-          // If CSRF token is invalid, clear it and retry once
-          console.log('CSRF token invalid, clearing and retry once...');
-          setCsrfToken(null);
-          return writeStudentClickCount(pid, clickCount, clickTime, null);
+          clearCsrfToken();
+          return writeStudentClickCount(pid, clickCount, clickTime);
         }
         throw new Error(errorData.data?.err || `Failed to write click count with status ${response.status}`);
       }
@@ -283,33 +182,6 @@ const Home = () => {
     }
   };
 
-  const verifyAccess = async (pid, token) => {
-    try {
-      const ip = await publicIpv4();
-      const fingerprint = await getFingerprint();
-      const response = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'verifyAccess',
-          pid,
-          token,
-          ip,
-          fingerprint
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.data?.err || `Access verification failed with status ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error verifying access:', error);
-      throw error;
-    }
-  };
 
   async function loadInitialData() {
     setInitialLoadAttempted(true);
@@ -366,33 +238,6 @@ const Home = () => {
       const verifyResponse = await verifyAccess(pid, token);
       console.log("verifyAccess response:", verifyResponse);
 
-      if (verifyResponse?.data?.err === 'INVALID_SESSION_TOKEN') {
-        console.warn(`Invalid session token detected: ${verifyResponse.data.reason}. Requesting re-confirmation.`);
-        initialCsrfToken = null; setCsrfToken(null);
-        await writeStudentAccessVerifyError(pid, `INVALID_SESSION_TOKEN: ${verifyResponse.data.reason}`, initialCsrfToken).catch(e => console.error("Failed to log INVALID_SESSION_TOKEN error:", e));
-        localStorage.removeItem('token');
-        setLoadStatus("Requesting new email verification...");
-        student.writtenLangPref = queryLanguage || student.writtenLangPref;
-        const confirmResp = await sendConfirmationEmail(pid, showcase || 'dashboard');
-        if (confirmResp.data?.err) {
-          await writeStudentConfirmError(pid, confirmResp.data.err, initialCsrfToken).catch(e => console.error("Failed to log confirmation email error:", e));
-          throw new Error(`Confirmation email error: ${confirmResp.data.err}`);
-        }
-        setVerifyEmail(confirmResp.data || 'unknown email');
-        setLoaded(true);
-        return;
-      }
-
-      if (!verifyResponse || typeof verifyResponse.data === 'undefined' || verifyResponse.data.err) {
-        console.error("Verification check returned unexpected structure or error:", verifyResponse);
-        throw new Error(verifyResponse?.data?.err || "Verification check failed due to unexpected API response.");
-      }
-
-      console.log("Access token verified successfully.");
-      initialCsrfToken = await ensureCsrfToken();
-
-      setLoadStatus("Fetching user data...");
-      const studentData = await fetchStudentData(pid);
       if (!studentData) throw new Error("Failed to fetch student data after verification.");
       student = studentData;
 
@@ -434,45 +279,6 @@ const Home = () => {
     }
   }
 
-  const ensureCsrfToken = async () => {
-    if (csrfToken) return csrfToken;
-    const sessionToken = localStorage.getItem('token');
-    if (!sessionToken) {
-      console.log("No session token found, skipping CSRF token initialization");
-      return null;
-    }
-
-    console.log("Attempting to fetch initial CSRF token via /api/auth...");
-    try {
-      const response = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getCsrfToken' })
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        const errorMsg = `Failed to get CSRF token (${response.status}): ${errData.data?.err || response.statusText}`;
-        console.error(errorMsg);
-        throw new Error(errorMsg);
-      }
-
-      const result = await response.json();
-      if (!result.data?.csrfToken) {
-        const errorMsg = "CSRF token not found in response from getCsrfToken.";
-        console.error(errorMsg);
-        throw new Error(errorMsg);
-      }
-
-      console.log("Initial CSRF token fetched and set to state.");
-      setCsrfToken(result.data.csrfToken);
-      return result.data.csrfToken;
-    } catch (error) {
-      console.error("Error fetching initial CSRF token:", error);
-      setLoadStatus(`Error initializing secure session: ${error.message}. Try refreshing.`);
-      throw error;
-    }
-  };
 
   // Main initialization effect
   useEffect(() => {
@@ -520,7 +326,7 @@ const Home = () => {
         };
       } catch (pusherError) { console.error("Pusher subscription error:", pusherError); }
     }
-  }, [router.isReady, pid, queryLanguage, showcase, loaded, verifyEmail, initialLoadAttempted, csrfToken]);
+  }, [router.isReady, pid, queryLanguage, showcase, loaded, verifyEmail, initialLoadAttempted]);
 
   // Component-specific helper functions
   const updateMediaList = useCallback(() => {
@@ -544,45 +350,6 @@ const Home = () => {
     mantraList = [{ key: 'control-mantra', eventname: 'controlTitleMantraCounter', tag: 'control', control: 'mantra', date: '9999-01-01', bg: 'primary', indent: 0 }];
     scheduleList = [{ key: 'control-schedule', eventname: 'controlTitleSchedule', tag: 'control', control: 'schedule', date: '9999-01-01', bg: 'primary', indent: 0 }];
     const descriptionsEvent = allEvents.find(e => e.aid === 'descriptions');
-    let descriptionsMasterListIndex = -1;
-    if (student.translator && descriptionsEvent?.config?.translationsOnDeck) {
-      translationMasterList.push([]); descriptionsMasterListIndex = translationMasterList.length - 1;
-      const descEventForControl = { name: "Event Descriptions", aid: 'descriptions' };
-      translationMasterList[descriptionsMasterListIndex].push({
-        key: 'translations-descriptions',
-        displayOrder: 'AAAAAA_DESCRIPTIONS',
-        eventname: promptLookup(displayPrompts, 'translationsControlTitle-descriptions', student?.writtenLangPref || 'English', 'descriptions', dbgPrompt, dbgout),
-        tag: 'control',
-        control: 'descriptions-translations',
-        bg: "secondary",
-        date: '9999-01-01',
-        parentEvent: descEventForControl,
-        complete: true
-      });
-      if (typeof displayControl['descriptions-translations'] === 'undefined') displayControl['descriptions-translations'] = false;
-    }
-    allEvents.forEach(pEvent => {
-      if (!pEvent.subEvents || !eligible(pEvent.config.pool, student, pEvent.aid, allPools)) return;
-      pEvent.coordEmail = (student.country === "United States") ? pEvent.config.coordEmailAmericas : pEvent.config.coordEmailEurope;
-      if (student.translator && pEvent.config?.translationsOnDeck) {
-        let currentTranslationListIndex = -1;
-        if (pEvent.aid === 'descriptions' && descriptionsMasterListIndex !== -1) { currentTranslationListIndex = descriptionsMasterListIndex; }
-        else if (pEvent.aid !== 'descriptions') {
-          translationMasterList.push([]); currentTranslationListIndex = translationMasterList.length - 1;
-          translationMasterList[currentTranslationListIndex].push({ key: `translations-${pEvent.aid}`, displayOrder: `AAAAAA_${pEvent.aid.toUpperCase()}`, eventname: `translationsControlTitle-${pEvent.aid}`, tag: 'control', control: `${pEvent.aid}-translations`, bg: pEvent.config.translationsBG || "info", date: '9999-01-01', parentEvent: pEvent, complete: true });
-          if (typeof displayControl[`${pEvent.aid}-translations`] === 'undefined') displayControl[`${pEvent.aid}-translations`] = false;
-        }
-        if (currentTranslationListIndex !== -1) {
-          masterPrompts.forEach(promptObj => {
-            if (promptObj.aid === pEvent.aid && promptObj.language === 'English' && !promptObj.dnt) {
-              let langVersions = masterPrompts.filter(p => p.prompt === promptObj.prompt && p.language === currentLang);
-              let currentLangPrompt = langVersions.length > 0 ? langVersions[0] : { ...promptObj, language: currentLang, text: "" };
-              translationMasterList[currentTranslationListIndex].push({ key: promptObj.prompt + '-' + currentLang, displayOrder: promptObj.prompt, tag: `${pEvent.aid}-translations`, eventname: promptObj.prompt, subEventDisplayName: null, subEventName: 'translation', date: '9998-01-01', complete: true, parentEvent: pEvent, subEvent: {}, prompt: { name: promptObj.prompt, english: promptObj.text, translation: currentLangPrompt.text, restore: currentLangPrompt.text, index: masterPrompts.findIndex(p => p.prompt === currentLangPrompt.prompt && p.language === currentLangPrompt.language), lsb: currentLangPrompt.lsb } });
-            }
-          });
-          translationMasterList[currentTranslationListIndex].sort((a, b) => { if (a.tag === 'control') return -1; if (b.tag === 'control') return 1; return a.displayOrder.localeCompare(b.displayOrder); });
-        }
-      }
       if (pEvent.showcaseVideoList) {
         showcaseMasterList.push([]); let showcaseIdx = showcaseMasterList.length - 1;
         const controlKey = `${pEvent.aid}-showcase`;
@@ -913,11 +680,12 @@ const Home = () => {
         const newPreferences = { ...preferences, [key]: !preferences[key] };
         setPreferences(newPreferences);
 
+        const token = await ensureCsrfToken();
         const response = await fetch('/api/db', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            ...(csrfToken && { [CSRF_HEADER_NAME]: csrfToken })
+            ...(token && { [CSRF_HEADER_NAME]: token })
           },
           body: JSON.stringify({
             action: 'updateEmailPreferences',
@@ -930,6 +698,10 @@ const Home = () => {
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
+          if (errorData.data?.err === 'CSRF_TOKEN_MISSING' || errorData.data?.err === 'CSRF_TOKEN_MISMATCH') {
+            clearCsrfToken();
+            return handlePreferenceChange(key);
+          }
           throw new Error(errorData.data?.err || `Failed to update preferences with status ${response.status}`);
         }
 
