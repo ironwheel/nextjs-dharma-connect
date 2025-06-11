@@ -239,6 +239,7 @@ const Home = () => {
   };
 
   async function loadInitialData() {
+    let initialCsrfToken = null;
     try {
       if (!pid) {
         setLoadingProgress(prev => ({ ...prev, message: "No PID provided in URL." }));
