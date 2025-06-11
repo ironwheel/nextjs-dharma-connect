@@ -240,7 +240,7 @@ export async function sendConfirmationEmail(pid, clientIp, clientFingerprint, sh
         } catch (geoError) { console.warn(`auth-logic: Could not fetch geolocation for IP ${clientIp}:`, geoError.message); }
     }
 
-    let confirmationUrl = `${APP_DOMAIN}verify/?pid=${pid}&token=${confirmationToken}&language=${language}`;
+    let confirmationUrl = `${APP_DOMAIN}confirm/?pid=${pid}&token=${confirmationToken}&language=${language}`;
     if (showcase) confirmationUrl += `&showcase=${encodeURIComponent(showcase)}`;
 
     // --- Hash logic for APP_ACCESS_JSON ---
