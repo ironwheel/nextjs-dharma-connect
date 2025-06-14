@@ -6,7 +6,7 @@
  */
 import { publicIpv4 } from 'public-ip';
 import { getFingerprint } from './fingerprint';
-import { CSRF_HEADER_NAME } from '@dharma/backend-core';
+import { CSRF_HEADER_NAME } from '@dharma/backend-core/src/csrf-constants';
 
 let csrfToken = null;
 
