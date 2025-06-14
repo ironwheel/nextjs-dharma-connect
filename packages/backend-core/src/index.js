@@ -42,7 +42,16 @@ export {
     handleWriteParticipantAID,
     handleWriteOWYAALease,
     handleWriteStudentAccessVerifyError,
-    handleTableCount
+    handleTableCount,
+    handleCreateWorkOrder,
+    handleGetWorkOrders,
+    handleGetWorkOrder,
+    handleUpdateWorkOrder,
+    handleLogWorkOrderAudit,
+    handleGetWorkOrderAuditLogs,
+    handleDeleteWorkOrder,
+    handleUpdateWorkOrderStatus,
+    handleUpdateStepStatus,
 } from './db-actions.js';
 
 // Export from auth-logic.js

@@ -1,0 +1,25 @@
+{
+    "name": "email-manager",
+    "version": "0.1.0",
+    "private": true,
+    "scripts": {
+        "dev": "next dev",
+        "build": "next build",
+        "start": "next start",
+        "lint": "next lint"
+    },
+    "dependencies": {
+        "@dharma/backend-core": "workspace:*",
+        "@dharma/shared": "workspace:*",
+        "bootstrap": "^5.3.3",
+        "next": "15.3.3",
+        "react": "^18.3.1",
+        "react-bootstrap": "^2.10.9",
+        "react-dom": "^18.3.1",
+        "react-toastify": "^10.0.4"
+    },
+    "devDependencies": {
+        "eslint": "9.23.0",
+        "eslint-config-next": "15.2.4"
+    }
+}

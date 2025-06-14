@@ -7,6 +7,7 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { fromCognitoIdentityPool } from "@aws-sdk/credential-provider-cognito-identity";
+import { DbAction, DbActionParams, DbActionResponse } from './types'
 
 // --- Configuration from Environment Variables ---
 // These will be read from the environment of the calling application (e.g., student-dashboard API route)
@@ -24,6 +25,8 @@ const TABLE_MAP = {
     VIEWS: process.env.DYNAMODB_TABLE_VIEWS,
     CONFIG: process.env.DYNAMODB_TABLE_CONFIG,
     AUTH: process.env.DYNAMODB_TABLE_AUTH,
+    WORK_ORDERS: process.env.DYNAMODB_TABLE_WORK_ORDERS,
+    WORK_ORDER_AUDIT_LOGS: process.env.DYNAMODB_TABLE_WORK_ORDER_AUDIT_LOGS,
 };
 
 let docClientInstance; // Singleton instance for the DynamoDB Document Client
@@ -79,4 +82,32 @@ export function getTableName(tableNameKey) {
         throw new Error(`Server configuration error: Table name for '${tableNameKey}' is not configured.`);
     }
     return tableName;
+}
+
+const client = new DynamoDBClient({})
+const docClient = DynamoDBDocumentClient.from(client)
+
+export async function callDbApi(action, params) {
+    try {
+        const response = await fetch('/api/db', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                action,
+                params,
+            }),
+        })
+
+        if (!response.ok) {
+            throw new Error(`API call failed: ${response.statusText}`)
+        }
+
+        const data = await response.json()
+        return data
+    } catch (error) {
+        console.error('Error calling DB API:', error)
+        throw error
+    }
 }

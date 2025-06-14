@@ -45,7 +45,7 @@ import {
   ensureCsrfToken,
   clearCsrfToken
 } from '@dharma/shared';
-import { CSRF_HEADER_NAME } from '@dharma/backend-core'; // Import CSRF header name
+import { CSRF_HEADER_NAME } from '@dharma/backend-core/src/csrf-constants'; // Import CSRF header name
 
 
 // Module-level variables

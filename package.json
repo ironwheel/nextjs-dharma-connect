@@ -1,6 +1,15 @@
 {
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.826.0",
+    "@aws-sdk/lib-dynamodb": "^3.826.0",
     "@fortawesome/fontawesome-svg-core": "^6.7.2",
-    "next": "^15.3.3"
+    "@types/react": "^19.1.8",
+    "@types/react-bootstrap": "^1.0.1",
+    "next": "^15.3.3",
+    "react": "^19.1.0",
+    "react-bootstrap": "^2.10.10",
+    "react-icons": "^5.5.0",
+    "react-toastify": "^11.0.5",
+    "uuid": "^11.1.0"
   }
 }
