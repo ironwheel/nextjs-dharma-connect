@@ -419,7 +419,12 @@ const DisplayEmailIFrame = ({ el, state }) => {
           .replace(/\|\|name\|\|/g, `${student.first || ''} ${student.last || ''}`)
           .replace(/\|\|coord-email\|\|/g, el.parentEvent?.coordEmail || 'support@example.com')
           .replace(/123456789/g, pid || 'UNKNOWN_PID');
-        if (dbgLocalHost()) processedData = processedData.replace(/https:\/\/reg\.slsupport\.link\//g, "http://localhost:3000/");
+        const studentRegUrl = process.env.STUDENT_REG_URL;
+        if (!studentRegUrl) {
+          throw new Error('STUDENT_REG_URL environment variable is not set');
+        }
+        if (dbgLocalHost()) processedData = processedData.replace(new RegExp(studentRegUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), "http://localhost:3000/");
+
         const aidRegex = /&aid=([^"&]+)/;
         processedData = processedData.replace(aidRegex, (match) => `${match}&callback=${REGCOMPLETE_WEBHOOK_CHANNEL}`);
         setIFrameData(processedData);
@@ -440,7 +445,11 @@ const MediaElement = ({ el }) => {
       if (student.programs[el.parentEvent.aid].offeringHistory.retreat?.offeringSKU) offeringComplete = true;
     }
   }
-  const regLink = `${dbgLocalHost() ? 'http://localhost:3000' : 'https://reg.slsupport.link'}/?pid=${pid}&aid=${el.parentEvent.aid}&callback=${REGCOMPLETE_WEBHOOK_CHANNEL}`;
+  const studentRegUrl = process.env.STUDENT_REG_URL;
+  if (!studentRegUrl) {
+    throw new Error('STUDENT_REG_URL environment variable is not set');
+  }
+  const regLink = `${dbgLocalHost() ? 'http://localhost:3000' : studentRegUrl}/?pid=${pid}&aid=${el.parentEvent.aid}&callback=${REGCOMPLETE_WEBHOOK_CHANNEL}`;
 
   if (!el.complete) {
     const hasOffering = student.programs?.[el.parentEvent.aid]?.offeringHistory?.[el.subEventName];

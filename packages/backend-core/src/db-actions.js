@@ -706,70 +706,43 @@ async function handleTableCount({ tableNameKey }) {
  * @param {string} payload.subEvent - The sub-event code.
  * @param {string} payload.stage - The stage code.
  * @param {string} payload.languages - The languages for the work order.
- * @param {string} payload.subject - The subject code.
+ * @param {object} payload.subjects - The subjects for the work order.
  * @param {string} payload.account - The account code.
  * @param {string} payload.createdBy - The user PID who created the work order.
  * @returns {Promise<object>} The created work order.
  * @throws {Error} If required fields are missing or DB error.
  */
 async function handleCreateWorkOrder(payload) {
-    const { eventCode, subEvent, stage, languages, subject, account, createdBy } = payload;
-    if (!eventCode || !subEvent || !stage || !languages || !subject || !account || !createdBy) {
+    const { eventCode, subEvent, stage, languages, subjects, account, createdBy } = payload;
+    if (!eventCode || !subEvent || !stage || !languages || !subjects || !account || !createdBy) {
         throw new Error(`Missing required fields for createWorkOrder: ${JSON.stringify(payload)}`);
     }
 
-    const workOrderId = `wo_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const id = `wo_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const now = new Date().toISOString();
 
     const workOrder = {
-        workOrderId,
+        id,
         eventCode,
         subEvent,
         stage,
         languages,
-        subject,
+        subjects,
         account,
         createdBy,
+        locked: false,
+        lockedBy: "",
         steps: [
-            {
-                name: 'Prepare',
-                status: 'ready',
-                message: '',
-                isActive: true
-            },
-            {
-                name: 'Test',
-                status: 'ready',
-                message: '',
-                isActive: false
-            },
-            {
-                name: 'Send',
-                status: 'ready',
-                message: '',
-                isActive: false
-            }
+            { name: 'Prepare', status: 'ready', message: '', isActive: true },
+            { name: 'Test', status: 'ready', message: '', isActive: false },
+            { name: 'Send', status: 'ready', message: '', isActive: false }
         ],
         createdAt: now,
-        updatedAt: now,
+        updatedAt: now
     };
 
     const client = getDocClient();
-    const params = {
-        TableName: getTableName('WORK_ORDERS'),
-        Item: workOrder,
-    };
-
-    await client.send(new PutCommand(params));
-
-    // Log the creation
-    await handleLogWorkOrderAudit({
-        workOrderId,
-        action: 'created',
-        userPid: createdBy,
-        details: { eventCode, subEvent, stage, languages, subject, account },
-    });
-
+    await client.send(new PutCommand({ TableName: getTableName('WORK_ORDERS'), Item: workOrder }));
     return workOrder;
 }
 
@@ -815,20 +788,20 @@ async function handleGetWorkOrders(payload) {
  * @async
  * @function handleGetWorkOrder
  * @param {object} payload - The request payload.
- * @param {string} payload.workOrderId - The work order ID.
+ * @param {string} payload.id - The work order ID.
  * @returns {Promise<object>} The work order data.
  * @throws {Error} If work order not found or DB error.
  */
 async function handleGetWorkOrder(payload) {
-    const { workOrderId } = payload;
-    if (!workOrderId) {
-        throw new Error("Missing workOrderId in payload for getWorkOrder.");
+    const { id } = payload;
+    if (!id) {
+        throw new Error("Missing id in payload for getWorkOrder.");
     }
 
     const client = getDocClient();
     const params = {
         TableName: getTableName('WORK_ORDERS'),
-        Key: { workOrderId },
+        Key: { id },
     };
 
     const data = await client.send(new GetCommand(params));
@@ -843,15 +816,15 @@ async function handleGetWorkOrder(payload) {
  * @async
  * @function handleUpdateWorkOrder
  * @param {object} payload - The request payload.
- * @param {string} payload.workOrderId - The work order ID.
+ * @param {string} payload.id - The work order ID.
  * @param {string} payload.userPid - The user PID making the update.
  * @param {object} payload.updates - The fields to update.
  * @returns {Promise<object>} The updated work order.
  * @throws {Error} If required fields missing or DB error.
  */
 async function handleUpdateWorkOrder(payload) {
-    const { workOrderId, userPid, updates } = payload;
-    if (!workOrderId || !userPid || !updates) {
+    const { id, userPid, updates } = payload;
+    if (!id || !userPid || !updates) {
         throw new Error("Missing required fields for updateWorkOrder.");
     }
 
@@ -864,7 +837,7 @@ async function handleUpdateWorkOrder(payload) {
     const expressionAttributeNames = {};
 
     Object.entries(updates).forEach(([key, value]) => {
-        if (key !== 'workOrderId') { // Don't allow updating the ID
+        if (key !== 'id') { // Don't allow updating the ID
             updateExpressions.push(`#${key} = :${key}`);
             expressionAttributeValues[`:${key}`] = value;
             expressionAttributeNames[`#${key}`] = key;
@@ -878,7 +851,7 @@ async function handleUpdateWorkOrder(payload) {
 
     const params = {
         TableName: getTableName('WORK_ORDERS'),
-        Key: { workOrderId },
+        Key: { id },
         UpdateExpression: `SET ${updateExpressions.join(', ')}`,
         ExpressionAttributeValues: expressionAttributeValues,
         ExpressionAttributeNames: expressionAttributeNames,
@@ -889,7 +862,7 @@ async function handleUpdateWorkOrder(payload) {
 
     // Log the update
     await handleLogWorkOrderAudit({
-        workOrderId,
+        workOrderId: id,
         action: 'updated',
         userPid,
         details: updates,
@@ -974,16 +947,16 @@ async function handleGetWorkOrderAuditLogs(payload) {
  * @async
  * @function handleDeleteWorkOrder
  * @param {object} payload - The request payload.
- * @param {string} payload.workOrderId - The work order ID.
+ * @param {string} payload.id - The work order ID.
  * @returns {Promise<object>} Success indicator.
  */
 async function handleDeleteWorkOrder(payload) {
-    const { workOrderId } = payload;
-    if (!workOrderId) throw new Error("Missing 'workOrderId' in payload for handleDeleteWorkOrder.");
+    const { id } = payload;
+    if (!id) throw new Error("Missing 'id' in payload for handleDeleteWorkOrder.");
     const client = getDocClient();
     const params = {
         TableName: getTableName('WORK_ORDERS'),
-        Key: { workOrderId }
+        Key: { id }
     };
     await client.send(new DeleteCommand(params));
     return { success: true };
@@ -1018,15 +991,15 @@ async function handleUpdateWorkOrderStatus(payload) {
  * @async
  * @function handleUpdateStepStatus
  * @param {object} payload - The request payload.
- * @param {string} payload.workOrderId - The work order ID.
+ * @param {string} payload.id - The work order ID.
  * @param {string} payload.stepName - The name of the step to update.
  * @param {string} payload.status - The new status.
  * @param {string} [payload.message] - Optional message.
  * @returns {Promise<object>} Success indicator.
  */
 async function handleUpdateStepStatus(payload) {
-    const { workOrderId, stepName, status, message } = payload;
-    if (!workOrderId || !stepName || !status) {
+    const { id, stepName, status, message } = payload;
+    if (!id || !stepName || !status) {
         throw new Error("Missing required fields for handleUpdateStepStatus.");
     }
 
@@ -1036,7 +1009,7 @@ async function handleUpdateStepStatus(payload) {
     // First get the current work order to check step order
     const getParams = {
         TableName: getTableName('WORK_ORDERS'),
-        Key: { workOrderId }
+        Key: { id }
     };
     const workOrder = await client.send(new GetCommand(getParams));
 
@@ -1096,19 +1069,17 @@ async function handleUpdateStepStatus(payload) {
         }
     }
 
+    // Update the work order in the database
     const updateParams = {
         TableName: getTableName('WORK_ORDERS'),
-        Key: { workOrderId },
-        UpdateExpression: 'SET #steps = :steps, updatedAt = :updatedAt',
-        ExpressionAttributeNames: {
-            '#steps': 'steps'
-        },
+        Key: { id },
+        UpdateExpression: 'SET steps = :steps, updatedAt = :updatedAt',
         ExpressionAttributeValues: {
             ':steps': steps,
             ':updatedAt': now
-        }
+        },
+        ReturnValues: 'ALL_NEW',
     };
-
     await client.send(new UpdateCommand(updateParams));
     return { success: true };
 }

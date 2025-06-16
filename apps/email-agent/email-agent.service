@@ -1,0 +1,19 @@
+[Unit]
+Description=Email Agent Service
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/opt/email-agent
+Environment=PYTHONPATH=/opt/email-agent
+Environment=AWS_REGION=us-east-1
+Environment=DYNAMODB_TABLE=WORK_ORDERS
+Environment=SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/ACCOUNT_ID/work-order-queue.fifo
+Environment=WEBSOCKET_API_URL=wss://API_ID.execute-api.us-east-1.amazonaws.com/prod
+ExecStart=/opt/email-agent/venv/bin/python -m src.main
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target 
