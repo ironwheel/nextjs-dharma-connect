@@ -893,10 +893,6 @@ const Home = () => {
 
   const getRowValues = (viewConditions, columnLabels, el) => {
 
-    //if (el.id.includes('test')) {
-    //    return null;
-    //}
-
     if (el.unsubscribe) {
       return null;
     }
@@ -1348,7 +1344,11 @@ const Home = () => {
         }
         rowValues[field] = writtenLanguage
       } else if (field === 'history') {
-        rowValues[field] = "https://dashboard.slsupport.link/?pid=" + el.id
+        const studentHistoryBaseUrl = process.env.STUDENT_HISTORY_URL;
+        if (!studentHistoryBaseUrl) {
+          throw new Error('STUDENT_HISTORY_URL environment variable is not set');
+        }
+        rowValues[field] = `${studentHistoryBaseUrl}/?pid=${el.id}`;
       } else if (field === 'installmentsTotal' || field === 'installmentsReceived' || field === 'installmentsDue' || field === 'installmentsRefunded') {
         let person = el.programs[currentEvent.aid]
         var installmentTotal = 0

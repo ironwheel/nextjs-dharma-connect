@@ -69,3 +69,15 @@ ehthumbs_vista.db
 
 # Misc local files
 lang_permissions.json
+
+# all zip files
+*.zip
+
+# Ignore deployment/build artifacts
+apps/email-agent.zip
+
+# Ignore Python bytecode cache directories
+**/__pycache__/
+
+# Ignore Python virtual environments
+apps/email-agent/venv/

@@ -3,15 +3,16 @@ import { Table, Button, Badge } from 'react-bootstrap'
 import { toast } from 'react-toastify'
 import { callDbApi } from '@dharma/shared/src/clientApi'
 import { FiPlus } from 'react-icons/fi'
+import { useWebSocketContext } from '../context/WebSocketProvider'
 
 interface WorkOrder {
-    workOrderId: string
+    id: string
     eventCode: string
     subEvent: string
     stage: string
     language?: string
     languages?: { [key: string]: boolean }
-    subject: string
+    subjects?: { [lang: string]: string }
     account: string
     createdBy: string
     steps: Array<{
@@ -25,7 +26,7 @@ interface WorkOrder {
 }
 
 interface WorkOrderListProps {
-    onEdit: (workOrderId: string) => void
+    onEdit: (id: string) => void
     onNew: () => void
     refreshTrigger?: number
 }
@@ -36,6 +37,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0 }: Wor
     const [activeSteps, setActiveSteps] = useState<Record<string, boolean>>({})
     const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
     const [hoveredRow, setHoveredRow] = useState<string | null>(null)
+    const { lastMessage } = useWebSocketContext()
 
     const loadParticipantName = async (pid: string) => {
         if (!pid || participantNames[pid]) return
@@ -71,6 +73,13 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0 }: Wor
         loadWorkOrders()
     }, [refreshTrigger])
 
+    useEffect(() => {
+        if (lastMessage && lastMessage.type === 'workOrderUpdate') {
+            // Optionally filter by eventName or id
+            loadWorkOrders()
+        }
+    }, [lastMessage])
+
     const getStatusBadgeClass = (status: string, isActive: boolean) => {
         if ((!isActive && status.toLowerCase() === 'ready') || status.toLowerCase() === 'ready') return 'bg-secondary text-dark'; // light gray for pending and ready
         switch (status.toLowerCase()) {
@@ -87,61 +96,14 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0 }: Wor
         }
     }
 
-    const handleStepAction = async (workOrderId: string, stepName: 'Prepare' | 'Test' | 'Send', isStarting: boolean) => {
+    const handleStepAction = async (id: string, stepName: 'Prepare' | 'Test' | 'Send', isStarting: boolean) => {
         try {
-            if (isStarting) {
-                // Show mock dialog after a delay
-                setTimeout(() => {
-                    const mockDialog = window.confirm(
-                        'Choose step result:\n\n' +
-                        '1. Complete (success)\n' +
-                        '2. Working\n' +
-                        '3. Error'
-                    )
-
-                    let status: 'complete' | 'working' | 'error'
-                    let message = ''
-
-                    if (mockDialog) {
-                        const choice = prompt('Enter 1, 2, or 3:')
-                        switch (choice) {
-                            case '1':
-                                status = 'complete'
-                                message = 'Step completed successfully'
-                                break
-                            case '2':
-                                status = 'working'
-                                message = 'Step is in progress'
-                                break
-                            case '3':
-                                status = 'error'
-                                message = 'Step encountered an error'
-                                break
-                            default:
-                                return
-                        }
-
-                        callDbApi('handleUpdateStepStatus', {
-                            workOrderId,
-                            id: workOrderId,
-                            stepName,
-                            status,
-                            message
-                        }).then(() => {
-                            loadWorkOrders()
-                        })
-                    }
-                }, 2000)
-            }
-
             await callDbApi('handleUpdateStepStatus', {
-                workOrderId,
-                id: workOrderId,
+                id,
                 stepName,
                 status: isStarting ? 'working' : 'interrupted',
                 message: isStarting ? 'Step started' : 'Step was interrupted'
             })
-
             loadWorkOrders()
         } catch (error) {
             console.error('Error updating step status:', error)
@@ -193,33 +155,40 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0 }: Wor
                             <th style={{ border: 'none' }}>Event Code</th>
                             <th style={{ border: 'none' }}>Sub Event</th>
                             <th style={{ border: 'none' }}>Stage</th>
-                            <th style={{ border: 'none' }}>Languages</th>
-                            <th style={{ border: 'none' }}>Subject</th>
-                            <th style={{ border: 'none' }}>Account</th>
+                            <th style={{ border: 'none' }}>Language(s)</th>
+                            <th style={{ border: 'none' }}>Subject(s)</th>
+                            <th style={{ border: 'none' }}>Email Account</th>
                             <th style={{ border: 'none' }}>Created By</th>
                         </tr>
                     </thead>
                     <tbody>
                         {workOrders.map((workOrder, idx) => (
-                            <React.Fragment key={workOrder.workOrderId}>
+                            <React.Fragment key={workOrder.id}>
                                 {idx > 0 && (
                                     <tr>
                                         <td colSpan={7} style={{ height: 24, border: 'none', background: 'transparent' }}></td>
                                     </tr>
                                 )}
                                 <tr
-                                    onMouseEnter={() => setHoveredRow(workOrder.workOrderId)}
+                                    onMouseEnter={() => setHoveredRow(workOrder.id)}
                                     onMouseLeave={() => setHoveredRow(null)}
                                     style={{ cursor: 'pointer', border: 'none' }}
-                                    onClick={() => onEdit(workOrder.workOrderId)}
+                                    onClick={() => onEdit(workOrder.id)}
                                 >
-                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.workOrderId ? '#484b50' : '#3a3d40' }}>{workOrder.eventCode}</td>
-                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.workOrderId ? '#484b50' : '#3a3d40' }}>{workOrder.subEvent}</td>
-                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.workOrderId ? '#484b50' : '#3a3d40' }}>{workOrder.stage}</td>
-                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.workOrderId ? '#484b50' : '#3a3d40' }}>{Object.keys(workOrder.languages || {}).join(',')}</td>
-                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.workOrderId ? '#484b50' : '#3a3d40' }}>{workOrder.subject}</td>
-                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.workOrderId ? '#484b50' : '#3a3d40' }}>{workOrder.account}</td>
-                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.workOrderId ? '#484b50' : '#3a3d40' }}>{participantNames[workOrder.createdBy] || workOrder.createdBy}</td>
+                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.eventCode}</td>
+                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.subEvent}</td>
+                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.stage}</td>
+                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{Object.keys(workOrder.languages || {}).join(',')}</td>
+                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
+                                        {workOrder.subjects
+                                            ? Object.entries(workOrder.subjects)
+                                                .filter(([lang, _]) => workOrder.languages?.[lang])
+                                                .map(([lang, subj]) => `${lang.toUpperCase()}: ${subj}`)
+                                                .join(', ')
+                                            : ''}
+                                    </td>
+                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.account}</td>
+                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{participantNames[workOrder.createdBy] || workOrder.createdBy}</td>
                                 </tr>
                                 <tr>
                                     <td colSpan={7} style={{ padding: 0, background: 'transparent', border: 'none' }}>
@@ -240,8 +209,10 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0 }: Wor
                                                         : {};
                                             const badgeBg = isReadyActive ? 'bg-primary' : isInterrupted ? '' : isError ? '' : getStatusBadgeClass(step.status, step.isActive);
                                             const messageColor = isComplete ? '#bbb' : '#fff';
+                                            const prevStepComplete = index === 0 || workOrder.steps[index - 1].status === 'complete';
+                                            const canStart = !isComplete && (prevStepComplete || isError || isInterrupted);
                                             return (
-                                                <div key={`${workOrder.workOrderId}-${step.name}`} style={{ background: '#2c3034', padding: '12px' }}>
+                                                <div key={`${workOrder.id}-${step.name}`} style={{ background: '#2c3034', padding: '12px' }}>
                                                     <div className="d-flex align-items-center">
                                                         <div style={{ flex: 2 }} className="ps-5">
                                                             <div className="d-flex align-items-center">
@@ -251,10 +222,11 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0 }: Wor
                                                         </div>
                                                         <div style={{ flex: 1 }}>
                                                             <Button
-                                                                variant={step.status === 'working' ? 'danger' : 'primary'}
+                                                                variant={step.status === 'working' ? 'danger' : isComplete ? 'secondary' : 'primary'}
                                                                 size="sm"
-                                                                onClick={e => { e.stopPropagation(); handleStepAction(workOrder.workOrderId, step.name, step.status !== 'working') }}
-                                                                disabled={!(step.isActive || isError || isInterrupted)}
+                                                                onClick={e => { e.stopPropagation(); handleStepAction(workOrder.id, step.name, step.status !== 'working') }}
+                                                                disabled={!canStart}
+                                                                style={isComplete ? { backgroundColor: '#bbb', color: '#888', borderColor: '#bbb', cursor: 'not-allowed' } : {}}
                                                             >
                                                                 {(isInterrupted || isError) ? 'Restart' : step.status === 'working' ? 'Stop' : 'Start'}
                                                             </Button>

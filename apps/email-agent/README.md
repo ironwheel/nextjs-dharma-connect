@@ -1,111 +1,116 @@
 # Email Agent
 
-A Node.js service that processes email campaign work orders by polling DynamoDB and executing steps in sequence.
+A Python-based email processing agent that handles work orders for email campaigns.
 
-## Features
+## Architecture
 
-- Polls DynamoDB for pending work orders
-- Processes work orders one at a time
-- Executes steps in sequence (copy from Mailchimp, send test emails, send campaign emails)
-- Supports continuous operation for long-running campaigns
-- Maintains audit logs of all operations
-- Graceful shutdown handling
+The system consists of several components:
 
-## Prerequisites
+1. **DynamoDB Table**
+   - Stores work orders with their steps and status
+   - Has a stream enabled to capture all changes
 
-- Node.js 18 or later
-- AWS credentials with access to:
-  - DynamoDB (WorkOrders and WorkOrderAuditLogs tables)
-  - S3 (for email templates)
-  - SES (for sending emails)
-  - Cognito Identity Pool
+2. **Lambda Function**
+   - Processes DynamoDB stream events
+   - Routes step status changes to SQS
+   - Broadcasts all changes to WebSocket clients
 
-## Environment Variables
+3. **SQS FIFO Queue**
+   - Receives step status change events
+   - Ensures ordered processing of work orders
 
-Required environment variables:
+4. **Python Email Agent**
+   - Runs on EC2 (production) or locally (development)
+   - Polls SQS for new work orders
+   - Processes steps and updates work order status
+   - Locks work orders during processing
 
-```bash
-# AWS Configuration
+5. **API Gateway WebSocket API**
+   - Provides real-time updates to web clients
+   - Broadcasts work order changes to all connected clients
+
+## Setup
+
+### Prerequisites
+
+- Python 3.9+
+- AWS CLI configured with appropriate permissions
+- AWS CDK installed (for infrastructure deployment)
+
+### Environment Variables
+
+Create a `.env` file with:
+
+```env
 AWS_REGION=us-east-1
-AWS_COGNITO_IDENTITY_POOL_ID=your-identity-pool-id
-
-# DynamoDB Table Names
-DYNAMODB_TABLE_WORK_ORDERS=WorkOrders
-DYNAMODB_TABLE_WORK_ORDER_AUDIT_LOGS=WorkOrderAuditLogs
-
-# Logging
-LOG_LEVEL=info
-
-# Python Module Path (for future integration)
-PYTHON_MODULE_PATH=/path/to/python/modules
+DYNAMODB_TABLE=WORK_ORDERS
+SQS_QUEUE_URL=https://sqs.{region}.amazonaws.com/{account}/{queue-name}
+WEBSOCKET_API_URL=wss://{api-id}.execute-api.{region}.amazonaws.com/{stage}
 ```
 
-## Installation
+### Installation
 
-1. Install dependencies:
+1. Create a virtual environment:
    ```bash
-   npm install
+   python -m venv venv
+   source venv/bin/activate  # or `venv\Scripts\activate` on Windows
    ```
 
-2. Create a `.env` file with the required environment variables.
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-## Usage
+### Running the Agent
 
-Start the agent:
+Development:
 ```bash
-npm start
+python -m src.main
 ```
 
-For development with auto-reload:
+Production (EC2):
 ```bash
-npm run dev
+# Install as a systemd service
+sudo cp email-agent.service /etc/systemd/system/
+sudo systemctl enable email-agent
+sudo systemctl start email-agent
 ```
 
-## Work Order Structure
+## Infrastructure
 
-A work order consists of:
-- `workOrderId`: Unique identifier
-- `campaignString`: Campaign identifier
-- `status`: Current status (pending, running, completed, error, stopped)
-- `steps`: Array of step objects
-- `createdBy`: User PID who created the work order
-- `createdAt`: Creation timestamp
-- `updatedAt`: Last update timestamp
+The AWS infrastructure is defined using CDK. To deploy:
 
-Each step has:
-- `stepNumber`: Sequential number
-- `type`: Step type (copyFromMailchimp, sendTestEmails, sendCampaignEmails)
-- `status`: Current status
-- `parameters`: Step-specific parameters
-- `continuous`: Whether the step should run continuously
-- `startTime`: When the step started
-- `endTime`: When the step completed/errored
+```bash
+cd infrastructure
+npm install
+cdk deploy
+```
 
-## Integration with Python Modules
-
-The agent is designed to integrate with existing Python modules for:
-- Copying HTML from Mailchimp to S3
-- Sending test emails
-- Sending campaign emails
-
-The integration points are in `src/step-processor.js`.
-
-## Logging
-
-Logs are written to:
-- Console (all levels)
-- `error.log` (error level only)
-- `combined.log` (all levels)
+This will create:
+- DynamoDB table with stream enabled
+- SQS FIFO queue
+- Lambda function
+- API Gateway WebSocket API
+- Required IAM roles and policies
 
 ## Development
 
-1. Run tests:
-   ```bash
-   npm test
-   ```
+### Adding New Steps
 
-2. The agent uses the shared `@dharma/backend-core` package for DynamoDB operations.
+1. Add the step type to the `StepProcessor` class
+2. Implement the processing logic
+3. Update the work order model if needed
 
-## License
+### Testing
 
-MIT 
+```bash
+pytest
+```
+
+## Monitoring
+
+The agent logs to CloudWatch Logs in production. Key metrics to monitor:
+- SQS queue depth
+- Lambda invocation errors
+- WebSocket connection count
+- Work order processing time 

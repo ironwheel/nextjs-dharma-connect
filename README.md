@@ -1,50 +1,65 @@
-# Next.js Dharma Connect Projects
+# Dharma Connect
 
-This repository contains a collection of Next.js applications related to the Dharma Connect platform, a suite of event registration and participant management tools managed as a monorepo.
+## Overview
+Dharma Connect is a comprehensive monorepo designed to manage event registration and payment, registration management, media access, email campaigns, and administrative tasks. It consists of multiple applications and services that work together to provide passwordless, authenticated, eligibility-sensitive access to all aspects of event registration management.
 
-## Repository Structure
+> **Work in Progress Notice:**  
+> The applications in this repository are currently being moved from various private repositories and are undergoing refactoring. As a result, the code here is not yet ready for production use. We appreciate your patience and understanding as we work to improve and stabilize the codebase. There are significant improvements and app additions needed to complete its functionality.
 
-This monorepo is organized into the following main directories:
+## Components
 
--   **/apps**: Contains the individual Next.js applications.
-    -   `student-dashboard`: Dashboard interface for students allowing access to upcoming events, video recordings of previous events, teaching materials (PDFs) access, and overall schedule.
-    -   `student-registration`: Handles event registration and payments using Stripe.
-    -   `admin-dashboard`: Provides administrative functionalities.
--   **/packages**: Contains shared code, utilities, components, or configurations used across multiple applications within this monorepo.
-    -   `shared`: A package containing common utilities (like eligibility logic) and shared UI components and types.
-    -   `backend-core`: A package containing common AWS interface and authentication utilities.  
+### Apps
+- **Admin Dashboard**: A web application for administrators to manage student event registration, view student history, and handle event configurations. Built with Next.js.
+- **Student Dashboard**: A web application for students to view videos of past teaching events, access liturgies, register for upcoming events, and manage email preferences. Built with Next.js.
+- **Email Agent**: A Python-based service that sends emails to students and manages communication between the system and users. It includes a systemd service file for deployment to an EC2 or other dedicated Linux instance.
+- **Email Manager**: A web application for managing email campaigns. Built with Next.js.
 
-## Tech Stack
+### Backend
+- **Backend Core**: A shared library that provides database actions and business logic for the applications. It is used by all of the Next.js applications.
 
--   **Framework:** [Next.js](https://nextjs.org/)
--   **Package Manager:** [pnpm](https://pnpm.io/) (utilizing workspaces)
--   **Build/Task Orchestration:** (Optional but recommended) [Turborepo](https://turbo.build/repo)
--   **UI:** [React](https://react.dev/), [React Bootstrap](https://react-bootstrap.netlify.app/)
--   **Styling:** [Bootstrap](https://getbootstrap.com/) / [Bootswatch](https://bootswatch.com/), Custom CSS
--   **Backend Services (API Routes):** Node.js (within Next.js API routes)
--   **Database:** AWS DynamoDB
--   **Authentication:** JWT, AWS Cognito Identity Pools
--   **Deployment:** [Vercel](https://vercel.com/)
+### Infrastructure
+- **Infrastructure**: Contains deployment configurations and infrastructure as code (e.g., CDK, Terraform) for deploying the applications and services to AWS.
 
 ## Getting Started
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd dharma-connect
+   ```
 
-1.  **Clone the repository:**
-    ```bash
-    git clone <repository-url>
-    cd nextjs-dharma-connect
-    ```
-2.  **Install dependencies:** Ensure you have [pnpm](https://pnpm.io/installation) installed globally (`npm install -g pnpm`). Then run the install command from the root directory (`nextjs-dharma-connect/`):
-    ```bash
-    pnpm install
-    ```
-3.  **Set up Environment Variables:** Each application might require its own environment variables. Refer to the `README.md` file within each specific application directory under `/apps` for detailed setup instructions (including creating `.env.local` files). Shared secrets might be configured at the root or per-app as needed.
-4.  **Run an Application:** To run a specific application (e.g., `student-dashboard`) in development mode, use the pnpm filter command from the root directory:
-    ```bash
-    pnpm --filter student-dashboard dev
-    ```
-    *(Replace `student-dashboard` with the desired application name)*
+2. **Install dependencies**:
+   - For the Admin Dashboard, Student Dashboard, and Email Manager:
+     ```bash
+     pnpm --filter admin-dashboard install
+     pnpm --filter student-dashboard install
+     pnpm --filter email-manager install     
+     ```
+   - For the Email Agent:
+     ```bash
+     cd email-agent
+     pip install -r requirements.txt
+     ```
 
+3. **Set up environment variables**:
+   - Create `.env.local` files in the respective app directories and add the necessary environment variables. See the README's in each of the apps for more info.
+
+4. **Run the applications**:
+   - Admin Dashboard:
+     ```bash
+     pnpm --filter admin-dashboard run dev
+     ```
+   - Student Dashboard:
+     ```bash
+     pnpm --filter student-dashboard run dev
+     ```
+   - Email Manager
+     ```bash
+     pnpm --filter email-manager run dev
+     ```
+   - Email Agent:
+     ```bash
+     cd email-agent
+     python -m src.main.py
+     ```
 ## License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
+This project is licensed under the MIT License.

@@ -1,0 +1,41 @@
+# CDK asset staging directory
+.cdk.staging
+cdk.out/
+
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment variables
+.env
+.env.*
+*.local
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# TypeScript
+*.js
+!jest.config.js
+*.d.ts
+
+# Test coverage
+coverage/
+
+# Build output
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temporary files
+*.tmp
+*.temp 

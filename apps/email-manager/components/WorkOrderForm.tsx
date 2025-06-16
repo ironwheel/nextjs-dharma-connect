@@ -5,13 +5,13 @@ import { callDbApi } from '@dharma/shared/src/clientApi'
 import { FiTrash2 } from 'react-icons/fi'
 
 interface WorkOrderFormProps {
-    workOrderId?: string
+    id?: string
     onSave: () => void
     onCancel: () => void
     userPid: string
 }
 
-export default function WorkOrderForm({ workOrderId, onSave, onCancel, userPid }: WorkOrderFormProps) {
+export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrderFormProps) {
     const [loading, setLoading] = useState(false)
     const [events, setEvents] = useState<any[]>([])
     const [eventCode, setEventCode] = useState('')
@@ -21,11 +21,12 @@ export default function WorkOrderForm({ workOrderId, onSave, onCancel, userPid }
     const [stage, setStage] = useState('')
     const [languageList, setLanguageList] = useState<string[]>([])
     const [languages, setLanguages] = useState<{ [key: string]: boolean }>({})
-    const [subject, setSubject] = useState('')
+    const [subjects, setSubjects] = useState<{ [lang: string]: string }>({})
     const [accountList, setAccountList] = useState<string[]>([])
     const [account, setAccount] = useState('')
     const [optionsLoaded, setOptionsLoaded] = useState(false)
     const loadedSubEventRef = useRef<string | null>(null)
+    const loadedWorkOrderRef = useRef<any>(null)
 
     // Fetch events and config on mount
     useEffect(() => {
@@ -39,15 +40,18 @@ export default function WorkOrderForm({ workOrderId, onSave, onCancel, userPid }
             // Only show events with config.emailManager === true
             const filteredEvents = (eventsResp || []).filter((ev: any) => ev.config && ev.config.emailManager)
             setEvents(filteredEvents)
-            setEventCode('') // No event selected by default
-            setSubEvents([])
-            setSubEvent('')
             setAccountList(accountResp?.value || [])
             setStageList(stageResp?.value || [])
             setLanguageList(langResp?.value || [])
-            setAccount('')
-            setStage('')
-            setLanguages({})
+            if (!id) {
+                setEventCode('') // No event selected by default
+                setSubEvents([])
+                setSubEvent('')
+                setAccount('')
+                setStage('')
+                setLanguages({})
+                setSubjects({})
+            }
             setOptionsLoaded(true)
         }).catch((err) => {
             toast.error('Failed to load form options')
@@ -57,26 +61,38 @@ export default function WorkOrderForm({ workOrderId, onSave, onCancel, userPid }
 
     // Load work order if editing, but only after options are loaded
     useEffect(() => {
-        if (workOrderId && optionsLoaded) {
-            loadWorkOrder()
+        if (id) {
+            callDbApi('handleGetWorkOrder', { id }).then(response => {
+                loadedWorkOrderRef.current = response
+                if (optionsLoaded) {
+                    setEventCode(response.eventCode)
+                    loadedSubEventRef.current = response.subEvent
+                    setStage(response.stage)
+                    setSubjects(response.subjects || {})
+                    setAccount(response.account)
+                    setLanguages(response.languages || {})
+                }
+            }).catch(error => {
+                console.error('Error loading work order:', error)
+                toast.error('Failed to load work order')
+            })
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [workOrderId, optionsLoaded])
+    }, [id])
 
-    const loadWorkOrder = async () => {
-        try {
-            const response = await callDbApi('handleGetWorkOrder', { workOrderId: workOrderId })
+    // When optionsLoaded becomes true, set form state from loaded work order if present
+    useEffect(() => {
+        if (optionsLoaded && loadedWorkOrderRef.current) {
+            const response = loadedWorkOrderRef.current
             setEventCode(response.eventCode)
             loadedSubEventRef.current = response.subEvent
             setStage(response.stage)
-            setSubject(response.subject)
+            setSubjects(response.subjects || {})
             setAccount(response.account)
             setLanguages(response.languages || {})
-        } catch (error) {
-            console.error('Error loading work order:', error)
-            toast.error('Failed to load work order')
         }
-    }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [optionsLoaded])
 
     // Update sub-events when event changes
     useEffect(() => {
@@ -84,13 +100,15 @@ export default function WorkOrderForm({ workOrderId, onSave, onCancel, userPid }
         if (selectedEvent) {
             const subEvNames = selectedEvent.subEvents ? Object.keys(selectedEvent.subEvents) : []
             setSubEvents(subEvNames)
-            // Only set subEvent if loading from edit
+            // Only set subEvent if loading from edit and the value is present in the new options
             if (loadedSubEventRef.current && subEvNames.includes(loadedSubEventRef.current)) {
                 setSubEvent(loadedSubEventRef.current)
                 loadedSubEventRef.current = null
-            } else if (subEvNames.length === 1) {
+            } else if (!id && subEvNames.length === 1) {
                 setSubEvent(subEvNames[0])
-            } else {
+            } else if (!id) {
+                setSubEvent('')
+            } else if (id && !subEvNames.includes(subEvent)) {
                 setSubEvent('')
             }
         } else {
@@ -108,7 +126,7 @@ export default function WorkOrderForm({ workOrderId, onSave, onCancel, userPid }
                 subEvent,
                 stage,
                 languages,
-                subject,
+                subjects,
                 account,
                 createdBy: userPid,
                 steps: [
@@ -133,10 +151,11 @@ export default function WorkOrderForm({ workOrderId, onSave, onCancel, userPid }
                 ]
             }
 
-            if (workOrderId) {
+            if (id) {
                 await callDbApi('handleUpdateWorkOrder', {
-                    workOrderId: workOrderId,
-                    ...workOrder
+                    id,
+                    userPid,
+                    updates: workOrder
                 })
                 toast.success('Work order updated')
             } else {
@@ -154,14 +173,14 @@ export default function WorkOrderForm({ workOrderId, onSave, onCancel, userPid }
     return (
         <Form onSubmit={handleSubmit} className="text-light">
             <div className="d-flex justify-content-between align-items-center mb-3">
-                {workOrderId && (
+                {id && (
                     <Button
                         variant="danger"
                         onClick={async () => {
                             if (window.confirm('Are you sure you want to delete this work order?')) {
                                 setLoading(true)
                                 try {
-                                    await callDbApi('handleDeleteWorkOrder', { workOrderId })
+                                    await callDbApi('handleDeleteWorkOrder', { id })
                                     toast.success('Work order deleted')
                                     onSave()
                                 } catch (err) {
@@ -240,7 +259,7 @@ export default function WorkOrderForm({ workOrderId, onSave, onCancel, userPid }
                     required
                     className="bg-dark text-light border-secondary"
                 >
-                    <option value="" disabled>Select stage</option>
+                    <option value="">Select Stage</option>
                     {stageList.map(st => (
                         <option key={st} value={st}>{st}</option>
                     ))}
@@ -265,14 +284,19 @@ export default function WorkOrderForm({ workOrderId, onSave, onCancel, userPid }
             </Form.Group>
 
             <Form.Group className="mb-3">
-                <Form.Label>Subject</Form.Label>
-                <Form.Control
-                    type="text"
-                    value={subject}
-                    onChange={e => setSubject(e.target.value)}
-                    required
-                    className="bg-dark text-light border-secondary"
-                />
+                <Form.Label>Subjects</Form.Label>
+                {Object.keys(languages).filter(l => languages[l]).map(lang => (
+                    <div key={lang} className="mb-2">
+                        <Form.Label>{lang.toUpperCase()}</Form.Label>
+                        <Form.Control
+                            type="text"
+                            value={subjects[lang] || ''}
+                            onChange={e => setSubjects(s => ({ ...s, [lang]: e.target.value }))}
+                            placeholder={`Subject for ${lang.toUpperCase()}`}
+                            className="bg-dark text-light border-secondary mb-2"
+                        />
+                    </div>
+                ))}
             </Form.Group>
 
             <Form.Group className="mb-3">

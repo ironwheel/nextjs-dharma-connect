@@ -108,7 +108,7 @@ export default function Home() {
                 </Modal.Header>
                 <Modal.Body className="bg-dark text-light">
                     <WorkOrderForm
-                        workOrderId={editingWorkOrderId}
+                        id={editingWorkOrderId}
                         onSave={handleFormClose}
                         onCancel={handleFormClose}
                         userPid={userPid}
