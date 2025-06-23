@@ -7,6 +7,7 @@ interface WebSocketContextType {
     lastMessage: any;
     send: (data: any) => void;
     error: any;
+    connectionId: string | null;
 }
 
 const WebSocketContext = createContext<WebSocketContextType | undefined>(undefined);

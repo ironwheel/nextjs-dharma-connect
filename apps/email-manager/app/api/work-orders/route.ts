@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid'
 const client = new DynamoDBClient({})
 const docClient = DynamoDBDocumentClient.from(client)
 
-const WORK_ORDERS_TABLE = process.env.WORK_ORDERS_TABLE || 'WorkOrders'
+const WORK_ORDERS_TABLE = process.env.DYNAMODB_TABLE_WORK_ORDERS || 'WorkOrders'
 
 export async function GET() {
     try {
@@ -69,17 +69,6 @@ export async function PUT(request: Request) {
             TableName: WORK_ORDERS_TABLE,
             Key: { id },
             UpdateExpression: 'SET eventCode = :eventCode, subEvent = :subEvent, stage = :stage, language = :language, subject = :subject, account = :account, createdBy = :createdBy, steps = :steps, updatedAt = :updatedAt',
-            ExpressionAttributeValues: {
-                ':eventCode': eventCode,
-                ':subEvent': subEvent,
-                ':stage': stage,
-                ':language': language,
-                ':subject': subject,
-                ':account': account,
-                ':createdBy': createdBy,
-                ':steps': steps,
-                ':updatedAt': new Date().toISOString()
-            },
             ConditionExpression: 'attribute_exists(id) AND #status <> :running',
             ExpressionAttributeNames: {
                 '#status': 'status'

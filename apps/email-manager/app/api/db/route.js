@@ -5,19 +5,24 @@ import {
     handleDeleteWorkOrder,
     handleUpdateWorkOrderStatus,
     handleUpdateStepStatus,
+    handleLockWorkOrder,
+    handleUnlockWorkOrder,
     handleScanTable,
     handleGetConfig,
     handleGetWorkOrder,
-    handleFindParticipant
+    handleFindParticipant,
+    sendWorkOrderMessageAction
 } from '@dharma/backend-core';
 
 export async function POST(request) {
     let status = 200;
     let responseData = {};
+    let action = 'unknown'; // Declare action outside try block
 
     try {
         const body = await request.json();
-        const { action, params, payload } = body;
+        const { action: actionFromBody, params, payload } = body;
+        action = actionFromBody; // Assign the action from body
         // Accept both 'params' and 'payload' for compatibility
         const args = params || payload || {};
 
@@ -25,6 +30,7 @@ export async function POST(request) {
         console.log(`[API /api/db] Args:`, args);
 
         switch (action) {
+            case 'getWorkOrders':
             case 'handleGetWorkOrders':
                 responseData = await handleGetWorkOrders(args);
                 break;
@@ -49,6 +55,15 @@ export async function POST(request) {
             case 'handleUpdateStepStatus':
                 responseData = await handleUpdateStepStatus(args);
                 break;
+            case 'handleLockWorkOrder':
+                responseData = await handleLockWorkOrder(args);
+                break;
+            case 'handleUnlockWorkOrder':
+                responseData = await handleUnlockWorkOrder(args);
+                break;
+            case 'sendWorkOrderMessage':
+                responseData = await sendWorkOrderMessageAction(args);
+                break;
             case 'getEvents':
                 responseData = await handleScanTable({ tableNameKey: 'EVENTS', ...args });
                 break;
@@ -57,16 +72,20 @@ export async function POST(request) {
                 break;
             default:
                 status = 400;
-                responseData = { err: `Unknown database action: '${action}'` };
+                responseData = { error: `Unknown action: ${action}` };
         }
-    } catch (error) {
-        status = 500;
-        responseData = { err: error.message || "Internal server error" };
-        console.error(`[API /api/db] Error:`, error);
-    }
 
-    return new Response(JSON.stringify(responseData), {
-        status,
-        headers: { 'Content-Type': 'application/json' },
-    });
+        return new Response(JSON.stringify({ data: responseData }), {
+            status,
+            headers: { 'Content-Type': 'application/json' }
+        });
+    } catch (error) {
+        console.error(`[API /api/db] Error in action ${action}:`, error);
+        return new Response(JSON.stringify({
+            data: { err: error.message || 'Internal server error' }
+        }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' }
+        });
+    }
 } 

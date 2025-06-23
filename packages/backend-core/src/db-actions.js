@@ -13,7 +13,7 @@ import {
     DeleteCommand,
     // Add other commands like PutCommand, GetCommand, DeleteCommand if needed by your actions
 } from "@aws-sdk/lib-dynamodb";
-import { getDocClient, getTableName } from "./db-client.js"; // Import from the same package
+import { getDocClient, getTableName, sendWorkOrderMessage } from "./db-client.js"; // Import from the same package
 
 // --- Action Handlers ---
 // Each handler takes the payload and constructs the DynamoDB command params
@@ -49,6 +49,9 @@ export {
     handleDeleteWorkOrder,
     handleUpdateWorkOrderStatus,
     handleUpdateStepStatus,
+    handleLockWorkOrder,
+    handleUnlockWorkOrder,
+    sendWorkOrderMessageAction
 };
 
 /**
@@ -709,11 +712,12 @@ async function handleTableCount({ tableNameKey }) {
  * @param {object} payload.subjects - The subjects for the work order.
  * @param {string} payload.account - The account code.
  * @param {string} payload.createdBy - The user PID who created the work order.
+ * @param {string} payload.zoomId - The zoom ID for the work order.
  * @returns {Promise<object>} The created work order.
  * @throws {Error} If required fields are missing or DB error.
  */
 async function handleCreateWorkOrder(payload) {
-    const { eventCode, subEvent, stage, languages, subjects, account, createdBy } = payload;
+    const { eventCode, subEvent, stage, languages, subjects, account, createdBy, zoomId } = payload;
     if (!eventCode || !subEvent || !stage || !languages || !subjects || !account || !createdBy) {
         throw new Error(`Missing required fields for createWorkOrder: ${JSON.stringify(payload)}`);
     }
@@ -730,6 +734,7 @@ async function handleCreateWorkOrder(payload) {
         subjects,
         account,
         createdBy,
+        zoomId: zoomId || null,
         locked: false,
         lockedBy: "",
         steps: [
@@ -758,12 +763,16 @@ async function handleCreateWorkOrder(payload) {
 async function handleGetWorkOrders(payload) {
     const { status } = payload;
     const client = getDocClient();
+    const tableName = getTableName('WORK_ORDERS');
+
+    console.log('[DEBUG] handleGetWorkOrders called with payload:', payload);
+    console.log('[DEBUG] Using table name:', tableName);
 
     let params;
     if (status) {
         // Use GSI if status filter is provided
         params = {
-            TableName: getTableName('WORK_ORDERS'),
+            TableName: tableName,
             IndexName: 'StatusCreatedAtIndex',
             KeyConditionExpression: '#status = :status',
             ExpressionAttributeNames: { '#status': 'status' },
@@ -773,13 +782,16 @@ async function handleGetWorkOrders(payload) {
     } else {
         // Full scan if no status filter
         params = {
-            TableName: getTableName('WORK_ORDERS'),
+            TableName: tableName,
             ScanIndexForward: false,
         };
     }
 
+    console.log('[DEBUG] DynamoDB params:', params);
     const command = status ? new QueryCommand(params) : new ScanCommand(params);
     const data = await client.send(command);
+    console.log('[DEBUG] DynamoDB response:', data);
+    console.log('[DEBUG] Found work orders:', data.Items?.length || 0);
     return { workOrders: data.Items || [] };
 }
 
@@ -999,14 +1011,23 @@ async function handleUpdateWorkOrderStatus(payload) {
  */
 async function handleUpdateStepStatus(payload) {
     const { id, stepName, status, message } = payload;
+    console.log(`[STEP-UPDATE] Starting step status update for work order ${id}`);
+    console.log(`[STEP-UPDATE] Step name: ${stepName}`);
+    console.log(`[STEP-UPDATE] New status: ${status}`);
+    console.log(`[STEP-UPDATE] Message: ${message || 'none'}`);
+    console.log(`[STEP-UPDATE] Timestamp: ${new Date().toISOString()}`);
+
     if (!id || !stepName || !status) {
-        throw new Error("Missing required fields for handleUpdateStepStatus.");
+        console.error(`[STEP-UPDATE] ERROR: Missing required parameters`);
+        console.error(`[STEP-UPDATE] id: ${id}, stepName: ${stepName}, status: ${status}`);
+        throw new Error("Missing 'id', 'stepName', or 'status' in payload for handleUpdateStepStatus.");
     }
 
     const client = getDocClient();
     const now = new Date().toISOString();
 
     // First get the current work order to check step order
+    console.log(`[STEP-UPDATE] Fetching current work order from DynamoDB...`);
     const getParams = {
         TableName: getTableName('WORK_ORDERS'),
         Key: { id }
@@ -1014,15 +1035,30 @@ async function handleUpdateStepStatus(payload) {
     const workOrder = await client.send(new GetCommand(getParams));
 
     if (!workOrder.Item) {
+        console.error(`[STEP-UPDATE] ERROR: Work order ${id} not found in DynamoDB`);
         throw new Error("Work order not found");
     }
 
     const steps = workOrder.Item.steps;
-    const stepIndex = steps.findIndex(s => s.name === stepName);
+    console.log(`[STEP-UPDATE] Current work order found with ${steps.length} steps`);
+    console.log(`[STEP-UPDATE] Looking for step: ${stepName}`);
+    console.log(`[STEP-UPDATE] Steps structure:`, JSON.stringify(steps, null, 2));
+
+    // Check if steps are in DynamoDB format
+    const stepIndex = steps.findIndex(s => {
+        const stepNameValue = s.name?.S || s.name;
+        console.log(`[STEP-UPDATE] Comparing step name: ${stepNameValue} with: ${stepName}`);
+        return stepNameValue === stepName;
+    });
 
     if (stepIndex === -1) {
+        console.error(`[STEP-UPDATE] ERROR: Step ${stepName} not found in work order`);
+        console.error(`[STEP-UPDATE] Available step names:`, steps.map(s => s.name?.S || s.name));
         throw new Error(`Step ${stepName} not found in work order`);
     }
+
+    console.log(`[STEP-UPDATE] Found step at index: ${stepIndex}`);
+    console.log(`[STEP-UPDATE] Current step data:`, JSON.stringify(steps[stepIndex], null, 2));
 
     // Update the current step
     steps[stepIndex] = {
@@ -1032,44 +1068,10 @@ async function handleUpdateStepStatus(payload) {
         isActive: status === 'working'
     };
 
-    // If the step completed successfully, enable the next step
-    if (status === 'complete' && stepIndex < steps.length - 1) {
-        steps[stepIndex + 1].isActive = true;
-        steps[stepIndex + 1].status = 'ready';
-    }
-
-    // If the step failed, disable all subsequent steps
-    if (status === 'error') {
-        for (let i = stepIndex + 1; i < steps.length; i++) {
-            steps[i].isActive = false;
-            steps[i].status = 'ready';
-        }
-    }
-    // If the step is stopped (set to ready), set to 'interrupted' if previously working, else 'ready'.
-    else if (status === 'ready') {
-        // If the previous status was 'working', mark as interrupted
-        if (steps[stepIndex].status === 'working') {
-            steps[stepIndex] = {
-                ...steps[stepIndex],
-                status: 'interrupted',
-                isActive: true,
-                message: message || 'Step was interrupted'
-            };
-        } else {
-            steps[stepIndex] = {
-                ...steps[stepIndex],
-                status: 'ready',
-                isActive: true,
-                message: message || ''
-            };
-        }
-        for (let i = stepIndex + 1; i < steps.length; i++) {
-            steps[i].isActive = false;
-            steps[i].status = 'ready';
-        }
-    }
+    console.log(`[STEP-UPDATE] Updated step data:`, JSON.stringify(steps[stepIndex], null, 2));
 
     // Update the work order in the database
+    console.log(`[STEP-UPDATE] Updating work order in DynamoDB...`);
     const updateParams = {
         TableName: getTableName('WORK_ORDERS'),
         Key: { id },
@@ -1081,5 +1083,167 @@ async function handleUpdateStepStatus(payload) {
         ReturnValues: 'ALL_NEW',
     };
     await client.send(new UpdateCommand(updateParams));
+
+    console.log(`[STEP-UPDATE] Step status update completed successfully`);
+    console.log(`[STEP-UPDATE] Final step data:`, JSON.stringify(steps[stepIndex], null, 2));
+
     return { success: true };
+}
+
+/**
+ * Locks a work order for editing by a specific user.
+ * @async
+ * @function handleLockWorkOrder
+ * @param {object} payload - The request payload.
+ * @param {string} payload.id - The work order ID.
+ * @param {string} payload.userPid - The user PID attempting to lock.
+ * @returns {Promise<object>} Success indicator with lock status.
+ */
+async function handleLockWorkOrder(payload) {
+    const { id, userPid } = payload;
+    if (!id || !userPid) {
+        throw new Error("Missing 'id' or 'userPid' in payload for handleLockWorkOrder.");
+    }
+
+    const client = getDocClient();
+    const now = new Date().toISOString();
+
+    try {
+        // Try to lock the work order - will fail if already locked
+        const params = {
+            TableName: getTableName('WORK_ORDERS'),
+            Key: { id },
+            UpdateExpression: "SET #locked = :locked, #lockedBy = :lockedBy, updatedAt = :updatedAt",
+            ExpressionAttributeNames: {
+                "#locked": "locked",
+                "#lockedBy": "lockedBy"
+            },
+            ExpressionAttributeValues: {
+                ":locked": true,
+                ":lockedBy": userPid,
+                ":updatedAt": now,
+                ":false": false
+            },
+            ConditionExpression: "attribute_exists(id) AND (attribute_not_exists(#locked) OR #locked = :false)",
+            ReturnValues: 'ALL_NEW'
+        };
+
+        const result = await client.send(new UpdateCommand(params));
+
+        // Log the lock action (handle gracefully if audit table doesn't exist)
+        try {
+            await handleLogWorkOrderAudit({
+                workOrderId: id,
+                action: 'locked',
+                userPid,
+                details: { lockedBy: userPid }
+            });
+        } catch (auditError) {
+            console.warn('Failed to log lock audit:', auditError);
+            // Don't fail the lock operation if audit logging fails
+        }
+
+        return {
+            success: true,
+            locked: true,
+            lockedBy: userPid,
+            workOrder: result.Attributes
+        };
+    } catch (error) {
+        if (error.name === 'ConditionalCheckFailedException') {
+            // Work order is already locked
+            return {
+                success: false,
+                locked: true,
+                error: 'Work order is already locked by another user'
+            };
+        }
+        throw error;
+    }
+}
+
+/**
+ * Unlocks a work order.
+ * @async
+ * @function handleUnlockWorkOrder
+ * @param {object} payload - The request payload.
+ * @param {string} payload.id - The work order ID.
+ * @param {string} payload.userPid - The user PID attempting to unlock.
+ * @returns {Promise<object>} Success indicator.
+ */
+async function handleUnlockWorkOrder(payload) {
+    const { id, userPid } = payload;
+    if (!id || !userPid) {
+        throw new Error("Missing 'id' or 'userPid' in payload for handleUnlockWorkOrder.");
+    }
+
+    const client = getDocClient();
+    const now = new Date().toISOString();
+
+    try {
+        // Unlock the work order
+        const params = {
+            TableName: getTableName('WORK_ORDERS'),
+            Key: { id },
+            UpdateExpression: "SET #locked = :locked, #lockedBy = :lockedBy, updatedAt = :updatedAt",
+            ExpressionAttributeNames: {
+                "#locked": "locked",
+                "#lockedBy": "lockedBy"
+            },
+            ExpressionAttributeValues: {
+                ":locked": false,
+                ":lockedBy": null,
+                ":updatedAt": now
+            },
+            ReturnValues: 'ALL_NEW'
+        };
+
+        const result = await client.send(new UpdateCommand(params));
+
+        // Log the unlock action (handle gracefully if audit table doesn't exist)
+        try {
+            await handleLogWorkOrderAudit({
+                workOrderId: id,
+                action: 'unlocked',
+                userPid,
+                details: { unlockedBy: userPid }
+            });
+        } catch (auditError) {
+            console.warn('Failed to log unlock audit:', auditError);
+            // Don't fail the unlock operation if audit logging fails
+        }
+
+        return {
+            success: true,
+            locked: false,
+            workOrder: result.Attributes
+        };
+    } catch (error) {
+        throw error;
+    }
+}
+
+async function sendWorkOrderMessageAction(payload) {
+    const { workOrderId, stepName, action } = payload;
+
+    console.log(`[SQS-SEND] Sending work order message:`, { workOrderId, stepName, action });
+    console.log(`[SQS-SEND] Timestamp: ${new Date().toISOString()}`);
+
+    if (!workOrderId || !stepName || !action) {
+        throw new Error('Missing required parameters: workOrderId, stepName, action');
+    }
+
+    if (!['start', 'stop'].includes(action)) {
+        throw new Error('Invalid action. Must be "start" or "stop"');
+    }
+
+    try {
+        // Send SQS message to email-agent
+        const result = await sendWorkOrderMessage(workOrderId, stepName, action);
+        console.log(`[SQS-SEND] SUCCESS: Sent ${action} message for work order ${workOrderId}, step ${stepName}`);
+        return { success: true, messageId: result.MessageId };
+    } catch (error) {
+        console.error(`[SQS-SEND] ERROR: Failed to send ${action} message for work order ${workOrderId}, step ${stepName}:`, error);
+        throw error;
+    }
 }

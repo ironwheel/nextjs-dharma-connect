@@ -8,20 +8,34 @@ export function useWebSocket(url: string) {
     const [status, setStatus] = useState<WebSocketStatus>('connecting');
     const [lastMessage, setLastMessage] = useState<any>(null);
     const [error, setError] = useState<any>(null);
+    const [connectionId, setConnectionId] = useState<string | null>(null);
 
     const connect = useCallback(() => {
         ws.current = new WebSocket(url);
         setStatus('connecting');
 
-        ws.current.onopen = () => setStatus('open');
-        ws.current.onclose = () => setStatus('closed');
+        ws.current.onopen = () => {
+            setStatus('open');
+            // Send a ping message to get the connection ID
+            ws.current?.send(JSON.stringify({ type: 'ping' }));
+        };
+        ws.current.onclose = () => {
+            setStatus('closed');
+            setConnectionId(null);
+        };
         ws.current.onerror = (e) => {
             setStatus('error');
             setError(e);
+            setConnectionId(null);
         };
         ws.current.onmessage = (event) => {
             try {
-                setLastMessage(JSON.parse(event.data));
+                const data = JSON.parse(event.data);
+                // If this is a connection ID response, store it
+                if (data.type === 'connectionId') {
+                    setConnectionId(data.connectionId);
+                }
+                setLastMessage(data);
             } catch (e) {
                 setLastMessage(event.data);
             }
@@ -49,5 +63,5 @@ export function useWebSocket(url: string) {
         }
     }, []);
 
-    return { status, lastMessage, send, error };
+    return { status, lastMessage, send, error, connectionId };
 } 

@@ -1,15 +1,162 @@
 import os
+import boto3
+import logging
 from dotenv import load_dotenv
+from pathlib import Path
+from typing import Optional
+from pydantic import BaseModel
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from .env files
+env_path = Path('.') / '.env'
+if env_path.is_file():
+    print(f"Loading environment variables from {env_path.resolve()}")
+    load_dotenv(dotenv_path=env_path, override=True)
+else:
+    print("No .env file found, relying on system environment variables.")
 
-# AWS Configuration
+# Configure logging
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# Email configuration
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
+# TODO: These will be fetched from DynamoDB based on work order's email account
+EMAIL_USERNAME = os.getenv('EMAIL_USERNAME', 'stub-email@gmail.com')
+EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD', 'stub-password')
+EMAIL_FROM = os.getenv('EMAIL_FROM', 'noreply@example.com')
+
+# AWS configuration
 AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
-DYNAMODB_TABLE = os.getenv('DYNAMODB_TABLE', 'WORK_ORDERS')
-SQS_QUEUE_URL = os.getenv('WORK_ORDER_QUEUE_URL')
+AWS_PROFILE = os.getenv('AWS_PROFILE', 'default')
+
+# Get AWS credentials from profile
+session = boto3.Session(profile_name=AWS_PROFILE)
+credentials = session.get_credentials()
+AWS_ACCESS_KEY_ID = credentials.access_key
+AWS_SECRET_ACCESS_KEY = credentials.secret_key
+
+# DynamoDB configuration
+DYNAMODB_TABLE = os.getenv('DYNAMODB_TABLE', 'email-work-orders')
+WORK_ORDERS_TABLE = os.getenv('WORK_ORDERS_TABLE')
+CONNECTIONS_TABLE = os.getenv('CONNECTIONS_TABLE')
+EVENTS_TABLE = os.getenv('EVENTS_TABLE', 'events')
+
+# SQS configuration
+SQS_QUEUE_URL = os.getenv('SQS_QUEUE_URL')
+
+# WebSocket configuration
 WEBSOCKET_API_URL = os.getenv('WEBSOCKET_API_URL')
+
+# S3 configuration
+S3_BUCKET = os.getenv('S3_BUCKET')
+
+# Mailchimp configuration
+MAILCHIMP_API_KEY = os.getenv('MAILCHIMP_API_KEY')
+MAILCHIMP_AUDIENCE = os.getenv('MAILCHIMP_AUDIENCE')
+MAILCHIMP_REPLY_TO = os.getenv('MAILCHIMP_REPLY_TO')
+MAILCHIMP_SERVER_PREFIX = os.getenv('MAILCHIMP_SERVER_PREFIX')
+
+# Email templates configuration
+TEMPLATES_DIR = os.getenv('TEMPLATES_DIR', str(Path(__file__).parent / 'templates'))
+
+# Required environment variables
+REQUIRED_ENV_VARS = [
+    'AWS_PROFILE',
+    'SQS_QUEUE_URL',
+    'WEBSOCKET_API_URL',
+    'WORK_ORDERS_TABLE',
+    'CONNECTIONS_TABLE',
+    'S3_BUCKET',
+    'MAILCHIMP_API_KEY',
+    'MAILCHIMP_AUDIENCE',
+    'MAILCHIMP_REPLY_TO',
+    'MAILCHIMP_SERVER_PREFIX'
+]
+
+def validate_config():
+    """Validate that all required environment variables are set"""
+    missing_vars = [var for var in REQUIRED_ENV_VARS if not os.getenv(var)]
+    if missing_vars:
+        raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+    
+    # Validate AWS credentials
+    if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
+        raise ValueError(f"Could not load AWS credentials from profile '{AWS_PROFILE}'. Please ensure the profile exists and has valid credentials.")
+
+# Validate configuration on import
+validate_config()
 
 # Agent Configuration
 POLL_INTERVAL = int(os.getenv('POLL_INTERVAL', '5'))  # seconds
-STOP_CHECK_INTERVAL = int(os.getenv('STOP_CHECK_INTERVAL', '1'))  # seconds 
+STOP_CHECK_INTERVAL = int(os.getenv('STOP_CHECK_INTERVAL', '1'))  # seconds
+
+# Mailchimp Configuration
+MAILCHIMP_API_KEY = os.getenv('MAILCHIMP_API_KEY')
+MAILCHIMP_AUDIENCE = os.getenv('MAILCHIMP_AUDIENCE')
+MAILCHIMP_REPLY_TO = os.getenv('MAILCHIMP_REPLY_TO')
+MAILCHIMP_SERVER_PREFIX = os.getenv('MAILCHIMP_SERVER_PREFIX')
+
+# Validate required environment variables
+required_vars = [
+    # AWS Configuration
+    'WORK_ORDERS_TABLE',
+    'CONNECTIONS_TABLE',
+    'SQS_QUEUE_URL',
+    'WEBSOCKET_API_URL',
+    'S3_BUCKET',
+    # Mailchimp Configuration
+    'MAILCHIMP_API_KEY',
+    'MAILCHIMP_AUDIENCE',
+    'MAILCHIMP_REPLY_TO',
+    'MAILCHIMP_SERVER_PREFIX'
+]
+
+missing_vars = [var for var in required_vars if not os.getenv(var)]
+if missing_vars:
+    raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+
+class AppConfig(BaseModel):
+    """
+    Pydantic model for application configuration.
+    Loads settings from environment variables.
+    """
+    aws_region: str = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+    work_orders_table: str = os.environ.get("WORK_ORDERS_TABLE")
+    sqs_queue_url: str = os.environ.get("SQS_QUEUE_URL")
+    websocket_api_url: Optional[str] = os.environ.get("WEBSOCKET_API_URL")
+    connections_table: str = os.environ.get("CONNECTIONS_TABLE")
+    events_table: str = os.environ.get("EVENTS_TABLE", "events")
+    openai_api_key: Optional[str] = os.environ.get("OPENAI_API_KEY")
+
+    class Config:
+        # Pydantic will treat these as case-insensitive
+        case_sensitive = False
+
+# Create a single config instance to be used throughout the application.
+config = AppConfig()
+
+# Validate that required variables are loaded.
+required_attributes = ['work_orders_table', 'sqs_queue_url', 'connections_table']
+missing_vars = [attr for attr in required_attributes if not getattr(config, attr)]
+
+if missing_vars:
+    # We report the uppercase version of the attribute name to match the .env file convention.
+    missing_env_vars = [v.upper() for v in missing_vars]
+    raise ValueError(f"Missing required environment variables: {', '.join(missing_env_vars)}")
+
+print("Configuration loaded successfully:")
+print(f"  - SQS Queue URL: {'*' * 10 if config.sqs_queue_url else 'Not set'}")
+print(f"  - Work Orders Table: {config.work_orders_table}")
+print(f"  - Connections Table: {config.connections_table}")
+
+# You can now import 'config' from this module in other parts of the application.
+# from src.config import config
+#
+# DYNAMODB_TABLE = config.dynamodb_table_name
+# SQS_QUEUE_URL = config.sqs_queue_url
+
+# ... existing code ... 

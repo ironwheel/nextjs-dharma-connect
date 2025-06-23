@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { Table, Button, Badge } from 'react-bootstrap'
 import { toast } from 'react-toastify'
 import { callDbApi } from '@dharma/shared/src/clientApi'
 import { FiPlus } from 'react-icons/fi'
 import { useWebSocketContext } from '../context/WebSocketProvider'
+import { unmarshall } from '@aws-sdk/util-dynamodb'
 
 interface WorkOrder {
     id: string
@@ -15,29 +16,34 @@ interface WorkOrder {
     subjects?: { [lang: string]: string }
     account: string
     createdBy: string
+    zoomId?: string
+    inPerson?: boolean
     steps: Array<{
         name: 'Prepare' | 'Test' | 'Send'
-        status: 'ready' | 'working' | 'complete' | 'error' | 'interrupted'
+        status: 'ready' | 'working' | 'complete' | 'error' | 'interrupted' | 'exception'
         message: string
         isActive: boolean
     }>
     createdAt: string
     updatedAt: string
+    locked: boolean
+    lockedBy?: string
 }
 
 interface WorkOrderListProps {
     onEdit: (id: string) => void
     onNew: () => void
     refreshTrigger?: number
+    userPid: string
 }
 
-export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0 }: WorkOrderListProps) {
+export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userPid }: WorkOrderListProps) {
     const [workOrders, setWorkOrders] = useState<WorkOrder[]>([])
     const [loading, setLoading] = useState(true)
     const [activeSteps, setActiveSteps] = useState<Record<string, boolean>>({})
     const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
     const [hoveredRow, setHoveredRow] = useState<string | null>(null)
-    const { lastMessage } = useWebSocketContext()
+    const { lastMessage, status, connectionId } = useWebSocketContext()
 
     const loadParticipantName = async (pid: string) => {
         if (!pid || participantNames[pid]) return
@@ -55,34 +61,196 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0 }: Wor
 
     const loadWorkOrders = async () => {
         try {
-            const response = await callDbApi('handleGetWorkOrders', {})
-            setWorkOrders(response?.workOrders ?? [])
-            // Fetch participant names for all unique createdBy PIDs
-            const pids = Array.from(new Set((response?.workOrders ?? []).map((wo: WorkOrder) => wo.createdBy)))
-            pids.forEach(pid => { if (typeof pid === 'string' && pid && !participantNames[pid]) loadParticipantName(pid) })
+            setLoading(true);
+            console.log('[DEBUG] Loading work orders...');
+            const response = await callDbApi('getWorkOrders', {});
+            console.log('[DEBUG] API response:', response);
+            console.log('[DEBUG] Response type:', typeof response);
+            console.log('[DEBUG] Response keys:', Object.keys(response || {}));
+
+            // The API returns { data: { workOrders: [...] } }
+            const orders = response?.workOrders || [];
+            console.log('[DEBUG] Work orders found:', orders.length, orders);
+            console.log('[DEBUG] Orders type:', typeof orders);
+            console.log('[DEBUG] Is array:', Array.isArray(orders));
+
+            setWorkOrders(orders);
+
+            // Load participant names for all work orders
+            orders.forEach(order => {
+                if (order.createdBy) {
+                    loadParticipantName(order.createdBy);
+                }
+            });
         } catch (error) {
-            console.error('Error loading work orders:', error)
-            toast.error('Failed to load work orders')
-            setWorkOrders([])
+            console.error('[DEBUG] Error loading work orders:', error);
         } finally {
-            setLoading(false)
+            setLoading(false);
         }
-    }
+    };
 
     useEffect(() => {
         loadWorkOrders()
     }, [refreshTrigger])
 
+    // Debug effect to log when workOrders state changes
+    useEffect(() => {
+        console.log('[DEBUG] workOrders state changed:', workOrders.length, workOrders);
+    }, [workOrders]);
+
     useEffect(() => {
         if (lastMessage && lastMessage.type === 'workOrderUpdate') {
-            // Optionally filter by eventName or id
-            loadWorkOrders()
+            console.log('Received WebSocket work order update:', lastMessage)
+            console.log('[DEBUG] Full WebSocket message structure:', JSON.stringify(lastMessage, null, 2))
+
+            // Handle DynamoDB Stream messages (from DynamoDB Streams)
+            const newImage = lastMessage.newImage
+            if (newImage) {
+                const updatedWorkOrder = unmarshall(newImage) as WorkOrder
+                console.log('Unmarshalled work order update:', updatedWorkOrder)
+                console.log('[DEBUG] Work order lock status after update:', updatedWorkOrder.locked, 'LockedBy:', updatedWorkOrder.lockedBy);
+                console.log('[DEBUG] Steps data from DynamoDB Stream:', updatedWorkOrder.steps);
+
+                if (updatedWorkOrder) {
+                    setWorkOrders(prevOrders => {
+                        const index = prevOrders.findIndex(wo => wo.id === updatedWorkOrder.id)
+
+                        if (index === -1) {
+                            // If it's a new work order, add it to the list and sort
+                            const newOrders = [updatedWorkOrder, ...prevOrders]
+                            newOrders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                            return newOrders
+                        }
+
+                        // Simply update with the real data from DynamoDB
+                        const newOrders = [...prevOrders]
+                        newOrders[index] = updatedWorkOrder;
+
+                        console.log('Updated work order in list:', newOrders[index])
+                        return newOrders
+                    })
+                }
+            }
+
+            // Handle direct WebSocket messages (from email-agent)
+            const workOrder = lastMessage.workOrder
+            if (workOrder) {
+                console.log('Received direct work order update:', workOrder)
+                console.log('[DEBUG] Direct work order lock status:', workOrder.locked, 'LockedBy:', workOrder.lockedBy);
+                console.log('[DEBUG] Steps data from direct message:', workOrder.steps);
+                console.log('[DEBUG] Full work order data:', JSON.stringify(workOrder, null, 2));
+
+                // Convert the work order data to the expected format
+                const updatedWorkOrder: WorkOrder = {
+                    id: workOrder.id,
+                    eventCode: workOrder.eventCode || '',
+                    subEvent: workOrder.subEvent || '',
+                    stage: workOrder.stage || '',
+                    languages: workOrder.languages || {},
+                    subjects: workOrder.subjects || {},
+                    account: workOrder.account || '',
+                    createdBy: workOrder.createdBy || '',
+                    steps: workOrder.steps || [],
+                    createdAt: workOrder.createdAt || '',
+                    updatedAt: workOrder.updatedAt || '',
+                    locked: workOrder.locked || false,
+                    lockedBy: workOrder.lockedBy,
+                    zoomId: workOrder.zoomId,
+                    inPerson: workOrder.inPerson,
+                }
+
+                console.log('[DEBUG] Converted work order for state update:', updatedWorkOrder);
+                console.log('[DEBUG] Steps after conversion:', updatedWorkOrder.steps);
+                console.log('[DEBUG] Locked status after conversion:', updatedWorkOrder.locked, 'lockedBy:', updatedWorkOrder.lockedBy);
+
+                setWorkOrders(prevOrders => {
+                    const index = prevOrders.findIndex(wo => wo.id === updatedWorkOrder.id)
+
+                    if (index === -1) {
+                        // If it's a new work order, add it to the list and sort
+                        const newOrders = [updatedWorkOrder, ...prevOrders]
+                        newOrders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                        return newOrders
+                    }
+
+                    // Simply update with the real data from DynamoDB
+                    const newOrders = [...prevOrders]
+                    newOrders[index] = updatedWorkOrder;
+
+                    console.log('Updated work order in list:', newOrders[index])
+                    return newOrders
+                })
+            }
         }
     }, [lastMessage])
 
-    const getStatusBadgeClass = (status: string, isActive: boolean) => {
-        if ((!isActive && status.toLowerCase() === 'ready') || status.toLowerCase() === 'ready') return 'bg-secondary text-dark'; // light gray for pending and ready
-        switch (status.toLowerCase()) {
+    const handleRowClick = async (workOrder: WorkOrder) => {
+        console.log('[DEBUG] Row clicked for work order:', workOrder.id, 'Locked:', workOrder.locked, 'LockedBy:', workOrder.lockedBy);
+
+        if (workOrder.locked) {
+            // Don't allow editing if locked
+            console.log('Work order is locked, cannot edit:', workOrder.id)
+            return
+        }
+
+        console.log('Attempting to lock work order:', workOrder.id, 'for user:', userPid)
+
+        // Try to lock the work order before opening for edit
+        try {
+            const lockResult = await callDbApi('handleLockWorkOrder', {
+                id: workOrder.id,
+                userPid
+            })
+
+            console.log('Lock result:', lockResult)
+
+            if (lockResult.success && lockResult.workOrder) {
+                // Update state immediately with the returned work order
+                setWorkOrders(prevOrders => {
+                    const index = prevOrders.findIndex(wo => wo.id === (lockResult.workOrder as WorkOrder).id)
+                    if (index === -1) return prevOrders // Should not happen
+                    const newOrders = [...prevOrders]
+                    newOrders[index] = lockResult.workOrder as WorkOrder
+                    console.log('[DEBUG] Updated work order in state after lock:', newOrders[index])
+                    return newOrders
+                })
+
+                // Successfully locked, proceed with edit
+                console.log('Successfully locked work order, opening edit dialog')
+                onEdit(workOrder.id)
+            } else {
+                // Failed to lock (probably locked by another user)
+                console.log('Failed to lock work order:', lockResult.error)
+                toast.error(lockResult.error || 'Work order is locked by another user')
+                // Optional: Force a refresh in case our state is stale
+                loadWorkOrders()
+            }
+        } catch (error) {
+            console.error('Error locking work order:', error)
+            toast.error('Failed to lock work order')
+        }
+    }
+
+    const getStatusBadgeClass = (status: string | { value: string } | undefined, isActive: boolean) => {
+        // Handle undefined or null status
+        if (!status) {
+            console.warn('Status is undefined or null, defaulting to secondary')
+            return 'bg-secondary'
+        }
+
+        // Handle both string and enum values
+        const statusStr = typeof status === 'string' ? status : status.value
+
+        if (!statusStr) {
+            console.warn('Status string is empty, defaulting to secondary')
+            return 'bg-secondary'
+        }
+
+        if ((!isActive && statusStr.toLowerCase() === 'ready') || statusStr.toLowerCase() === 'ready') {
+            return 'bg-secondary text-dark' // light gray for pending and ready
+        }
+
+        switch (statusStr.toLowerCase()) {
             case 'working':
                 return 'bg-info'
             case 'complete':
@@ -91,23 +259,83 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0 }: Wor
                 return 'bg-danger'
             case 'interrupted':
                 return 'bg-warning'
+            case 'exception':
+                return 'bg-purple' // Purple for exception status
             default:
+                console.warn('Unknown status:', statusStr)
                 return 'bg-secondary'
         }
     }
 
     const handleStepAction = async (id: string, stepName: 'Prepare' | 'Test' | 'Send', isStarting: boolean) => {
+        console.log(`[STEP-ACTION] Starting step action for work order ${id}, step ${stepName}, isStarting: ${isStarting}`);
+        console.log(`[STEP-ACTION] Timestamp: ${new Date().toISOString()}`);
+
         try {
-            await callDbApi('handleUpdateStepStatus', {
-                id,
-                stepName,
-                status: isStarting ? 'working' : 'interrupted',
-                message: isStarting ? 'Step started' : 'Step was interrupted'
-            })
-            loadWorkOrders()
+            // Find the current step to check if it's a restart of a failed step
+            const workOrder = workOrders.find(wo => wo.id === id);
+            const step = workOrder?.steps.find(s => {
+                const stepNameStr = typeof s.name === 'string' ? s.name :
+                    (s.name && typeof s.name === 'object' && 'S' in s.name) ? (s.name as { S: string }).S : '';
+                return stepNameStr === stepName;
+            });
+
+            const stepStatus = typeof step?.status === 'string' ? step.status :
+                (step?.status && typeof step?.status === 'object' && 'S' in step?.status) ?
+                    (step?.status as { S: string }).S : '';
+
+            console.log(`[STEP-ACTION] Current step status: ${stepStatus}`);
+            console.log(`[STEP-ACTION] Step data:`, step);
+
+            // If starting a step, implement optimistic UI update
+            if (isStarting) {
+                // Immediately update the UI to show "working" status
+                setWorkOrders(prevOrders => {
+                    return prevOrders.map(wo => {
+                        if (wo.id === id) {
+                            return {
+                                ...wo,
+                                steps: wo.steps.map(s => {
+                                    const stepNameStr = typeof s.name === 'string' ? s.name :
+                                        (s.name && typeof s.name === 'object' && 'S' in s.name) ? (s.name as { S: string }).S : '';
+
+                                    if (stepNameStr === stepName) {
+                                        return {
+                                            ...s,
+                                            status: 'working',
+                                            message: 'Beginning work...',
+                                            isActive: true
+                                        };
+                                    }
+                                    return s;
+                                })
+                            };
+                        }
+                        return wo;
+                    });
+                });
+
+                console.log(`[STEP-ACTION] Applied optimistic update for ${id}-${stepName}`);
+            }
+
+            // Determine the action to send to the email-agent
+            const action = isStarting ? 'start' : 'stop';
+            console.log(`[STEP-ACTION] Sending ${action} action to email-agent for work order ${id}, step ${stepName}`);
+
+            // Send SQS message to email-agent - let the agent handle all step state updates
+            await callDbApi('sendWorkOrderMessage', {
+                workOrderId: id,
+                stepName: stepName,
+                action: action
+            });
+
+            console.log(`[STEP-ACTION] SUCCESS: Sent ${action} message to email-agent for work order ${id}, step ${stepName}`);
+
         } catch (error) {
-            console.error('Error updating step status:', error)
-            toast.error('Failed to update step status')
+            console.error(`[STEP-ACTION] ERROR: Failed to send ${isStarting ? 'start' : 'stop'} message to email-agent:`, error);
+
+            // Show error to user
+            alert(`Failed to ${isStarting ? 'start' : 'stop'} step: ${error}`);
         }
     }
 
@@ -118,14 +346,26 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0 }: Wor
         return (
             <div className="bg-dark text-light min-vh-100">
                 <div className="d-flex justify-content-between align-items-center mb-3">
-                    <Button
-                        variant="primary"
-                        onClick={onNew}
-                        style={{ borderRadius: '50%', width: 40, height: 40, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                        aria-label="New Work Order"
-                    >
-                        <FiPlus size={24} />
-                    </Button>
+                    <div className="d-flex align-items-center">
+                        <Button
+                            variant="primary"
+                            onClick={onNew}
+                            style={{ borderRadius: '50%', width: 40, height: 40, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            aria-label="New Work Order"
+                        >
+                            <FiPlus size={24} />
+                        </Button>
+                        <div className="ms-3">
+                            <Badge bg={status === 'open' ? 'success' : status === 'connecting' ? 'warning' : 'danger'}>
+                                WebSocket: {status}
+                            </Badge>
+                            {connectionId && (
+                                <Badge bg="info" className="ms-2">
+                                    ID: {connectionId}
+                                </Badge>
+                            )}
+                        </div>
+                    </div>
                     <div></div>
                 </div>
                 <div className="d-flex justify-content-center align-items-center" style={{ height: '300px', color: '#bbb', fontSize: '1.5rem' }}>
@@ -138,106 +378,185 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0 }: Wor
     return (
         <div className="bg-dark text-light">
             <div className="d-flex justify-content-between align-items-center mb-3">
-                <Button
-                    variant="primary"
-                    onClick={onNew}
-                    style={{ borderRadius: '50%', width: 40, height: 40, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                    aria-label="New Work Order"
-                >
-                    <FiPlus size={24} />
-                </Button>
+                <div className="d-flex align-items-center">
+                    <Button
+                        variant="primary"
+                        onClick={onNew}
+                        style={{ borderRadius: '50%', width: 40, height: 40, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        aria-label="New Work Order"
+                    >
+                        <FiPlus size={24} />
+                    </Button>
+                    <div className="ms-3">
+                        <Badge bg={status === 'open' ? 'success' : status === 'connecting' ? 'warning' : 'danger'}>
+                            WebSocket: {status}
+                        </Badge>
+                        {connectionId && (
+                            <Badge bg="info" className="ms-2">
+                                ID: {connectionId}
+                            </Badge>
+                        )}
+                    </div>
+                </div>
                 <div></div>
             </div>
             <div style={{ height: '600px', overflowY: 'auto' }}>
                 <Table borderless hover variant="dark" className="mb-0">
                     <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: '#212529' }}>
                         <tr style={{ border: 'none' }}>
+                            <th style={{ border: 'none' }}>Status</th>
                             <th style={{ border: 'none' }}>Event Code</th>
                             <th style={{ border: 'none' }}>Sub Event</th>
                             <th style={{ border: 'none' }}>Stage</th>
-                            <th style={{ border: 'none' }}>Language(s)</th>
-                            <th style={{ border: 'none' }}>Subject(s)</th>
+                            <th style={{ border: 'none' }}>Languages</th>
                             <th style={{ border: 'none' }}>Email Account</th>
                             <th style={{ border: 'none' }}>Created By</th>
+                            <th style={{ border: 'none' }}>Zoom/Type</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {workOrders.map((workOrder, idx) => (
+                        {workOrders.map(workOrder => (
                             <React.Fragment key={workOrder.id}>
-                                {idx > 0 && (
-                                    <tr>
-                                        <td colSpan={7} style={{ height: 24, border: 'none', background: 'transparent' }}></td>
-                                    </tr>
-                                )}
                                 <tr
+                                    onClick={() => handleRowClick(workOrder)}
                                     onMouseEnter={() => setHoveredRow(workOrder.id)}
                                     onMouseLeave={() => setHoveredRow(null)}
-                                    style={{ cursor: 'pointer', border: 'none' }}
-                                    onClick={() => onEdit(workOrder.id)}
+                                    style={{ cursor: workOrder.locked ? 'not-allowed' : 'pointer' }}
                                 >
-                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.eventCode}</td>
+                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
+                                        <Badge
+                                            bg={workOrder.locked ? 'danger' : 'success'}
+                                            className="px-3 py-2"
+                                        >
+                                            {workOrder.locked ? 'Locked' : 'Edit'}
+                                        </Badge>
+                                    </td>
+                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
+                                        {workOrder.eventCode}
+                                    </td>
                                     <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.subEvent}</td>
                                     <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.stage}</td>
                                     <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{Object.keys(workOrder.languages || {}).join(',')}</td>
-                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
-                                        {workOrder.subjects
-                                            ? Object.entries(workOrder.subjects)
-                                                .filter(([lang, _]) => workOrder.languages?.[lang])
-                                                .map(([lang, subj]) => `${lang.toUpperCase()}: ${subj}`)
-                                                .join(', ')
-                                            : ''}
-                                    </td>
                                     <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.account}</td>
                                     <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{participantNames[workOrder.createdBy] || workOrder.createdBy}</td>
+                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
+                                        {workOrder.stage === 'reg-confirm' ? (
+                                            workOrder.inPerson ? (
+                                                <Badge bg="success">In-Person</Badge>
+                                            ) : workOrder.zoomId ? (
+                                                <span title={`Zoom ID: ${workOrder.zoomId}`}>Zoom</span>
+                                            ) : (
+                                                <span className="text-muted">No Zoom ID</span>
+                                            )
+                                        ) : (
+                                            <span className="text-muted">-</span>
+                                        )}
+                                    </td>
                                 </tr>
                                 <tr>
-                                    <td colSpan={7} style={{ padding: 0, background: 'transparent', border: 'none' }}>
-                                        {workOrder.steps.map((step, index) => {
-                                            const isPending = !step.isActive && step.status === 'ready';
-                                            const isReadyActive = step.isActive && step.status === 'ready';
-                                            const isComplete = step.status === 'complete';
-                                            const isInterrupted = step.status === 'interrupted';
-                                            const isError = step.status === 'error';
+                                    <td colSpan={9} style={{ padding: 0, background: 'transparent', border: 'none' }}>
+                                        {(workOrder.steps || []).map((step, index) => {
+                                            // Helper function to extract string values from DynamoDB format or plain strings
+                                            const extractString = (value: any): string => {
+                                                if (typeof value === 'string') return value;
+                                                if (value && typeof value === 'object' && 'S' in value) return (value as { S: string }).S;
+                                                if (value && typeof value === 'object' && 'value' in value) return (value as { value: string }).value;
+                                                return String(value || '');
+                                            };
+
+                                            // Extract all step properties as strings
+                                            const stepName = extractString(step.name);
+                                            const stepStatus = extractString(step.status);
+                                            const stepMessage = extractString(step.message);
+                                            const stepIsActive = typeof step.isActive === 'boolean' ? step.isActive :
+                                                (step.isActive && typeof step.isActive === 'object' && 'BOOL' in step.isActive) ?
+                                                    (step.isActive as { BOOL: boolean }).BOOL : false;
+
+                                            // Debug logging for step data
+                                            if (stepStatus === 'error' || stepMessage) {
+                                                console.log('[DEBUG] Step data for', workOrder.id, stepName, ':', {
+                                                    step,
+                                                    stepName,
+                                                    stepStatus,
+                                                    stepMessage,
+                                                    stepIsActive,
+                                                    rawMessage: step.message,
+                                                    messageType: typeof step.message,
+                                                    messageKeys: step.message && typeof step.message === 'object' ? Object.keys(step.message) : 'N/A'
+                                                });
+                                            }
+
+                                            const isPending = !stepIsActive && stepStatus === 'ready';
+                                            const isReadyActive = stepIsActive && stepStatus === 'ready';
+                                            const isComplete = stepStatus === 'complete';
+                                            const isInterrupted = stepStatus === 'interrupted';
+                                            const isError = stepStatus === 'error';
+                                            const isException = stepStatus === 'exception';
+                                            const isWorking = stepStatus === 'working';
+
                                             const stepTextColor = (isPending || isComplete) ? '#bbb' : '#fff';
                                             const indentColor = (isPending || isComplete) ? '#bbb' : '#fff';
+
+                                            // Button styling based on status
+                                            let buttonVariant = 'primary';
+                                            let buttonText = 'Start';
+                                            let buttonDisabled = false;
+
+                                            if (isWorking) {
+                                                buttonVariant = 'danger';
+                                                buttonText = 'Stop';
+                                            } else if (isInterrupted || isError || isException || isComplete) {
+                                                buttonVariant = 'primary';
+                                                buttonText = 'Restart';
+                                            } else if (isReadyActive) {
+                                                buttonVariant = 'primary';
+                                                buttonText = 'Start';
+                                            } else {
+                                                buttonVariant = 'primary';
+                                                buttonText = 'Start';
+                                                buttonDisabled = true; // Disabled for pending steps
+                                            }
+
                                             const badgeStyle = isPending || isComplete
                                                 ? { color: '#444', background: '#ccc', border: '1px solid #bbb' }
                                                 : isInterrupted
                                                     ? { color: '#fff', background: '#ff9800', border: '1px solid #ff9800' }
                                                     : isError
                                                         ? { color: '#fff', background: '#dc3545', border: '1px solid #dc3545' }
-                                                        : {};
-                                            const badgeBg = isReadyActive ? 'bg-primary' : isInterrupted ? '' : isError ? '' : getStatusBadgeClass(step.status, step.isActive);
+                                                        : isException
+                                                            ? { color: '#fff', background: '#6f42c1', border: '1px solid #6f42c1' }
+                                                            : {};
+                                            const badgeBg = isReadyActive ? 'bg-primary' : isInterrupted ? '' : isError ? '' : isException ? '' : getStatusBadgeClass(stepStatus, stepIsActive);
                                             const messageColor = isComplete ? '#bbb' : '#fff';
-                                            const prevStepComplete = index === 0 || workOrder.steps[index - 1].status === 'complete';
-                                            const canStart = !isComplete && (prevStepComplete || isError || isInterrupted);
+                                            const prevStepComplete = index === 0 || (workOrder.steps && workOrder.steps[index - 1] && extractString(workOrder.steps[index - 1].status) === 'complete');
+                                            const canStart = prevStepComplete || isError || isInterrupted || isException || isComplete;
                                             return (
-                                                <div key={`${workOrder.id}-${step.name}`} style={{ background: '#2c3034', padding: '12px' }}>
+                                                <div key={`${workOrder.id}-${stepName}`} style={{ background: '#2c3034', padding: '12px' }}>
                                                     <div className="d-flex align-items-center">
                                                         <div style={{ flex: 2 }} className="ps-5">
                                                             <div className="d-flex align-items-center">
                                                                 <div className="me-2" style={{ color: isInterrupted ? '#fff' : indentColor }}>└─</div>
-                                                                <div style={{ color: isInterrupted ? '#fff' : stepTextColor }}>{step.name}</div>
+                                                                <div style={{ color: isInterrupted ? '#fff' : stepTextColor }}>{stepName}</div>
                                                             </div>
                                                         </div>
                                                         <div style={{ flex: 1 }}>
                                                             <Button
-                                                                variant={step.status === 'working' ? 'danger' : isComplete ? 'secondary' : 'primary'}
+                                                                variant={buttonVariant}
                                                                 size="sm"
-                                                                onClick={e => { e.stopPropagation(); handleStepAction(workOrder.id, step.name, step.status !== 'working') }}
-                                                                disabled={!canStart}
-                                                                style={isComplete ? { backgroundColor: '#bbb', color: '#888', borderColor: '#bbb', cursor: 'not-allowed' } : {}}
+                                                                onClick={e => { e.stopPropagation(); handleStepAction(workOrder.id, stepName as 'Prepare' | 'Test' | 'Send', !isWorking) }}
+                                                                disabled={buttonDisabled || !canStart}
+                                                                style={isComplete ? { backgroundColor: '#0d6efd', color: '#fff', borderColor: '#0d6efd' } : {}}
                                                             >
-                                                                {(isInterrupted || isError) ? 'Restart' : step.status === 'working' ? 'Stop' : 'Start'}
+                                                                {buttonText}
                                                             </Button>
                                                         </div>
                                                         <div style={{ flex: 1 }}>
                                                             <Badge bg={badgeBg} className="px-3 py-2" style={badgeStyle}>
-                                                                {isPending ? 'pending' : step.status}
+                                                                {isPending ? 'pending' : stepStatus}
                                                             </Badge>
                                                         </div>
                                                         <div style={{ flex: 4, color: isInterrupted ? '#fff' : messageColor }}>
-                                                            {step.message}
+                                                            {stepMessage}
                                                         </div>
                                                     </div>
                                                 </div>

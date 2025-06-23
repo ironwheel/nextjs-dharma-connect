@@ -52,6 +52,9 @@ export {
     handleDeleteWorkOrder,
     handleUpdateWorkOrderStatus,
     handleUpdateStepStatus,
+    handleLockWorkOrder,
+    handleUnlockWorkOrder,
+    sendWorkOrderMessageAction,
 } from './db-actions.js';
 
 // Export from auth-logic.js

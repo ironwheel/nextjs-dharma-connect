@@ -3,10 +3,14 @@ import signal
 import os
 import boto3
 from .agent import EmailAgent
+from .config import POLL_INTERVAL, STOP_CHECK_INTERVAL, DYNAMODB_TABLE, config
+from .aws_client import AWSClient, SQS_QUEUE_URL
 
 def force_unlock_all_work_orders():
-    dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table(os.environ['DYNAMODB_TABLE'])
+    """Force-unlocks all work orders that are in a locked state."""
+    print("[DEBUG] Forcibly unlocking all work orders...")
+    dynamodb = boto3.resource('dynamodb', region_name=config.aws_region)
+    table = dynamodb.Table(config.work_orders_table)
     scan_kwargs = {
         'FilterExpression': 'locked = :true',
         'ExpressionAttributeValues': {':true': True}
@@ -21,9 +25,6 @@ def force_unlock_all_work_orders():
     print(f"Force-unlocked {len(response.get('Items', []))} work orders.")
 
 async def main():
-    # Create and start the agent
-    agent = EmailAgent()
-    
     # Set up signal handlers
     def signal_handler(sig, frame):
         print("\nShutting down...")
@@ -33,10 +34,13 @@ async def main():
     signal.signal(signal.SIGTERM, signal_handler)
     
     try:
+        # Create and start the agent (EmailAgent constructor handles pipeline purging)
+        agent = EmailAgent()
         await agent.start()
     except Exception as e:
         print(f"Error in main: {e}")
-        await agent.stop()
+        if 'agent' in locals():
+            await agent.stop()
 
 if __name__ == "__main__":
     force_unlock_all_work_orders()

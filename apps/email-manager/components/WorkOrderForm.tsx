@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useRef } from 'react'
-import { Form, Button, Spinner, Card } from 'react-bootstrap'
+import React, { useEffect, useState, useRef, useCallback } from 'react'
+import { Form, Button, Spinner, Card, Badge } from 'react-bootstrap'
 import { toast } from 'react-toastify'
 import { callDbApi } from '@dharma/shared/src/clientApi'
 import { FiTrash2 } from 'react-icons/fi'
@@ -24,6 +24,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
     const [subjects, setSubjects] = useState<{ [lang: string]: string }>({})
     const [accountList, setAccountList] = useState<string[]>([])
     const [account, setAccount] = useState('')
+    const [zoomId, setZoomId] = useState('')
+    const [inPerson, setInPerson] = useState(false)
     const [optionsLoaded, setOptionsLoaded] = useState(false)
     const loadedSubEventRef = useRef<string | null>(null)
     const loadedWorkOrderRef = useRef<any>(null)
@@ -71,6 +73,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                     setSubjects(response.subjects || {})
                     setAccount(response.account)
                     setLanguages(response.languages || {})
+                    setZoomId(response.zoomId || '')
+                    setInPerson(response.inPerson || false)
                 }
             }).catch(error => {
                 console.error('Error loading work order:', error)
@@ -90,6 +94,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
             setSubjects(response.subjects || {})
             setAccount(response.account)
             setLanguages(response.languages || {})
+            setZoomId(response.zoomId || '')
+            setInPerson(response.inPerson || false)
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [optionsLoaded])
@@ -100,6 +106,11 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
         if (selectedEvent) {
             const subEvNames = selectedEvent.subEvents ? Object.keys(selectedEvent.subEvents) : []
             setSubEvents(subEvNames)
+
+            // Check if this event is in-person
+            const isInPersonEvent = selectedEvent.config && selectedEvent.config.inPerson === true
+            setInPerson(isInPersonEvent)
+
             // Only set subEvent if loading from edit and the value is present in the new options
             if (loadedSubEventRef.current && subEvNames.includes(loadedSubEventRef.current)) {
                 setSubEvent(loadedSubEventRef.current)
@@ -114,11 +125,19 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
         } else {
             setSubEvents([])
             setSubEvent('')
+            setInPerson(false)
         }
     }, [eventCode, events])
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
+
+        // Validate zoomId is present for reg-confirm stage (only if not in-person)
+        if (stage === 'reg-confirm' && !inPerson && !zoomId) {
+            toast.error('Zoom ID is required for registration confirmation emails')
+            return
+        }
+
         setLoading(true)
         try {
             const workOrder = {
@@ -128,6 +147,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                 languages,
                 subjects,
                 account,
+                zoomId: stage === 'reg-confirm' && !inPerson ? zoomId : undefined,
+                inPerson: inPerson ? true : false,
                 createdBy: userPid,
                 steps: [
                     {
@@ -162,6 +183,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                 await callDbApi('handleCreateWorkOrder', workOrder)
                 toast.success('Work order created')
             }
+
             onSave()
         } catch (err) {
             toast.error('Failed to save work order')
@@ -313,6 +335,35 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                     ))}
                 </Form.Select>
             </Form.Group>
+
+            {stage === 'reg-confirm' && (
+                <Form.Group className="mb-3">
+                    {inPerson ? (
+                        <>
+                            <Form.Label>Event Type</Form.Label>
+                            <div className="form-control bg-dark text-light border-secondary" style={{ padding: '0.375rem 0.75rem', backgroundColor: '#212529', color: '#fff' }}>
+                                <Badge bg="success" className="me-2">In-Person</Badge>
+                                This is an in-person event - no Zoom ID required
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <Form.Label>Zoom ID</Form.Label>
+                            <Form.Control
+                                type="text"
+                                value={zoomId}
+                                onChange={e => setZoomId(e.target.value)}
+                                placeholder="Enter Zoom ID"
+                                className="bg-dark text-light border-secondary"
+                                required
+                            />
+                            <Form.Text className="text-muted">
+                                Required for registration confirmation emails
+                            </Form.Text>
+                        </>
+                    )}
+                </Form.Group>
+            )}
         </Form>
     )
 } 

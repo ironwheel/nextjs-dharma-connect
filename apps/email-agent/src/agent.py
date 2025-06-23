@@ -2,68 +2,208 @@ import asyncio
 import json
 import uuid
 import boto3
+import os
 from typing import Optional
+from datetime import datetime
+import time
 
 from .aws_client import AWSClient
-from .config import POLL_INTERVAL, STOP_CHECK_INTERVAL, SQS_QUEUE_URL
+from .config import config
 from .models import WorkOrder, Step, StepStatus
 from .step_processor import StepProcessor
 
 class EmailAgent:
-    def __init__(self):
+    def __init__(self, poll_interval: int = 2, stop_check_interval: int = 1):
         self.aws_client = AWSClient()
         self.step_processor = StepProcessor(self.aws_client)
-        self.agent_id = str(uuid.uuid4())
+        self.poll_interval = poll_interval
+        self.stop_check_interval = stop_check_interval
+        self.current_work_order: WorkOrder = None
+        self.stop_requested = False
+        # Use a unique agent ID for locking
+        self.agent_id = f"agent_{datetime.utcnow().timestamp()}"
         self.is_running = False
-        self.current_work_order: Optional[WorkOrder] = None
-        # Clear the SQS queue on startup
-        print("[DEBUG] Purging SQS queue on agent startup...")
-        sqs = boto3.client('sqs')
-        sqs.purge_queue(QueueUrl=SQS_QUEUE_URL)
-        print("[DEBUG] SQS queue purged.")
+        # Track WebSocket connections for monitoring
+        self.last_connection_count = 0
+        self.connection_display_interval = 30  # Display connections every 30 seconds
+        self.last_connection_display = time.time()
+        self.connection_cleanup_interval = 60  # Clean up connections every 60 seconds
+        self.last_connection_cleanup = time.time()
+
+        # Purge the entire pipeline on startup
+        self._purge_pipeline()
+
+    def _purge_pipeline(self):
+        """Purges SQS queue and verifies WebSocket connections."""
+        print("[DEBUG] Purging entire pipeline on startup...")
+        try:
+            print("[DEBUG] Purging SQS queue...")
+            self.aws_client.sqs.purge_queue(QueueUrl=config.sqs_queue_url)
+            print("[DEBUG] SQS queue purged successfully.")
+        except Exception as e:
+            print(f"[ERROR] Failed to purge SQS queue: {e}")
+
+        # The AWSClient constructor already handles connection verification.
+        # No need to call it again here.
+
+        # Unlock work orders after purging and connection checks
+        try:
+            print("[DEBUG] Unlocking any locked work orders...")
+            unlocked_count = self.aws_client.unlock_all_work_orders()
+            if unlocked_count > 0:
+                print(f"Force-unlocked {unlocked_count} work orders.")
+        except Exception as e:
+            print(f"[ERROR] Error unlocking work orders: {e}")
+        
+        print("[DEBUG] Pipeline purge completed.")
+
+    def _check_websocket_connections(self):
+        """Check and display WebSocket connections if they've changed or it's time to display."""
+        current_time = time.time()
+        current_connections = self.aws_client.get_active_websocket_connections()
+        current_count = len(current_connections)
+        
+        # Clean up stale connections periodically
+        if current_time - self.last_connection_cleanup >= self.connection_cleanup_interval:
+            cleaned_count = self.aws_client.cleanup_stale_connections()
+            if cleaned_count > 0:
+                # Re-fetch connections after cleanup
+                current_connections = self.aws_client.get_active_websocket_connections()
+                current_count = len(current_connections)
+            self.last_connection_cleanup = current_time
+        
+        # Display if connections changed or if it's time for periodic display
+        should_display = (
+            current_count != self.last_connection_count or
+            current_time - self.last_connection_display >= self.connection_display_interval
+        )
+        
+        if should_display:
+            # Show connection change notification if count changed
+            if current_count != self.last_connection_count:
+                if current_count > self.last_connection_count:
+                    print(f"\n[WEBSOCKET] New connection detected! Total: {current_count}")
+                elif current_count < self.last_connection_count:
+                    print(f"\n[WEBSOCKET] Connection lost! Total: {current_count}")
+            
+            self.aws_client.display_websocket_connections()
+            self.last_connection_count = current_count
+            self.last_connection_display = current_time
 
     async def start(self):
         """Start the email agent."""
         self.is_running = True
         print(f"Email agent started with ID: {self.agent_id}")
         
+        # Display initial WebSocket connections
+        print("\n[WEBSOCKET] Initial connection status:")
+        self.aws_client.display_websocket_connections()
+        
+        # Unlock any locked work orders from previous runs
+        print("[DEBUG] Unlocking any locked work orders from previous runs...")
+        try:
+            unlocked_count = self.aws_client.unlock_all_work_orders()
+            if unlocked_count > 0:
+                print(f"Force-unlocked {unlocked_count} work orders.")
+        except Exception as e:
+            print(f"[ERROR] Error unlocking work orders on startup: {e}")
+
         while self.is_running:
             try:
+                # Check WebSocket connections
+                self._check_websocket_connections()
+                
                 # Check for new messages
+                print(f"[SQS-POLL] Polling SQS for messages...")
+                print(f"[SQS-POLL] Timestamp: {datetime.utcnow().isoformat()}")
                 messages = self.aws_client.receive_sqs_messages()
+                print(f"[SQS-POLL] Received {len(messages)} messages from SQS")
+                
+                if len(messages) > 0:
+                    print(f"[SQS-POLL] Processing {len(messages)} message(s)...")
+                    for i, msg in enumerate(messages):
+                        print(f"[SQS-POLL] Message {i+1}/{len(messages)}: ID={msg.get('MessageId', 'unknown')}")
+                else:
+                    print(f"[SQS-POLL] No messages received, continuing to next poll")
                 
                 for message in messages:
                     try:
+                        print(f"[SQS-RECEIVE] === Processing SQS message ===")
+                        print(f"[SQS-RECEIVE] Timestamp: {datetime.utcnow().isoformat()}")
+                        print(f"[SQS-RECEIVE] Message ID: {message.get('MessageId', 'unknown')}")
+                        print(f"[SQS-RECEIVE] Receipt Handle: {message.get('ReceiptHandle', 'unknown')[:50]}...")
+                        print(f"[SQS-RECEIVE] Raw message: {message}")
+                        
                         # Process the message
                         body = json.loads(message['Body'])
-                        work_order_id = body['id']
+                        print(f"[SQS-RECEIVE] Parsed body: {body}")
                         
+                        # Validate message format
+                        if not all(key in body for key in ['workOrderId', 'stepName', 'action']):
+                            print(f"[SQS-RECEIVE] ERROR: Invalid message format. Expected workOrderId, stepName, action. Got: {list(body.keys())}")
+                            # Delete invalid message
+                            self.aws_client.delete_sqs_message(message['ReceiptHandle'])
+                            continue
+                        
+                        work_order_id = body['workOrderId']
+                        step_name = body['stepName']
+                        action = body['action']
+                        
+                        print(f"[SQS-RECEIVE] Work order ID: {work_order_id}")
+                        print(f"[SQS-RECEIVE] Step name: {step_name}")
+                        print(f"[SQS-RECEIVE] Action: {action}")
+                        print(f"[SQS-RECEIVE] Processing SQS message for work order {work_order_id}, step {step_name}, action: {action}")
+                        
+                        # Validate action
+                        if action not in ['start', 'stop']:
+                            print(f"[SQS-RECEIVE] ERROR: Invalid action '{action}'. Expected 'start' or 'stop'")
+                            # Delete invalid message
+                            self.aws_client.delete_sqs_message(message['ReceiptHandle'])
+                            continue
+
                         # Get the work order
+                        print(f"[SQS-RECEIVE] Getting work order from DynamoDB...")
                         work_order = self.aws_client.get_work_order(work_order_id)
+                        print(f"[SQS-RECEIVE] Work order retrieved: {work_order is not None}")
+                        
                         if not work_order:
-                            print(f"Work order not found: {work_order_id}")
+                            print(f"[SQS-RECEIVE] ERROR: Work order not found: {work_order_id}")
+                            # Delete message for non-existent work order
+                            self.aws_client.delete_sqs_message(message['ReceiptHandle'])
+                            print(f"[SQS-RECEIVE] Deleted message for non-existent work order")
                             continue
 
-                        # Try to lock the work order
-                        if not self.aws_client.lock_work_order(work_order_id, self.agent_id):
-                            print(f"Could not lock work order: {work_order_id}")
+                        # Handle stop requests
+                        if action == 'stop':
+                            print(f"[SQS-RECEIVE] Handling stop request for work order: {work_order_id}, step: {step_name}")
+                            await self._handle_stop_request(work_order_id, work_order, step_name)
+                            # Always delete stop messages after processing
+                            self.aws_client.delete_sqs_message(message['ReceiptHandle'])
+                            print(f"[SQS-RECEIVE] Stop request processed and message deleted")
                             continue
 
-                        # Process the work order
-                        await self._process_work_order(work_order)
+                        # Handle start requests
+                        if action == 'start':
+                            print(f"[SQS-RECEIVE] Handling start request for work order: {work_order_id}, step: {step_name}")
+                            success = await self._handle_start_request(work_order_id, work_order, step_name)
+                            # Delete message after processing
+                            self.aws_client.delete_sqs_message(message['ReceiptHandle'])
+                            print(f"[SQS-RECEIVE] Start request processed and message deleted")
+                            continue
 
                     except Exception as e:
-                        print(f"Error processing message: {e}")
-                    finally:
-                        # Delete the message from the queue
-                        self.aws_client.delete_sqs_message(message['ReceiptHandle'])
+                        print(f"[SQS-RECEIVE] ERROR: Error processing message: {e}")
+                        import traceback
+                        print(f"[SQS-RECEIVE] ERROR: Full traceback: {traceback.format_exc()}")
+                        print(f"[SQS-RECEIVE] Message will remain in queue for retry")
+                        # Don't delete message on unexpected errors
 
                 # Wait before next poll
-                await asyncio.sleep(POLL_INTERVAL)
+                await asyncio.sleep(self.poll_interval)
 
             except Exception as e:
                 print(f"Error in main loop: {e}")
-                await asyncio.sleep(POLL_INTERVAL)
+                await asyncio.sleep(self.poll_interval)
 
     async def stop(self):
         """Stop the email agent."""
@@ -73,46 +213,262 @@ class EmailAgent:
             self.aws_client.unlock_work_order(self.current_work_order.id)
         print("Email agent stopped")
 
-    async def _process_work_order(self, work_order: WorkOrder):
-        """Process a work order."""
-        self.current_work_order = work_order
-        print(f"[DEBUG] Processing work order: {work_order.id}")
+    def extract_s(self, val):
+        if isinstance(val, dict) and 'S' in val:
+            return val['S']
+        return val
+
+    def step_to_plain_dict(self, step):
+        def extract_s(val):
+            if isinstance(val, dict) and 'S' in val:
+                return val['S']
+            if isinstance(val, dict) and 'BOOL' in val:
+                return val['BOOL']
+            if isinstance(val, dict) and 'NULL' in val:
+                return None
+            return val
+        return {
+            'name': extract_s(step.name),
+            'status': extract_s(step.status.value if isinstance(step.status, StepStatus) else step.status),
+            'message': extract_s(step.message),
+            'isActive': extract_s(step.isActive),
+            'startTime': extract_s(step.startTime),
+            'endTime': extract_s(step.endTime)
+        }
+
+    async def _handle_stop_request(self, work_order_id: str, work_order: WorkOrder, step_name: str):
+        """Handle a stop request for a specific step in a work order."""
+        print(f"[DEBUG] Handling stop request for work order: {work_order_id}, step: {step_name}")
+        
         try:
-            # Process only the first active, non-complete step
-            for step in work_order.steps:
-                if not self.is_running:
-                    print("[DEBUG] Agent stopped during step processing.")
+            # Find the requested step
+            step = None
+            step_index = -1
+            for i, s in enumerate(work_order.steps):
+                if self.extract_s(s.name) == step_name:
+                    step = s
+                    step_index = i
                     break
-                if not step.isActive or step.status == StepStatus.COMPLETE:
-                    continue
-                print(f"[DEBUG] Executing step: {step.name} (status: {step.status})")
-                # Check for stop request
-                if work_order.stopRequested:
-                    print(f"[DEBUG] Stop requested for work order: {work_order.id}")
-                    await self._handle_stop_request(work_order, step)
+            
+            if step is None:
+                print(f"[DEBUG] ERROR: Step {step_name} not found in work order {work_order_id}")
+                return
+            
+            # Validate current step status
+            current_status = self.extract_s(step.status)
+            if current_status != StepStatus.WORKING:
+                print(f"[DEBUG] ERROR: Step {step_name} is not working (status: {current_status}) - ignoring stop request")
+                # Don't update the step status since it's already in the correct state
+                return
+            
+            # Check if this agent is currently processing this work order
+            if (self.current_work_order and 
+                self.current_work_order.id == work_order_id and 
+                self.current_work_order.steps):
+                
+                # Find the currently active step
+                active_step = None
+                for s in self.current_work_order.steps:
+                    if self.extract_s(s.name) == step_name and s.isActive and self.extract_s(s.status) == StepStatus.WORKING:
+                        active_step = s
+                        break
+                
+                if active_step:
+                    # Agent is actively processing this work order
+                    print(f"[DEBUG] Agent is actively processing {step_name} step, stopping it")
+                    
+                    # Update the step status to interrupted
+                    await self._update_step_status(work_order, step_name, StepStatus.INTERRUPTED, f"{step_name} step stopped by user")
+                    
+                    # Unlock the work order since we're stopping
+                    self.aws_client.unlock_work_order(work_order_id)
+                    self.current_work_order = None
+                    
+                    print(f"[DEBUG] Successfully stopped {step_name} step")
+                else:
+                    # Agent has the work order but step is not active
+                    print(f"[DEBUG] Agent has work order but {step_name} step is not active, sending idle response")
+                    await self._update_step_status(work_order, step_name, StepStatus.INTERRUPTED, f"Agent was idle when {step_name} step was stopped by user")
+            else:
+                # Agent is not processing this work order
+                print(f"[DEBUG] Agent is not processing work order {work_order_id}, sending idle response")
+                await self._update_step_status(work_order, step_name, StepStatus.INTERRUPTED, f"Agent was idle when {step_name} step was stopped by user")
+                
+        except Exception as e:
+            print(f"[DEBUG] ERROR: Exception during stop request: {str(e)}")
+            await self._update_step_status(work_order, step_name, StepStatus.EXCEPTION, f"Exception during stop: {str(e)}")
+
+    async def _handle_start_request(self, work_order_id: str, work_order: WorkOrder, step_name: str) -> bool:
+        """Handle a start request for a specific step in a work order."""
+        print(f"[DEBUG] Handling start request for work order: {work_order_id}, step: {step_name}")
+        
+        try:
+            # Find the requested step
+            step = None
+            step_index = -1
+            for i, s in enumerate(work_order.steps):
+                if self.extract_s(s.name) == step_name:
+                    step = s
+                    step_index = i
                     break
-                # Process the step (stubbed)
-                success = await self.step_processor.process_step(work_order, step)
-                print(f"[DEBUG] Step {step.name} execution result: {success}")
-                # Do not auto-activate the next step; only process one step per message
-                break
-        finally:
-            print(f"[DEBUG] Unlocking work order: {work_order.id}")
-            self.aws_client.unlock_work_order(work_order.id)
+            
+            if step is None:
+                print(f"[DEBUG] ERROR: Step {step_name} not found in work order {work_order_id}")
+                await self._update_step_status(work_order, step_name, StepStatus.ERROR, f"Step {step_name} not found")
+                return False
+            
+            # Validate step order - can only start first step or step after completed step
+            if step_index > 0:
+                prev_step = work_order.steps[step_index - 1]
+                prev_status = self.extract_s(prev_step.status)
+                if prev_status != StepStatus.COMPLETE:
+                    print(f"[DEBUG] ERROR: Cannot start {step_name} step. Previous step {self.extract_s(prev_step.name)} is not complete (status: {prev_status})")
+                    await self._update_step_status(work_order, step_name, StepStatus.ERROR, f"Cannot start {step_name} step. Previous step must be complete.")
+                    return False
+            
+            # Validate current step status
+            current_status = self.extract_s(step.status)
+            if current_status == StepStatus.WORKING:
+                print(f"[DEBUG] ERROR: Step {step_name} is already working - ignoring duplicate start request")
+                # Don't update the step status since it's already correct
+                return False
+            elif current_status not in [StepStatus.READY, StepStatus.COMPLETE, StepStatus.INTERRUPTED, StepStatus.ERROR, StepStatus.EXCEPTION]:
+                print(f"[DEBUG] ERROR: Step {step_name} has invalid status for start: {current_status}")
+                await self._update_step_status(work_order, step_name, StepStatus.ERROR, f"Cannot start step with status: {current_status}")
+                return False
+            
+            # Try to lock the work order
+            if not self.aws_client.lock_work_order(work_order_id, self.agent_id):
+                print(f"[DEBUG] ERROR: Could not lock work order: {work_order_id}")
+                await self._update_step_status(work_order, step_name, StepStatus.ERROR, "Could not lock work order for processing")
+                return False
+            
+            print(f"[DEBUG] SUCCESS: Work order locked successfully")
+            
+            # Set the current work order to track that we're processing it
+            self.current_work_order = work_order
+            
+            # Update step status to working
+            await self._update_step_status(work_order, step_name, StepStatus.WORKING, "Work request received, beginning work")
+            
+            # Create a clean step object with extracted values for the processor
+            clean_step = Step(
+                name=step_name,  # Use the extracted step_name instead of step.name
+                status=StepStatus.WORKING,
+                message="Work request received, beginning work",
+                isActive=True,
+                startTime=datetime.utcnow().isoformat(),
+                endTime=None
+            )
+            
+            # Process the step
+            success = await self.step_processor.process_step(work_order, clean_step)
+            print(f"[DEBUG] Step {step_name} execution result: {success}")
+            
+            if success:
+                # Step completed successfully
+                await self._update_step_status(work_order, step_name, StepStatus.COMPLETE, "Work complete")
+                
+                # Enable next step if it exists
+                if step_index < len(work_order.steps) - 1:
+                    next_step_name = self.extract_s(work_order.steps[step_index + 1].name)
+                    print(f"[DEBUG] Enabling next step: {next_step_name}")
+                    await self._enable_next_step(work_order, step_index + 1)
+                
+                # Unlock the work order after each step completes
+                print(f"[DEBUG] Step completed, unlocking work order: {work_order_id}")
+                self.aws_client.unlock_work_order(work_order_id)
+                self.current_work_order = None
+                
+                return True
+            else:
+                # Step failed - error status already set by step processor
+                # Unlock the work order so user can restart the failed step
+                print(f"[DEBUG] Step failed, unlocking work order for restart: {work_order_id}")
+                self.aws_client.unlock_work_order(work_order_id)
+                self.current_work_order = None
+                return False
+                
+        except Exception as e:
+            print(f"[DEBUG] ERROR: Exception during step processing: {str(e)}")
+            await self._update_step_status(work_order, step_name, StepStatus.EXCEPTION, f"Exception: {str(e)}")
+            # Unlock the work order on exception so user can restart
+            print(f"[DEBUG] Exception occurred, unlocking work order: {work_order_id}")
+            self.aws_client.unlock_work_order(work_order_id)
             self.current_work_order = None
+            return False
 
-    async def _handle_stop_request(self, work_order: WorkOrder, current_step: Step):
-        """Handle a stop request for the current step."""
-        # Update the current step to interrupted
-        await self.step_processor._update_step_status(
-            work_order,
-            current_step,
-            StepStatus.INTERRUPTED,
-            "Step was interrupted"
-        )
+    async def _enable_next_step(self, work_order: WorkOrder, next_step_index: int):
+        """Enable the next step in the sequence."""
+        try:
+            # Reload the work order from DynamoDB to get the current state
+            # This ensures we have the latest data including successful completions
+            current_work_order = self.aws_client.get_work_order(work_order.id)
+            if not current_work_order:
+                print(f"[DEBUG] ERROR: Could not reload work order {work_order.id} from DynamoDB")
+                return
+            
+            steps = current_work_order.steps.copy()
+            next_step = steps[next_step_index]
+            next_step_name = self.extract_s(next_step.name)
+            
+            print(f"[DEBUG] Enabling step {next_step_name} at index {next_step_index}")
+            
+            steps[next_step_index] = Step(
+                name=next_step_name,
+                status=StepStatus.READY,
+                message="",
+                isActive=True,
+                startTime=None,
+                endTime=None
+            )
+            
+            # Convert all steps to plain dicts before updating DynamoDB
+            plain_steps = [self.step_to_plain_dict(s) for s in steps]
+            self.aws_client.update_work_order({
+                'id': work_order.id,
+                'updates': {'steps': plain_steps}
+            })
+            
+            print(f"[DEBUG] Successfully enabled step {next_step_name}")
+            
+        except Exception as e:
+            print(f"[DEBUG] ERROR: Failed to enable next step: {str(e)}")
 
-        # Reset stop request flag
-        self.aws_client.update_work_order({
-            'id': work_order.id,
-            'updates': {'stopRequested': False}
-        }) 
+    async def _update_step_status(self, work_order: WorkOrder, step_name: str, status: StepStatus, message: str):
+        """Update the status of a specific step."""
+        try:
+            steps = work_order.steps.copy()
+            step_index = -1
+            
+            # Find the step
+            for i, s in enumerate(steps):
+                if self.extract_s(s.name) == step_name:
+                    step_index = i
+                    break
+            
+            if step_index == -1:
+                print(f"[DEBUG] ERROR: Step {step_name} not found for status update")
+                return
+            
+            # Update the step
+            steps[step_index] = Step(
+                name=step_name,
+                status=status,
+                message=message,
+                isActive=status == StepStatus.WORKING,
+                startTime=datetime.utcnow().isoformat() if status == StepStatus.WORKING else None,
+                endTime=datetime.utcnow().isoformat() if status in [StepStatus.COMPLETE, StepStatus.ERROR, StepStatus.EXCEPTION] else None
+            )
+            
+            # Convert all steps to plain dicts before updating DynamoDB
+            plain_steps = [self.step_to_plain_dict(s) for s in steps]
+            self.aws_client.update_work_order({
+                'id': work_order.id,
+                'updates': {'steps': plain_steps}
+            })
+            
+            print(f"[DEBUG] Successfully updated step {step_name} to status: {status}")
+            
+        except Exception as e:
+            print(f"[DEBUG] ERROR: Failed to update step status: {str(e)}") 
