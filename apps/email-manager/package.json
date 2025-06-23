@@ -9,6 +9,7 @@
         "lint": "next lint"
     },
     "dependencies": {
+        "@aws-sdk/util-dynamodb": "^3.830.0",
         "@dharma/backend-core": "workspace:*",
         "@dharma/shared": "workspace:*",
         "bootstrap": "^5.3.3",

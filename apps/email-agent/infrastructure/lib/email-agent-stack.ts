@@ -34,32 +34,56 @@ export class EmailAgentStack extends cdk.Stack {
             visibilityTimeout: cdk.Duration.seconds(300),
         });
 
+        // Create the handlers first
+        const connectHandler = new lambda.Function(this, 'ConnectHandler', {
+            runtime: lambda.Runtime.PYTHON_3_9,
+            handler: 'lambda_function.lambda_handler',
+            code: lambda.Code.fromAsset('../src'),
+            environment: {
+                WORK_ORDERS_TABLE: workOrdersTable.tableName,
+                WORK_ORDER_QUEUE_URL: workOrderQueue.queueUrl,
+                CONNECTIONS_TABLE: connectionsTable.tableName,
+            },
+        });
+
+        const disconnectHandler = new lambda.Function(this, 'DisconnectHandler', {
+            runtime: lambda.Runtime.PYTHON_3_9,
+            handler: 'lambda_function.lambda_handler',
+            code: lambda.Code.fromAsset('../src'),
+            environment: {
+                CONNECTIONS_TABLE: connectionsTable.tableName,
+            },
+        });
+
+        const defaultHandler = new lambda.Function(this, 'DefaultHandler', {
+            runtime: lambda.Runtime.PYTHON_3_9,
+            handler: 'lambda_function.lambda_handler',
+            code: lambda.Code.fromAsset('../src'),
+            environment: {
+                WORK_ORDERS_TABLE: workOrdersTable.tableName,
+                WORK_ORDER_QUEUE_URL: workOrderQueue.queueUrl,
+                CONNECTIONS_TABLE: connectionsTable.tableName,
+            },
+        });
+
         // WebSocket API
         const api = new apigateway.WebSocketApi(this, 'WorkOrderWebSocketApi', {
             apiName: 'WorkOrderWebSocketApi',
             connectRouteOptions: {
-                integration: new apigateway_integrations.WebSocketLambdaIntegration('ConnectIntegration', new lambda.Function(this, 'ConnectHandler', {
-                    runtime: lambda.Runtime.PYTHON_3_9,
-                    handler: 'lambda_function.lambda_handler',
-                    code: lambda.Code.fromAsset('../src'),
-                    environment: {
-                        WORK_ORDERS_TABLE: workOrdersTable.tableName,
-                        WORK_ORDER_QUEUE_URL: workOrderQueue.queueUrl,
-                        CONNECTIONS_TABLE: connectionsTable.tableName,
-                    },
-                }))
+                integration: new apigateway_integrations.WebSocketLambdaIntegration('ConnectIntegration', connectHandler)
             },
             disconnectRouteOptions: {
-                integration: new apigateway_integrations.WebSocketLambdaIntegration('DisconnectIntegration', new lambda.Function(this, 'DisconnectHandler', {
-                    runtime: lambda.Runtime.PYTHON_3_9,
-                    handler: 'lambda_function.lambda_handler',
-                    code: lambda.Code.fromAsset('../src'),
-                    environment: {
-                        CONNECTIONS_TABLE: connectionsTable.tableName,
-                    },
-                }))
+                integration: new apigateway_integrations.WebSocketLambdaIntegration('DisconnectIntegration', disconnectHandler)
             },
+            defaultRouteOptions: {
+                integration: new apigateway_integrations.WebSocketLambdaIntegration('DefaultIntegration', defaultHandler)
+            }
         });
+
+        // Update handler environments with API URL
+        connectHandler.addEnvironment('WEBSOCKET_API_URL', api.apiEndpoint);
+        disconnectHandler.addEnvironment('WEBSOCKET_API_URL', api.apiEndpoint);
+        defaultHandler.addEnvironment('WEBSOCKET_API_URL', api.apiEndpoint);
 
         // WebSocket Stage
         const stage = new apigateway.WebSocketStage(this, 'WebSocketStage', {
@@ -82,11 +106,27 @@ export class EmailAgentStack extends cdk.Stack {
             timeout: cdk.Duration.seconds(30),
         });
 
-        // Grant permissions
+        // Grant permissions to all handlers
         workOrdersTable.grantReadWriteData(streamHandler);
         workOrderQueue.grantSendMessages(streamHandler);
         api.grantManageConnections(streamHandler);
         connectionsTable.grantReadWriteData(streamHandler);
+
+        // Grant permissions to connect handler
+        api.grantManageConnections(connectHandler);
+        connectionsTable.grantReadWriteData(connectHandler);
+        workOrdersTable.grantReadWriteData(connectHandler);
+        workOrderQueue.grantSendMessages(connectHandler);
+
+        // Grant permissions to disconnect handler
+        api.grantManageConnections(disconnectHandler);
+        connectionsTable.grantReadWriteData(disconnectHandler);
+
+        // Grant permissions to default handler
+        api.grantManageConnections(defaultHandler);
+        connectionsTable.grantReadWriteData(defaultHandler);
+        workOrdersTable.grantReadWriteData(defaultHandler);
+        workOrderQueue.grantSendMessages(defaultHandler);
 
         // Add DynamoDB stream as event source
         streamHandler.addEventSource(new lambda_event_sources.DynamoEventSource(workOrdersTable, {

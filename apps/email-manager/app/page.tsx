@@ -4,6 +4,7 @@ import { Container, Modal, Spinner, Button } from 'react-bootstrap'
 import WorkOrderList from '../components/WorkOrderList'
 import WorkOrderForm from '../components/WorkOrderForm'
 import { toast } from 'react-toastify'
+import { callDbApi } from '@dharma/shared/src/clientApi'
 
 function getQueryParam(name: string): string | null {
     if (typeof window === 'undefined') return null;
@@ -67,7 +68,26 @@ export default function Home() {
         setShowForm(true)
     }
 
-    const handleFormClose = () => {
+    const handleFormClose = async () => {
+        // When the form closes, unlock the work order if one was being edited.
+        if (editingWorkOrderId) {
+            try {
+                console.log('Unlocking work order:', editingWorkOrderId, 'for user:', userPid);
+                const unlockResult = await callDbApi('handleUnlockWorkOrder', {
+                    id: editingWorkOrderId,
+                    userPid
+                });
+                console.log('Unlock result:', unlockResult);
+
+                // Add a small delay to ensure the unlock operation is processed
+                await new Promise(resolve => setTimeout(resolve, 100));
+
+                console.log('Successfully unlocked work order:', editingWorkOrderId);
+            } catch (err) {
+                // Log error but don't bother the user, as the lock will expire anyway.
+                console.error('Failed to unlock work order on form close:', err);
+            }
+        }
         setShowForm(false)
         setEditingWorkOrderId(undefined)
         setRefreshCounter(prev => prev + 1)
@@ -98,6 +118,7 @@ export default function Home() {
                 onEdit={handleEditWorkOrder}
                 onNew={handleNewWorkOrder}
                 refreshTrigger={refreshCounter}
+                userPid={userPid}
             />
 
             <Modal show={showForm} onHide={handleFormClose} size="lg">

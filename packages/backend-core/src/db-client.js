@@ -4,8 +4,9 @@
  * @license MIT
  * @description Shared DynamoDB client initialization and table name retrieval logic.
  */
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb/dist-es/index.js";
+import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb/dist-es/index.js";
+import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { fromCognitoIdentityPool } from "@aws-sdk/credential-provider-cognito-identity";
 import { DbAction, DbActionParams, DbActionResponse } from './types'
 
@@ -30,6 +31,7 @@ const TABLE_MAP = {
 };
 
 let docClientInstance; // Singleton instance for the DynamoDB Document Client
+let sqsClientInstance; // Singleton instance for the SQS Client
 
 /**
  * Initializes and returns a singleton DynamoDBDocumentClient instance.
@@ -109,5 +111,116 @@ export async function callDbApi(action, params) {
     } catch (error) {
         console.error('Error calling DB API:', error)
         throw error
+    }
+}
+
+/**
+ * Initializes and returns a singleton SQSClient instance.
+ * Uses the same credentials as the DynamoDB client.
+ * @function getSqsClient
+ * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable
+ * @returns {SQSClient} The initialized SQS client.
+ * @throws {Error} If essential AWS configuration environment variables are not set or client fails to initialize.
+ */
+export function getSqsClient(identityPoolIdOverride) {
+    const identityPoolId = identityPoolIdOverride || IDENTITY_POOL_ID;
+    if (!REGION) {
+        console.error("db-client: AWS_REGION environment variable is not set.");
+        throw new Error("Server configuration error: Missing AWS Region.");
+    }
+    if (!identityPoolId) {
+        console.error("db-client: AWS_COGNITO_IDENTITY_POOL_ID environment variable is not set.");
+        throw new Error("Server configuration error: Missing AWS Cognito Identity Pool ID.");
+    }
+
+    if (!sqsClientInstance) {
+        try {
+            const credentials = fromCognitoIdentityPool({
+                clientConfig: { region: REGION },
+                identityPoolId,
+            });
+            sqsClientInstance = new SQSClient({ region: REGION, credentials });
+            console.log("db-client: SQSClient initialized successfully.");
+        } catch (error) {
+            console.error("db-client: Failed to initialize SQSClient:", error);
+            throw new Error("Server configuration error: Could not initialize SQS client.");
+        }
+    }
+    return sqsClientInstance;
+}
+
+/**
+ * Sends a message to the work order SQS queue.
+ * @function sendWorkOrderMessage
+ * @param {string} workOrderId - The work order ID to process
+ * @param {string} stepName - The name of the step to process
+ * @param {string} action - The action to perform ('start' or 'stop')
+ * @param {string} identityPoolIdOverride - Optional identity pool ID override
+ * @returns {Promise<object>} The result of the SQS send operation
+ */
+export async function sendWorkOrderMessage(workOrderId, stepName, action, identityPoolIdOverride) {
+    const startTime = Date.now();
+    console.log(`[SQS-SEND] Starting SQS message send for work order ${workOrderId}, step ${stepName}, action: ${action}`);
+    console.log(`[SQS-SEND] Timestamp: ${new Date().toISOString()}`);
+
+    const sqsClient = getSqsClient(identityPoolIdOverride);
+    // Hardcode the SQS queue URL for now since we can't create .env.local
+    const queueUrl = process.env.SQS_QUEUE_URL || 'https://sqs.us-east-1.amazonaws.com/011754621643/work-order-queue.fifo';
+
+    if (!queueUrl) {
+        console.error("[SQS-SEND] ERROR: SQS_QUEUE_URL environment variable is not set.");
+        throw new Error("Server configuration error: Missing SQS Queue URL.");
+    }
+
+    const messageBody = JSON.stringify({
+        workOrderId: workOrderId,
+        stepName: stepName,
+        action: action
+    });
+
+    console.log(`[SQS-SEND] Queue URL: ${queueUrl}`);
+    console.log(`[SQS-SEND] Message body: ${messageBody}`);
+    console.log(`[SQS-SEND] Message group ID: ${workOrderId}`);
+    console.log(`[SQS-SEND] Message deduplication ID: ${workOrderId}_${stepName}_${action}_${startTime}`);
+
+    const command = new SendMessageCommand({
+        QueueUrl: queueUrl,
+        MessageBody: messageBody,
+        MessageGroupId: workOrderId, // Required for FIFO queues
+        MessageDeduplicationId: `${workOrderId}_${stepName}_${action}_${startTime}` // Required for FIFO queues
+    });
+
+    try {
+        console.log(`[SQS-SEND] Executing SendMessageCommand...`);
+        const result = await sqsClient.send(command);
+        const endTime = Date.now();
+        const duration = endTime - startTime;
+
+        console.log(`[SQS-SEND] SUCCESS: Work order message sent successfully!`);
+        console.log(`[SQS-SEND] Work order ID: ${workOrderId}`);
+        console.log(`[SQS-SEND] Step: ${stepName}`);
+        console.log(`[SQS-SEND] Action: ${action}`);
+        console.log(`[SQS-SEND] Message ID: ${result.MessageId}`);
+        console.log(`[SQS-SEND] Duration: ${duration}ms`);
+        console.log(`[SQS-SEND] Timestamp: ${new Date().toISOString()}`);
+        console.log(`[SQS-SEND] SQS Response:`, JSON.stringify(result, null, 2));
+
+        return result;
+    } catch (error) {
+        const endTime = Date.now();
+        const duration = endTime - startTime;
+
+        console.error(`[SQS-SEND] ERROR: Failed to send work order message!`);
+        console.error(`[SQS-SEND] Work order ID: ${workOrderId}`);
+        console.error(`[SQS-SEND] Step: ${stepName}`);
+        console.error(`[SQS-SEND] Action: ${action}`);
+        console.error(`[SQS-SEND] Duration: ${duration}ms`);
+        console.error(`[SQS-SEND] Timestamp: ${new Date().toISOString()}`);
+        console.error(`[SQS-SEND] Error details:`, error);
+        console.error(`[SQS-SEND] Error message: ${error.message}`);
+        console.error(`[SQS-SEND] Error code: ${error.code}`);
+        console.error(`[SQS-SEND] Error name: ${error.name}`);
+
+        throw error;
     }
 }
