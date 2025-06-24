@@ -23,9 +23,6 @@ class AWSClient:
         if not WEBSOCKET_API_URL:
             raise ValueError("WEBSOCKET_API_URL environment variable is not set")
         
-        # Debug the input URL
-        print(f"[DEBUG] Input WebSocket URL: {WEBSOCKET_API_URL}")
-        
         # Parse the WebSocket URL to get the API ID and stage
         try:
             # Remove any protocol prefix (wss:// or https://)
@@ -44,11 +41,6 @@ class AWSClient:
             
             # Construct the Management API endpoint
             mgmt_api_url = f"https://{api_id}.execute-api.{config.aws_region}.amazonaws.com/{stage}"
-            print(f"[DEBUG] Parsed components:")
-            print(f"[DEBUG]   API ID: {api_id}")
-            print(f"[DEBUG]   Stage: {stage}")
-            print(f"[DEBUG]   Region: {config.aws_region}")
-            print(f"[DEBUG] Final Management API endpoint: {mgmt_api_url}")
             
             # Create the API Gateway Management API client
             self.apigateway = boto3.client(
@@ -59,16 +51,14 @@ class AWSClient:
             self.table = self.dynamodb.Table(DYNAMODB_TABLE)
             
         except Exception as e:
-            print(f"[DEBUG] Error parsing WebSocket URL: {str(e)}")
+            print(f"[ERROR] Error parsing WebSocket URL: {str(e)}")
             raise
 
     def get_work_order(self, id: str) -> Optional[WorkOrder]:
         try:
             response = self.table.get_item(Key={'id': id})
             if 'Item' in response:
-                print(f"[DEBUG] Raw DynamoDB item for work order {id}: {response['Item']}")
                 work_order = WorkOrder.from_dict(response['Item'])
-                print(f"[DEBUG] Parsed work order {id}: inPerson={work_order.inPerson}, zoomId={work_order.zoomId}")
                 return work_order
             return None
         except ClientError as e:
@@ -172,14 +162,7 @@ class AWSClient:
             )
             
             if not response.get('Items'):
-                print("[DEBUG] No active WebSocket connections found")
                 return
-            
-            # Log all active connections
-            connection_ids = [item['connectionId'] for item in response.get('Items', [])]
-            print(f"[DEBUG] Active WebSocket connections: {len(connection_ids)}")
-            for conn_id in connection_ids:
-                print(f"[DEBUG]   - Connection ID: {conn_id}")
             
             # Create the message
             message = {
@@ -203,25 +186,17 @@ class AWSClient:
 
             # Convert any enum values to strings
             serializable_message = convert_enums(message)
-            
-            print(f"[DEBUG] Message before serialization: {message}")
-            print(f"[DEBUG] Serializable message: {serializable_message}")
 
             # Send to all connections
             for item in response.get('Items', []):
                 try:
                     connection_id = item['connectionId']
-                    print(f"[DEBUG] Sending update to connection {connection_id}")
                     self.apigateway.post_to_connection(
                         Data=json.dumps(serializable_message),
                         ConnectionId=connection_id
                     )
-                    print(f"[DEBUG] Successfully sent to connection {connection_id}")
                 except Exception as e:
-                    print(f"[DEBUG] Error sending to WebSocket connection {item['connectionId']}: {str(e)}")
-                    print(f"[DEBUG] Error type: {type(e).__name__}")
-                    if hasattr(e, 'response'):
-                        print(f"[DEBUG] Response: {e.response}")
+                    print(f"[ERROR] Error sending to WebSocket connection {item['connectionId']}: {str(e)}")
                     
                     # If the connection is gone, remove it from DynamoDB
                     if isinstance(e, self.apigateway.exceptions.GoneException):
@@ -229,14 +204,10 @@ class AWSClient:
                             self.dynamodb.Table(CONNECTIONS_TABLE).delete_item(
                                 Key={'connectionId': item['connectionId']}
                             )
-                            print(f"[DEBUG] Removed stale connection {item['connectionId']}")
                         except Exception as delete_error:
-                            print(f"[DEBUG] Error removing stale connection: {str(delete_error)}")
+                            print(f"[ERROR] Error removing stale connection: {str(delete_error)}")
         except Exception as e:
-            print(f"[DEBUG] Error in _send_websocket_update: {str(e)}")
-            print(f"[DEBUG] Error type: {type(e).__name__}")
-            if hasattr(e, 'response'):
-                print(f"[DEBUG] Response: {e.response}")
+            print(f"[ERROR] Error in _send_websocket_update: {str(e)}")
 
     def lock_work_order(self, id: str, agent_id: str) -> bool:
         try:
@@ -340,6 +311,46 @@ class AWSClient:
         except Exception as e:
             print(f"[DEBUG] Error unlocking work orders: {str(e)}")
             return 0
+
+    def scan_table(self, table_name: str) -> List[Dict]:
+        """
+        Scan an entire DynamoDB table and return all items.
+        
+        Args:
+            table_name: Name of the DynamoDB table to scan
+            
+        Returns:
+            List of all items in the table
+            
+        Raises:
+            Exception: If the scan operation fails
+        """
+        try:
+            print(f"[DEBUG] Scanning table: {table_name}")
+            table = self.dynamodb.Table(table_name)
+            items = []
+            
+            # Use pagination to get all items
+            last_evaluated_key = None
+            while True:
+                if last_evaluated_key:
+                    response = table.scan(ExclusiveStartKey=last_evaluated_key)
+                else:
+                    response = table.scan()
+                
+                items.extend(response.get('Items', []))
+                
+                # Check if there are more items
+                last_evaluated_key = response.get('LastEvaluatedKey')
+                if not last_evaluated_key:
+                    break
+            
+            print(f"[DEBUG] Scanned {len(items)} items from table: {table_name}")
+            return items
+            
+        except Exception as e:
+            print(f"[DEBUG] Error scanning table {table_name}: {str(e)}")
+            raise Exception(f"Failed to scan table {table_name}: {str(e)}")
 
     def get_active_websocket_connections(self) -> List[str]:
         """Get all active WebSocket connection IDs."""

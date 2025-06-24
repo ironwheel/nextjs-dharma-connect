@@ -5,50 +5,63 @@ from typing import Dict, Optional
 from .models import Step, StepStatus, WorkOrder
 from .aws_client import AWSClient
 from .steps import PrepareStep
+from .steps.count import CountStep
 
 class StepProcessor:
     def __init__(self, aws_client: AWSClient):
         self.aws_client = aws_client
+        self.count_step = CountStep(aws_client)
         self.prepare_step = PrepareStep(aws_client)
 
     async def process_step(self, work_order: WorkOrder, step: Step) -> bool:
         """Process a single step of a work order."""
-        print(f"[DEBUG] [StepProcessor] process_step called for step: {step.name}")
-        print(f"[DEBUG] [StepProcessor] Step name type: {type(step.name)}")
-        print(f"[DEBUG] [StepProcessor] Step name value: {step.name}")
         try:
             # Note: Step status is already set to WORKING by the agent before calling this method
             # No need to update it again here
 
             # Process based on step name
-            if step.name == "Prepare":
-                print(f"[DEBUG] [StepProcessor] Processing Prepare step...")
+            if step.name == "Count":
+                try:
+                    success = await self.count_step.process(work_order, step)
+                    if not success:
+                        error_message = "Step failed"
+                        await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
+                        return False
+                    else:
+                        # Use the message set by the Count step
+                        success_message = step.message
+                        await self._update_step_status(work_order, step, StepStatus.COMPLETE, success_message)
+                        return True
+                except Exception as e:
+                    error_message = str(e)
+                    print(f"[ERROR] Error in {step.name} step: {error_message}")
+                    await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
+                    return False
+            elif step.name == "Prepare":
                 try:
                     success = await self.prepare_step.process(work_order, step)
-                    print(f"[DEBUG] [StepProcessor] Prepare step result: {success}")
                     if not success:
                         error_message = "Step failed"
                         await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
                         return False
                 except Exception as e:
                     error_message = str(e)
-                    print(f"[DEBUG] Error in {step.name} step: {error_message}")
+                    print(f"[ERROR] Error in {step.name} step: {error_message}")
                     await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
                     return False
             elif step.name == "Test":
-                print(f"[DEBUG] [StepProcessor] Processing Test step...")
                 success = await self._process_test(work_order, step)
             elif step.name == "Send":
-                print(f"[DEBUG] [StepProcessor] Processing Send step...")
                 success = await self._process_send(work_order, step)
             else:
-                print(f"[DEBUG] Unknown step: {step.name}")
                 error_message = f"Unknown step type: {step.name}"
                 await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
                 return False
 
             if success:
-                await self._update_step_status(work_order, step, StepStatus.COMPLETE, "Step completed successfully")
+                # Use the message set by the step if present, otherwise default
+                success_message = step.message if getattr(step, 'message', None) else "Step completed successfully"
+                await self._update_step_status(work_order, step, StepStatus.COMPLETE, success_message)
                 return True
             else:
                 error_message = "Step failed"
@@ -57,7 +70,7 @@ class StepProcessor:
 
         except Exception as e:
             error_message = str(e)
-            print(f"[DEBUG] Error in {step.name} step: {error_message}")
+            print(f"[ERROR] Error in {step.name} step: {error_message}")
             await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
             return False
 
@@ -79,7 +92,7 @@ class StepProcessor:
                 break
         
         if step_index == -1:
-            print(f"[DEBUG] ERROR: Step {step.name} not found for status update")
+            print(f"[ERROR] Step {step.name} not found for status update")
             return
         
         steps[step_index] = Step(
@@ -101,7 +114,7 @@ class StepProcessor:
                 'updates': {'steps': steps_dict}
             })
         except Exception as e:
-            print(f"[DEBUG] Error updating step status in DynamoDB: {e}")
+            print(f"[ERROR] Error updating step status in DynamoDB: {e}")
             raise  # Re-raise the exception to be caught by the caller
 
     async def _process_test(self, work_order: WorkOrder, step: Step) -> bool:

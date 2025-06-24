@@ -35,11 +35,9 @@ class EmailAgent:
 
     def _purge_pipeline(self):
         """Purges SQS queue and verifies WebSocket connections."""
-        print("[DEBUG] Purging entire pipeline on startup...")
         try:
-            print("[DEBUG] Purging SQS queue...")
             self.aws_client.sqs.purge_queue(QueueUrl=config.sqs_queue_url)
-            print("[DEBUG] SQS queue purged successfully.")
+            print("SQS queue purged successfully.")
         except Exception as e:
             print(f"[ERROR] Failed to purge SQS queue: {e}")
 
@@ -48,15 +46,12 @@ class EmailAgent:
 
         # Unlock work orders after purging and connection checks
         try:
-            print("[DEBUG] Unlocking any locked work orders...")
             unlocked_count = self.aws_client.unlock_all_work_orders()
             if unlocked_count > 0:
                 print(f"Force-unlocked {unlocked_count} work orders.")
         except Exception as e:
             print(f"[ERROR] Error unlocking work orders: {e}")
         
-        print("[DEBUG] Pipeline purge completed.")
-
     def _check_websocket_connections(self):
         """Check and display WebSocket connections if they've changed or it's time to display."""
         current_time = time.time()
@@ -100,7 +95,6 @@ class EmailAgent:
         self.aws_client.display_websocket_connections()
         
         # Unlock any locked work orders from previous runs
-        print("[DEBUG] Unlocking any locked work orders from previous runs...")
         try:
             unlocked_count = self.aws_client.unlock_all_work_orders()
             if unlocked_count > 0:
@@ -114,29 +108,15 @@ class EmailAgent:
                 self._check_websocket_connections()
                 
                 # Check for new messages
-                print(f"[SQS-POLL] Polling SQS for messages...")
-                print(f"[SQS-POLL] Timestamp: {datetime.utcnow().isoformat()}")
                 messages = self.aws_client.receive_sqs_messages()
-                print(f"[SQS-POLL] Received {len(messages)} messages from SQS")
                 
                 if len(messages) > 0:
                     print(f"[SQS-POLL] Processing {len(messages)} message(s)...")
-                    for i, msg in enumerate(messages):
-                        print(f"[SQS-POLL] Message {i+1}/{len(messages)}: ID={msg.get('MessageId', 'unknown')}")
-                else:
-                    print(f"[SQS-POLL] No messages received, continuing to next poll")
                 
                 for message in messages:
                     try:
-                        print(f"[SQS-RECEIVE] === Processing SQS message ===")
-                        print(f"[SQS-RECEIVE] Timestamp: {datetime.utcnow().isoformat()}")
-                        print(f"[SQS-RECEIVE] Message ID: {message.get('MessageId', 'unknown')}")
-                        print(f"[SQS-RECEIVE] Receipt Handle: {message.get('ReceiptHandle', 'unknown')[:50]}...")
-                        print(f"[SQS-RECEIVE] Raw message: {message}")
-                        
                         # Process the message
                         body = json.loads(message['Body'])
-                        print(f"[SQS-RECEIVE] Parsed body: {body}")
                         
                         # Validate message format
                         if not all(key in body for key in ['workOrderId', 'stepName', 'action']):
@@ -149,11 +129,6 @@ class EmailAgent:
                         step_name = body['stepName']
                         action = body['action']
                         
-                        print(f"[SQS-RECEIVE] Work order ID: {work_order_id}")
-                        print(f"[SQS-RECEIVE] Step name: {step_name}")
-                        print(f"[SQS-RECEIVE] Action: {action}")
-                        print(f"[SQS-RECEIVE] Processing SQS message for work order {work_order_id}, step {step_name}, action: {action}")
-                        
                         # Validate action
                         if action not in ['start', 'stop']:
                             print(f"[SQS-RECEIVE] ERROR: Invalid action '{action}'. Expected 'start' or 'stop'")
@@ -162,33 +137,26 @@ class EmailAgent:
                             continue
 
                         # Get the work order
-                        print(f"[SQS-RECEIVE] Getting work order from DynamoDB...")
                         work_order = self.aws_client.get_work_order(work_order_id)
-                        print(f"[SQS-RECEIVE] Work order retrieved: {work_order is not None}")
                         
                         if not work_order:
                             print(f"[SQS-RECEIVE] ERROR: Work order not found: {work_order_id}")
                             # Delete message for non-existent work order
                             self.aws_client.delete_sqs_message(message['ReceiptHandle'])
-                            print(f"[SQS-RECEIVE] Deleted message for non-existent work order")
                             continue
 
                         # Handle stop requests
                         if action == 'stop':
-                            print(f"[SQS-RECEIVE] Handling stop request for work order: {work_order_id}, step: {step_name}")
                             await self._handle_stop_request(work_order_id, work_order, step_name)
                             # Always delete stop messages after processing
                             self.aws_client.delete_sqs_message(message['ReceiptHandle'])
-                            print(f"[SQS-RECEIVE] Stop request processed and message deleted")
                             continue
 
                         # Handle start requests
                         if action == 'start':
-                            print(f"[SQS-RECEIVE] Handling start request for work order: {work_order_id}, step: {step_name}")
                             success = await self._handle_start_request(work_order_id, work_order, step_name)
                             # Delete message after processing
                             self.aws_client.delete_sqs_message(message['ReceiptHandle'])
-                            print(f"[SQS-RECEIVE] Start request processed and message deleted")
                             continue
 
                     except Exception as e:
@@ -366,8 +334,8 @@ class EmailAgent:
             print(f"[DEBUG] Step {step_name} execution result: {success}")
             
             if success:
-                # Step completed successfully
-                await self._update_step_status(work_order, step_name, StepStatus.COMPLETE, "Work complete")
+                # Step completed successfully - step processor already updated the status
+                print(f"[DEBUG] Step {step_name} completed successfully")
                 
                 # Enable next step if it exists
                 if step_index < len(work_order.steps) - 1:

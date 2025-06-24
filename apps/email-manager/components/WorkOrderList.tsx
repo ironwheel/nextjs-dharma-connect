@@ -18,8 +18,9 @@ interface WorkOrder {
     createdBy: string
     zoomId?: string
     inPerson?: boolean
+    config?: { [key: string]: any }
     steps: Array<{
-        name: 'Prepare' | 'Test' | 'Send'
+        name: 'Count' | 'Prepare' | 'Test' | 'Send'
         status: 'ready' | 'working' | 'complete' | 'error' | 'interrupted' | 'exception'
         message: string
         isActive: boolean
@@ -157,6 +158,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                     lockedBy: workOrder.lockedBy,
                     zoomId: workOrder.zoomId,
                     inPerson: workOrder.inPerson,
+                    config: workOrder.config || {},
                 }
 
                 console.log('[DEBUG] Converted work order for state update:', updatedWorkOrder);
@@ -267,7 +269,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
         }
     }
 
-    const handleStepAction = async (id: string, stepName: 'Prepare' | 'Test' | 'Send', isStarting: boolean) => {
+    const handleStepAction = async (id: string, stepName: 'Count' | 'Prepare' | 'Test' | 'Send', isStarting: boolean) => {
         console.log(`[STEP-ACTION] Starting step action for work order ${id}, step ${stepName}, isStarting: ${isStarting}`);
         console.log(`[STEP-ACTION] Timestamp: ${new Date().toISOString()}`);
 
@@ -530,6 +532,15 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                             const messageColor = isComplete ? '#bbb' : '#fff';
                                             const prevStepComplete = index === 0 || (workOrder.steps && workOrder.steps[index - 1] && extractString(workOrder.steps[index - 1].status) === 'complete');
                                             const canStart = prevStepComplete || isError || isInterrupted || isException || isComplete;
+
+                                            // Special logic for Prepare step - only enable if Count is complete
+                                            let finalCanStart = canStart;
+                                            if (stepName === 'Prepare') {
+                                                const countStep = workOrder.steps.find(s => extractString(s.name) === 'Count');
+                                                const countStatus = countStep ? extractString(countStep.status) : 'ready';
+                                                finalCanStart = canStart && countStatus === 'complete';
+                                            }
+
                                             return (
                                                 <div key={`${workOrder.id}-${stepName}`} style={{ background: '#2c3034', padding: '12px' }}>
                                                     <div className="d-flex align-items-center">
@@ -543,8 +554,8 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                             <Button
                                                                 variant={buttonVariant}
                                                                 size="sm"
-                                                                onClick={e => { e.stopPropagation(); handleStepAction(workOrder.id, stepName as 'Prepare' | 'Test' | 'Send', !isWorking) }}
-                                                                disabled={buttonDisabled || !canStart}
+                                                                onClick={e => { e.stopPropagation(); handleStepAction(workOrder.id, stepName as 'Count' | 'Prepare' | 'Test' | 'Send', !isWorking) }}
+                                                                disabled={buttonDisabled || !finalCanStart}
                                                                 style={isComplete ? { backgroundColor: '#0d6efd', color: '#fff', borderColor: '#0d6efd' } : {}}
                                                             >
                                                                 {buttonText}
