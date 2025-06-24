@@ -8,8 +8,11 @@ export interface WorkOrder {
     account: string
     createdBy: string
     status: string
+    zoomId?: string
+    inPerson?: boolean
+    config?: { [key: string]: any }
     steps: Array<{
-        name: 'Prepare' | 'Test' | 'Send'
+        name: 'Count' | 'Prepare' | 'Test' | 'Send'
         status: 'ready' | 'working' | 'complete' | 'error' | 'interrupted'
         message: string
         isActive: boolean
@@ -50,6 +53,9 @@ export interface DbActionParams {
         subject: string
         account: string
         createdBy: string
+        zoomId?: string
+        inPerson?: boolean
+        config?: { [key: string]: any }
     }
     handleUpdateWorkOrder: {
         id: string
@@ -60,6 +66,9 @@ export interface DbActionParams {
         subject: string
         account: string
         createdBy: string
+        zoomId?: string
+        inPerson?: boolean
+        config?: { [key: string]: any }
     }
     handleDeleteWorkOrder: {
         id: string
@@ -70,7 +79,7 @@ export interface DbActionParams {
     }
     handleUpdateStepStatus: {
         workOrderId: string
-        stepName: 'Prepare' | 'Test' | 'Send'
+        stepName: 'Count' | 'Prepare' | 'Test' | 'Send'
         status: 'ready' | 'working' | 'complete' | 'error' | 'interrupted'
         message: string
     }

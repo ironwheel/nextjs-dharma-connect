@@ -8,7 +8,6 @@ from .aws_client import AWSClient, SQS_QUEUE_URL
 
 def force_unlock_all_work_orders():
     """Force-unlocks all work orders that are in a locked state."""
-    print("[DEBUG] Forcibly unlocking all work orders...")
     dynamodb = boto3.resource('dynamodb', region_name=config.aws_region)
     table = dynamodb.Table(config.work_orders_table)
     scan_kwargs = {

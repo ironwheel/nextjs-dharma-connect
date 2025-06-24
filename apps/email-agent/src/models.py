@@ -16,38 +16,26 @@ class Step:
     """Represents a step in a work order"""
     def __init__(self, name: str, status: StepStatus = StepStatus.READY, message: str = "", isActive: bool = False, startTime: Optional[str] = None, endTime: Optional[str] = None):
         self.name = name
-        print(f"[DEBUG] Step constructor - name: {name}, status: {status} (type: {type(status)})")
         if isinstance(status, dict):
-            print(f"[DEBUG] Status is a dict: {status}")
             if 'S' in status:
                 status_value = status['S']
-                print(f"[DEBUG] Extracting status value from dict: {status_value}")
                 self.status = StepStatus(status_value)
             else:
-                print(f"[DEBUG] Status dict doesn't have 'S' key: {status}")
                 self.status = StepStatus.READY
         elif isinstance(status, str):
-            print(f"[DEBUG] Status is a string: {status}")
             self.status = StepStatus(status)
         elif isinstance(status, StepStatus):
-            print(f"[DEBUG] Status is already a StepStatus enum: {status}")
             self.status = status
         else:
-            print(f"[DEBUG] Status is unknown type: {type(status)}, value: {status}")
             self.status = StepStatus.READY
         
-        print(f"[DEBUG] Step constructor - message: {message} (type: {type(message)})")
         if isinstance(message, dict):
-            print(f"[DEBUG] Message is a dict: {message}")
             if 'S' in message:
                 message_value = message['S']
-                print(f"[DEBUG] Extracting message value from dict: {message_value}")
                 self.message = message_value
             else:
-                print(f"[DEBUG] Message dict doesn't have 'S' key: {message}")
                 self.message = ""
         else:
-            print(f"[DEBUG] Message is not a dict: {message}")
             self.message = str(message) if message else ""
         
         self.isActive = isActive
@@ -89,7 +77,6 @@ class Step:
                 elif 'NULL' in field_data:
                     return None
                 else:
-                    print(f"[DEBUG] Unknown DynamoDB format for {field_name}: {field_data}")
                     return str(field_data)
             else:
                 return field_data
@@ -107,7 +94,6 @@ class Step:
             try:
                 status_enum = StepStatus(status)
             except ValueError:
-                print(f"[DEBUG] Invalid status value: {status}, defaulting to READY")
                 status_enum = StepStatus.READY
         else:
             status_enum = StepStatus.READY
@@ -163,6 +149,7 @@ class WorkOrder:
         self.fromName = None
         self.zoomId = None  # Add zoomId field
         self.inPerson = None  # Add inPerson field
+        self.config = {}  # Add config field for pool and other configuration
 
     def dict(self) -> Dict:
         """Convert to regular dictionary format"""
@@ -187,7 +174,8 @@ class WorkOrder:
             'replyTo': self.replyTo,
             'fromName': self.fromName,
             'zoomId': self.zoomId,
-            'inPerson': self.inPerson
+            'inPerson': self.inPerson,
+            'config': self.config
         }
 
     def to_dict(self) -> Dict:
@@ -213,7 +201,8 @@ class WorkOrder:
             'replyTo': {'S': self.replyTo} if self.replyTo else {'NULL': True},
             'fromName': {'S': self.fromName} if self.fromName else {'NULL': True},
             'zoomId': {'S': self.zoomId} if self.zoomId else {'NULL': True},
-            'inPerson': {'BOOL': self.inPerson} if self.inPerson is not None else {'NULL': True}
+            'inPerson': {'BOOL': self.inPerson} if self.inPerson is not None else {'NULL': True},
+            'config': {'M': {k: {'S': v} for k, v in self.config.items()}} if self.config else {'NULL': True}
         }
 
     def __str__(self) -> str:
@@ -294,6 +283,23 @@ class WorkOrder:
                 work_order.fromName = data.get('fromName', {}).get('S')
                 work_order.zoomId = data.get('zoomId', {}).get('S')
                 work_order.inPerson = data.get('inPerson', {}).get('BOOL')
+                
+                # Handle config with better error handling
+                config_data = data.get('config', {})
+                if isinstance(config_data, dict) and 'M' in config_data:
+                    try:
+                        work_order.config = {}
+                        for k, v in config_data['M'].items():
+                            if isinstance(v, dict) and 'S' in v:
+                                work_order.config[k] = v['S']
+                            else:
+                                work_order.config[k] = str(v)
+                    except Exception as e:
+                        print(f"[DEBUG] Error parsing config: {e}, config_data: {config_data}")
+                        work_order.config = {}
+                else:
+                    work_order.config = {}
+                    
                 return work_order
             else:
                 # Regular JSON format
@@ -315,6 +321,7 @@ class WorkOrder:
                 work_order.fromName = data.get('fromName')
                 work_order.zoomId = data.get('zoomId')
                 work_order.inPerson = data.get('inPerson', False)
+                work_order.config = data.get('config', {})
                 return work_order
         except Exception as e:
             print(f"Error creating WorkOrder: {e}")

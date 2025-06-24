@@ -713,11 +713,13 @@ async function handleTableCount({ tableNameKey }) {
  * @param {string} payload.account - The account code.
  * @param {string} payload.createdBy - The user PID who created the work order.
  * @param {string} payload.zoomId - The zoom ID for the work order.
+ * @param {boolean} payload.inPerson - Whether the work order is in-person.
+ * @param {object} payload.config - The config for the work order.
  * @returns {Promise<object>} The created work order.
  * @throws {Error} If required fields are missing or DB error.
  */
 async function handleCreateWorkOrder(payload) {
-    const { eventCode, subEvent, stage, languages, subjects, account, createdBy, zoomId } = payload;
+    const { eventCode, subEvent, stage, languages, subjects, account, createdBy, zoomId, inPerson, config } = payload;
     if (!eventCode || !subEvent || !stage || !languages || !subjects || !account || !createdBy) {
         throw new Error(`Missing required fields for createWorkOrder: ${JSON.stringify(payload)}`);
     }
@@ -735,10 +737,13 @@ async function handleCreateWorkOrder(payload) {
         account,
         createdBy,
         zoomId: zoomId || null,
+        inPerson: inPerson || false,
+        config: config || {},
         locked: false,
         lockedBy: "",
         steps: [
-            { name: 'Prepare', status: 'ready', message: '', isActive: true },
+            { name: 'Count', status: 'ready', message: '', isActive: true },
+            { name: 'Prepare', status: 'ready', message: '', isActive: false },
             { name: 'Test', status: 'ready', message: '', isActive: false },
             { name: 'Send', status: 'ready', message: '', isActive: false }
         ],

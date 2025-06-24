@@ -33,10 +33,11 @@ class PrepareStep:
         self.headers = {'Authorization': f'Bearer {self.api_key}'}
 
     async def process(self, work_order: WorkOrder, step: Step) -> bool:
-        """Process the prepare step for a work order.
+        """
+        Process the Prepare step for a work order.
         
         Args:
-            work_order: The work order being processed
+            work_order: The work order to process
             step: The current step being executed
             
         Returns:
@@ -45,28 +46,6 @@ class PrepareStep:
         Raises:
             Exception: If any error occurs during processing
         """
-        print("\n[DEBUG] Prepare Step Processing Details:")
-        print(f"  Work Order ID: {work_order.id}")
-        print(f"  Event Code: {work_order.eventCode}")
-        print(f"  Sub Event: {work_order.subEvent}")
-        print(f"  Stage: {work_order.stage}")
-        print(f"  Languages: {work_order.languages}")
-        print(f"  Subjects: {work_order.subjects}")
-        print(f"  Reply To: {work_order.replyTo}")
-        print(f"  From Name: {work_order.fromName}")
-        print(f"  Zoom ID: {work_order.zoomId}")
-        print(f"  Step Status: {step.status}")
-        print(f"  Step Message: {step.message}")
-        print(f"  Step Active: {step.isActive}")
-        print(f"  Environment Variables:")
-        print(f"    MAILCHIMP_API_KEY: {'Set' if self.api_key else 'Not Set'}")
-        print(f"    MAILCHIMP_AUDIENCE: {self.audience_name}")
-        print(f"    MAILCHIMP_REPLY_TO: {self.reply_to}")
-        print(f"    MAILCHIMP_SERVER_PREFIX: {self.server_prefix}")
-        print(f"    AWS_PROFILE: {self.aws_profile}")
-        print(f"    S3_BUCKET: {self.s3_bucket}")
-        print("")
-
         # Update initial progress message
         await self._update_progress(work_order, "Starting prepare step...")
 
@@ -79,24 +58,18 @@ class PrepareStep:
             object_name = template_name + ".html"
             s3_key = f"{work_order.eventCode}/{object_name}"
 
-            print(f"[DEBUG] Processing language: {lang}")
-            print(f"  Template Name: {template_name}")
-            print(f"  S3 Key: {s3_key}")
-
             # Update progress for this language
             await self._update_progress(work_order, f"Processing {lang} language...")
 
             # Get list ID for the audience
             await self._update_progress(work_order, f"Getting Mailchimp audience for {lang}...")
             list_id = self._get_list_id_by_name(self.audience_name)
-            print(f"  List ID: {list_id}")
             
             # Get template and create campaign
             await self._update_progress(work_order, f"Finding Mailchimp template for {lang}...")
             template = self._list_templates(template_name)
             if not template:
                 raise ValueError(f"Template '{template_name}' not found")
-            print(f"  Template ID: {template['id']}")
 
             # Use default values if fromName or replyTo are not set
             from_name = work_order.fromName or "Sakyong Lineage"
@@ -111,7 +84,6 @@ class PrepareStep:
                     reply_to,
                     from_name
                 )
-                print(f"  Campaign ID: {campaign_id}")
 
                 # Get and clean HTML content
                 await self._update_progress(work_order, f"Retrieving HTML content for {lang}...")
@@ -131,12 +103,6 @@ class PrepareStep:
                 await self._update_progress(work_order, f"Updating embeddedEmails for {lang}...")
                 if self.aws_client:
                     s3_url = f"https://{self.s3_bucket}.s3.amazonaws.com/{s3_key}"
-                    print(f"[DEBUG] Attempting to update embeddedEmails:")
-                    print(f"  Event Code: {work_order.eventCode}")
-                    print(f"  Sub Event: {work_order.subEvent}")
-                    print(f"  Stage: {work_order.stage}")
-                    print(f"  Language: {lang}")
-                    print(f"  S3 URL: {s3_url}")
                     
                     success = self.aws_client.update_event_embedded_emails(
                         work_order.eventCode,
@@ -151,8 +117,6 @@ class PrepareStep:
                         print(f"[ERROR] This failure indicates the events table update failed")
                         print(f"[ERROR] Event details: {work_order.eventCode}/{work_order.subEvent}/{work_order.stage}/{lang}")
                         raise ValueError(error_msg)
-                    else:
-                        print(f"[DEBUG] Successfully updated embeddedEmails for {lang}")
                 else:
                     error_msg = f"No AWS client available - cannot update embeddedEmails for {lang}"
                     print(f"[ERROR] {error_msg}")
@@ -160,10 +124,9 @@ class PrepareStep:
                     raise ValueError(error_msg)
                 
                 await self._update_progress(work_order, f"Successfully completed {lang} language")
-                print(f"[DEBUG] Successfully processed language: {lang}\n")
             except Exception as e:
                 error_message = str(e)
-                print(f"[DEBUG] Error processing language {lang}: {error_message}")
+                print(f"[ERROR] Error processing language {lang}: {error_message}")
                 # Don't update progress message here - let the error be handled by the caller
                 raise ValueError(f"Failed to process language {lang}: {error_message}")
 

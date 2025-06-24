@@ -44,6 +44,8 @@ DYNAMODB_TABLE = os.getenv('DYNAMODB_TABLE', 'email-work-orders')
 WORK_ORDERS_TABLE = os.getenv('WORK_ORDERS_TABLE')
 CONNECTIONS_TABLE = os.getenv('CONNECTIONS_TABLE')
 EVENTS_TABLE = os.getenv('EVENTS_TABLE', 'events')
+STUDENT_TABLE = os.getenv('STUDENT_TABLE', 'foundations.participants')
+POOLS_TABLE = os.getenv('POOLS_TABLE', 'pools')
 
 # SQS configuration
 SQS_QUEUE_URL = os.getenv('SQS_QUEUE_URL')

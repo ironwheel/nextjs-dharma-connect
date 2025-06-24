@@ -140,6 +140,10 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
 
         setLoading(true)
         try {
+            // Get the selected event to extract pool configuration
+            const selectedEvent = events.find(ev => ev.aid === eventCode)
+            const pool = selectedEvent?.config?.pool || ''
+
             const workOrder = {
                 eventCode,
                 subEvent,
@@ -150,12 +154,21 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                 zoomId: stage === 'reg-confirm' && !inPerson ? zoomId : undefined,
                 inPerson: inPerson ? true : false,
                 createdBy: userPid,
+                config: {
+                    pool: pool
+                },
                 steps: [
+                    {
+                        name: 'Count',
+                        status: 'ready',
+                        message: '',
+                        isActive: true
+                    },
                     {
                         name: 'Prepare',
                         status: 'ready',
                         message: '',
-                        isActive: true
+                        isActive: false
                     },
                     {
                         name: 'Test',
