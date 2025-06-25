@@ -2,7 +2,6 @@ import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { Form, Button, Spinner, Card, Badge } from 'react-bootstrap'
 import { toast } from 'react-toastify'
 import { callDbApi } from '@dharma/shared/src/clientApi'
-import { FiTrash2 } from 'react-icons/fi'
 
 interface WorkOrderFormProps {
     id?: string
@@ -279,7 +278,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                         aria-label="Delete Work Order"
                         disabled={loading}
                     >
-                        <FiTrash2 size={22} />
+                        &#128465;
                     </Button>
                 )}
                 <div className="d-flex gap-2 align-items-center">
