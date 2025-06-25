@@ -44,8 +44,10 @@ DYNAMODB_TABLE = os.getenv('DYNAMODB_TABLE', 'email-work-orders')
 WORK_ORDERS_TABLE = os.getenv('WORK_ORDERS_TABLE')
 CONNECTIONS_TABLE = os.getenv('CONNECTIONS_TABLE')
 EVENTS_TABLE = os.getenv('EVENTS_TABLE', 'events')
-STUDENT_TABLE = os.getenv('STUDENT_TABLE', 'foundations.participants')
+STUDENT_TABLE = os.getenv('STUDENT_TABLE', 'students')
 POOLS_TABLE = os.getenv('POOLS_TABLE', 'pools')
+PROMPTS_TABLE = os.getenv('PROMPTS_TABLE', 'prompts')
+EMAIL_ACCOUNT_CREDENTIALS_TABLE = os.getenv('EMAIL_ACCOUNT_CREDENTIALS_TABLE', 'email-account-credentials')
 
 # SQS configuration
 SQS_QUEUE_URL = os.getenv('SQS_QUEUE_URL')
@@ -62,6 +64,17 @@ MAILCHIMP_AUDIENCE = os.getenv('MAILCHIMP_AUDIENCE')
 MAILCHIMP_REPLY_TO = os.getenv('MAILCHIMP_REPLY_TO')
 MAILCHIMP_SERVER_PREFIX = os.getenv('MAILCHIMP_SERVER_PREFIX')
 
+# SMTP configuration
+SMTP_SERVER = os.getenv('SMTP_SERVER')
+SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
+DEFAULT_PREVIEW = os.getenv('DEFAULT_PREVIEW')
+DEFAULT_FROM_NAME = os.getenv('DEFAULT_FROM_NAME')
+
+# Email sending configuration
+EMAIL_BURST_SIZE = int(os.getenv('EMAIL_BURST_SIZE', '10'))
+EMAIL_RECOVERY_SLEEP_SECS = int(os.getenv('EMAIL_RECOVERY_SLEEP_SECS', '60'))
+EMAIL_CONTINUOUS_SLEEP_SECS = int(os.getenv('EMAIL_CONTINUOUS_SLEEP_SECS', '3600'))
+
 # Email templates configuration
 TEMPLATES_DIR = os.getenv('TEMPLATES_DIR', str(Path(__file__).parent / 'templates'))
 
@@ -76,7 +89,13 @@ REQUIRED_ENV_VARS = [
     'MAILCHIMP_API_KEY',
     'MAILCHIMP_AUDIENCE',
     'MAILCHIMP_REPLY_TO',
-    'MAILCHIMP_SERVER_PREFIX'
+    'MAILCHIMP_SERVER_PREFIX',
+    'SMTP_SERVER',
+    'SMTP_PORT',
+    'DEFAULT_PREVIEW',
+    'DEFAULT_FROM_NAME',
+    'EMAIL_ACCOUNT_CREDENTIALS_TABLE',
+    'PROMPTS_TABLE'
 ]
 
 def validate_config():

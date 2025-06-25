@@ -75,10 +75,8 @@ class CountStep:
         stage = work_order.stage or ""
 
         # Stage fixup
-        if stage == 'eligible':
+        if stage == 'eligible' or stage == 'offering-reminder' or stage == 'reg-reminder':
             stage = 'reg'
-        if stage == 'reg-confirm':
-            stage = 'reg_confirm'
         
         # Get language code from languages dict, default to "EN"
         language_code = "EN"
@@ -92,22 +90,29 @@ class CountStep:
         campaign_string = f"{event_code}_{sub_event}_{stage}_{language_code}"
         return campaign_string
 
+    LANG_CODE_TO_NAME = {
+        "EN": "English",
+        "FR": "French",
+        "ES": "Spanish",
+        "DE": "German",
+        "IT": "Italian",
+        "CZ": "Czech",
+        "PT": "Portuguese"
+    }
+    def code_to_full_language(self, code):
+        return self.LANG_CODE_TO_NAME.get(code.upper(), code)
+
     def _count_recipients_simple(self, student_data: List[Dict], pools_data: List[Dict], 
                                 work_order: WorkOrder, campaign_string: str) -> Tuple[int, int]:
         """
         Simplified count logic - only check unsubscribe status and campaign string presence.
-        
-        Args:
-            student_data: List of all student records
-            pools_data: List of all pool definitions
-            work_order: The work order being processed
-            campaign_string: The campaign string to check
-            
-        Returns:
-            Tuple of (received_count, will_receive_count)
+        Adds language eligibility logic as described by user.
         """
         received_count = 0
         will_receive_count = 0
+        selected_lang_codes = set(work_order.languages.keys())
+        has_english = 'EN' in selected_lang_codes
+        selected_full_names = set(self.code_to_full_language(code).lower() for code in selected_lang_codes)
         
         for student in student_data:
             # Skip if unsubscribe is true
@@ -121,8 +126,13 @@ class CountStep:
                 received_count += 1
                 continue
             
+            # Language eligibility check
+            if not has_english:
+                written_lang = student.get('writtenLangPref')
+                if not written_lang or written_lang.lower() not in selected_full_names:
+                    continue
+            
             # For "will receive" count, apply all filters
-            # Check eligibility
             pool_name = work_order.config.get('pool') if hasattr(work_order, 'config') and work_order.config else None
             if not pool_name:
                 continue
@@ -186,6 +196,20 @@ class CountStep:
             offering_history = program.get('offeringHistory', {})
             subevent_data = offering_history.get(sub_event, {})
             return 'offeringIntent' in subevent_data
+        
+        elif stage == 'offering-reminder':
+            # join: true, withdrawn: false|undefined, offeringHistory.<subevent>.offeringIntent: does not exist
+            if not (program.get('join', False) and not program.get('withdrawn', False)):
+                return False
+            
+            # Check if offeringIntent exists for the subevent
+            sub_event = work_order.subEvent
+            if not sub_event:
+                return False
+                
+            offering_history = program.get('offeringHistory', {})
+            subevent_data = offering_history.get(sub_event, {})
+            return 'offeringIntent' not in subevent_data
         
         # For other stages, return False (will be added later as mentioned)
         return False

@@ -49,12 +49,25 @@ class PrepareStep:
         # Update initial progress message
         await self._update_progress(work_order, "Starting prepare step...")
 
+        # Debug: Print Mailchimp config values before any API call
+        print(f"[DEBUG] MAILCHIMP_API_KEY: {self.api_key}")
+        print(f"[DEBUG] MAILCHIMP_SERVER_PREFIX: {self.server_prefix}")
+        print(f"[DEBUG] MAILCHIMP_AUDIENCE: {self.audience_name}")
+        print(f"[DEBUG] MAILCHIMP_REPLY_TO: {self.reply_to}")
+        print(f"[DEBUG] S3_BUCKET: {self.s3_bucket}")
+
         # Process each language in the work order
         for lang in work_order.languages.keys():
             if not work_order.languages[lang]:
                 continue  # Skip disabled languages
-            
-            template_name = f"{work_order.eventCode}-{work_order.subEvent}-{work_order.stage}-{lang}"
+
+            # Fixup stage
+            if work_order.stage == 'eligible' or work_order.stage == 'offering-reminder' or work_order.stage == 'reg-reminder':
+                stage = 'reg'
+            else:
+                stage = work_order.stage
+
+            template_name = f"{work_order.eventCode}-{work_order.subEvent}-{stage}-{lang}"
             object_name = template_name + ".html"
             s3_key = f"{work_order.eventCode}/{object_name}"
 
@@ -117,6 +130,18 @@ class PrepareStep:
                         print(f"[ERROR] This failure indicates the events table update failed")
                         print(f"[ERROR] Event details: {work_order.eventCode}/{work_order.subEvent}/{work_order.stage}/{lang}")
                         raise ValueError(error_msg)
+                    
+                    # Also store the S3 path in the work order for later use by other steps
+                    await self._update_progress(work_order, f"Storing S3 path for {lang} in work order...")
+                    current_work_order = self.aws_client.get_work_order(work_order.id)
+                    if current_work_order:
+                        s3_html_paths = current_work_order.s3HTMLPaths.copy()
+                        s3_html_paths[lang] = s3_url
+                        
+                        self.aws_client.update_work_order({
+                            'id': work_order.id,
+                            'updates': {'s3HTMLPaths': s3_html_paths}
+                        })
                 else:
                     error_msg = f"No AWS client available - cannot update embeddedEmails for {lang}"
                     print(f"[ERROR] {error_msg}")
@@ -132,6 +157,9 @@ class PrepareStep:
 
         # Final success message
         await self._update_progress(work_order, "Prepare step completed successfully")
+        step.message = "Prepare step completed successfully"
+        if hasattr(step, 'status'):
+            step.status = getattr(step, 'status', None) or 'complete'
         return True
 
     async def _update_progress(self, work_order: WorkOrder, message: str):

@@ -209,6 +209,12 @@ class EmailAgent:
         print(f"[DEBUG] Handling stop request for work order: {work_order_id}, step: {step_name}")
         
         try:
+            # Set stopRequested flag in DynamoDB
+            self.aws_client.update_work_order({
+                'id': work_order_id,
+                'updates': {'stopRequested': True}
+            })
+
             # Find the requested step
             step = None
             step_index = -1
@@ -271,6 +277,12 @@ class EmailAgent:
         print(f"[DEBUG] Handling start request for work order: {work_order_id}, step: {step_name}")
         
         try:
+            # Clear stopRequested flag in DynamoDB
+            self.aws_client.update_work_order({
+                'id': work_order_id,
+                'updates': {'stopRequested': False}
+            })
+
             # Find the requested step
             step = None
             step_index = -1

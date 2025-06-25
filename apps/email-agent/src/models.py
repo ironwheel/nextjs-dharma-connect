@@ -150,6 +150,10 @@ class WorkOrder:
         self.zoomId = None  # Add zoomId field
         self.inPerson = None  # Add inPerson field
         self.config = {}  # Add config field for pool and other configuration
+        self.testers = []  # Add testers field for test step
+        self.sendContinuously = False  # Add sendContinuously field
+        self.sendUntil = None  # Add sendUntil field
+        self.s3HTMLPaths = {}  # Add s3HTMLPaths field for storing S3 paths
 
     def dict(self) -> Dict:
         """Convert to regular dictionary format"""
@@ -175,7 +179,11 @@ class WorkOrder:
             'fromName': self.fromName,
             'zoomId': self.zoomId,
             'inPerson': self.inPerson,
-            'config': self.config
+            'config': self.config,
+            'testers': self.testers,
+            'sendContinuously': self.sendContinuously,
+            'sendUntil': self.sendUntil,
+            's3HTMLPaths': self.s3HTMLPaths
         }
 
     def to_dict(self) -> Dict:
@@ -202,7 +210,11 @@ class WorkOrder:
             'fromName': {'S': self.fromName} if self.fromName else {'NULL': True},
             'zoomId': {'S': self.zoomId} if self.zoomId else {'NULL': True},
             'inPerson': {'BOOL': self.inPerson} if self.inPerson is not None else {'NULL': True},
-            'config': {'M': {k: {'S': v} for k, v in self.config.items()}} if self.config else {'NULL': True}
+            'config': {'M': {k: {'S': v} for k, v in self.config.items()}} if self.config else {'NULL': True},
+            'testers': {'L': [{'S': tester} for tester in self.testers]} if self.testers else {'NULL': True},
+            'sendContinuously': {'BOOL': self.sendContinuously},
+            'sendUntil': {'NULL': True} if self.sendUntil is None else {'S': self.sendUntil},
+            's3HTMLPaths': {'M': {k: {'S': v} for k, v in self.s3HTMLPaths.items()}} if self.s3HTMLPaths else {'NULL': True}
         }
 
     def __str__(self) -> str:
@@ -322,6 +334,10 @@ class WorkOrder:
                 work_order.zoomId = data.get('zoomId')
                 work_order.inPerson = data.get('inPerson', False)
                 work_order.config = data.get('config', {})
+                work_order.testers = data.get('testers', [])
+                work_order.sendContinuously = data.get('sendContinuously', False)
+                work_order.sendUntil = data.get('sendUntil')
+                work_order.s3HTMLPaths = data.get('s3HTMLPaths', {})
                 return work_order
         except Exception as e:
             print(f"Error creating WorkOrder: {e}")
