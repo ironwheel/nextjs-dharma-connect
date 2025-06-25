@@ -14,8 +14,7 @@ import ReactSrcDocIframe from 'react-srcdoc-iframe';
 import { Viewer, Worker } from '@react-pdf-viewer/core';
 import { defaultLayoutPlugin } from '@react-pdf-viewer/default-layout';
 import packageJson from '../package.json';
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faGlobe, faPlus, faMinus, faTimes, faPlusCircle, faMinusCircle, faUser, faCheck, faXmark } from "@fortawesome/pro-solid-svg-icons";
+import { FiGlobe, FiPlus, FiMinus, FiX, FiPlusCircle, FiMinusCircle, FiUser, FiCheck } from 'react-icons/fi';
 import Pusher from 'pusher-js';
 
 // Shared utilities and components using '@/' alias
@@ -541,10 +540,10 @@ const MediaElementWrapper = ({ el }) => {
   if (el.tag === 'control' || el.tag === 'control-video') {
     const onControlClick = () => { if (el.control) { displayControl[el.control] = !displayControl[el.control]; forceRender(); } };
     const isExpanded = el.control ? !!displayControl[el.control] : false;
-    const icon = isExpanded ? faMinus : faPlus;
+    const Icon = isExpanded ? FiMinus : FiPlus;
     const title = promptLookup(displayPrompts, el.eventname, student?.writtenLangPref || 'English', 'dashboard', dbgPrompt, dbgout) || 'Control Section';
     if (el.tag === 'control-video' && !displayControl['video']) return null;
-    return (<Fragment key={el.key}> <Card border="dark" text={'white'} bg={el.bg || 'secondary'} onClick={onControlClick} style={{ cursor: "pointer", marginLeft: `${el.indent || 0}px` }} className="mb-3"> <Card.Body><Card.Title><FontAwesomeIcon size="lg" icon={icon} /> {title}</Card.Title></Card.Body> </Card> </Fragment>);
+    return (<Fragment key={el.key}> <Card border="dark" text={'white'} bg={el.bg || 'secondary'} onClick={onControlClick} style={{ cursor: "pointer", marginLeft: `${el.indent || 0}px` }} className="mb-3"> <Card.Body><Card.Title><Icon size={16} /> {title}</Card.Title></Card.Body> </Card> </Fragment>);
   }
   let parentControlKey = el.tag; let mainCategoryControlKey = el.tag?.startsWith('video-year-') ? 'video' : parentControlKey;
   if (!displayControl[parentControlKey] || (mainCategoryControlKey !== parentControlKey && !displayControl[mainCategoryControlKey])) return null;

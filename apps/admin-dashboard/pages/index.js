@@ -10,8 +10,6 @@ import React, { useState, useEffect, useCallback, Fragment, useRef } from "react
 import { useRouter } from 'next/router';
 import { Container, Row, Col, Form, Card, Button } from "react-bootstrap";
 import packageJson from '../package.json';
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faGlobe, faPlus, faMinus, faTimes, faPlusCircle, faMinusCircle, faUser, faCheck, faXmark } from "@fortawesome/pro-solid-svg-icons";
 import Navbar from "react-bootstrap/Navbar";
 import Dropdown from "react-bootstrap/Dropdown";
 import DropdownButton from "react-bootstrap/DropdownButton";

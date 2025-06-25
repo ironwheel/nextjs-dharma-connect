@@ -7,8 +7,7 @@
  */
 import React from "react";
 import { Navbar, DropdownButton, Dropdown, Form, Container } from "react-bootstrap";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faGlobe } from "@fortawesome/pro-solid-svg-icons";
+import { FiGlobe } from "react-icons/fi";
 
 /**
  * A dropdown component for selecting the written translation language.
@@ -28,7 +27,7 @@ export const WrittenTranslationSelection = ({ currentLanguage, onLanguageChange,
     const ConditionalIcon = () => {
         if (icon) {
             // Added margin-right (mr-1 or me-1 in Bootstrap 5) or use inline style
-            return <><FontAwesomeIcon style={{ color: "#FFF", marginRight: '0.3rem' }} icon={faGlobe} />{" "}</>;
+            return <><FiGlobe style={{ color: "#FFF", marginRight: '0.3rem' }} />{" "}</>;
         }
         return null;
     };
