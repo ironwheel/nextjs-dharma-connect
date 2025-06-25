@@ -279,7 +279,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                         aria-label="Delete Work Order"
                         disabled={loading}
                     >
-                        {React.createElement(FiTrash2, { size: 22 })}
+                        <FiTrash2 size={22} />
                     </Button>
                 )}
                 <div className="d-flex gap-2 align-items-center">
