@@ -1,10 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react'
-import { Table, Button, Badge } from 'react-bootstrap'
+import { Table, Button, Badge, Modal } from 'react-bootstrap'
 import { toast } from 'react-toastify'
 import { callDbApi } from '@dharma/shared/src/clientApi'
 import { FiPlus } from 'react-icons/fi'
 import { useWebSocketContext } from '../context/WebSocketProvider'
 import { unmarshall } from '@aws-sdk/util-dynamodb'
+import OverlayTrigger from 'react-bootstrap/OverlayTrigger'
+import Popover from 'react-bootstrap/Popover'
 
 interface WorkOrder {
     id: string
@@ -19,8 +21,11 @@ interface WorkOrder {
     zoomId?: string
     inPerson?: boolean
     config?: { [key: string]: any }
+    testers?: string[]
+    sendContinuously?: boolean
+    sendUntil?: string
     steps: Array<{
-        name: 'Count' | 'Prepare' | 'Test' | 'Send'
+        name: 'Count' | 'Prepare' | 'Dry-Run' | 'Test' | 'Send-Once' | 'Send-Continuously'
         status: 'ready' | 'working' | 'complete' | 'error' | 'interrupted' | 'exception'
         message: string
         isActive: boolean
@@ -29,6 +34,10 @@ interface WorkOrder {
     updatedAt: string
     locked: boolean
     lockedBy?: string
+    dryRunRecipients?: { id: string; name: string; email: string }[]
+    archived?: boolean
+    archivedAt?: string
+    archivedBy?: string
 }
 
 interface WorkOrderListProps {
@@ -44,7 +53,86 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
     const [activeSteps, setActiveSteps] = useState<Record<string, boolean>>({})
     const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
     const [hoveredRow, setHoveredRow] = useState<string | null>(null)
+    const [showRecipientsModal, setShowRecipientsModal] = useState(false)
+    const [currentRecipients, setCurrentRecipients] = useState<{ id: string; name: string; email: string }[]>([])
+    const [showArchiveModal, setShowArchiveModal] = useState(false)
+    const [archivedWorkOrders, setArchivedWorkOrders] = useState<WorkOrder[]>([])
+    const [loadingArchived, setLoadingArchived] = useState(false)
     const { lastMessage, status, connectionId } = useWebSocketContext()
+
+    const downloadRecipientsCSV = (recipients: { id: string; name: string; email: string }[]) => {
+        const csvContent = [
+            'Name,Email,ID',
+            ...recipients.map(r => `"${r.name}","${r.email}","${r.id}"`)
+        ].join('\n')
+
+        const blob = new Blob([csvContent], { type: 'text/csv' })
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `dry-run-recipients-${new Date().toISOString().split('T')[0]}.csv`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        window.URL.revokeObjectURL(url)
+    }
+
+    const openRecipientsModal = (recipients: { id: string; name: string; email: string }[]) => {
+        setCurrentRecipients(recipients)
+        setShowRecipientsModal(true)
+    }
+
+    const loadArchivedWorkOrders = async () => {
+        setLoadingArchived(true)
+        try {
+            const result = await callDbApi('getArchivedWorkOrders', {})
+            if (result && result.workOrders) {
+                setArchivedWorkOrders(result.workOrders)
+            }
+        } catch (error) {
+            console.error('Failed to load archived work orders:', error)
+            toast.error('Failed to load archived work orders')
+        } finally {
+            setLoadingArchived(false)
+        }
+    }
+
+    const openArchiveModal = async () => {
+        setShowArchiveModal(true)
+        await loadArchivedWorkOrders()
+    }
+
+    const archiveWorkOrder = async (workOrderId: string) => {
+        try {
+            await callDbApi('archiveWorkOrder', { workOrderId, archivedBy: userPid })
+            toast.success('Work order archived successfully')
+            loadWorkOrders() // Refresh the main list
+        } catch (error) {
+            console.error('Failed to archive work order:', error)
+            toast.error('Failed to archive work order')
+        }
+    }
+
+    const unarchiveWorkOrder = async (workOrderId: string) => {
+        try {
+            await callDbApi('unarchiveWorkOrder', { workOrderId })
+            toast.success('Work order restored successfully')
+            loadArchivedWorkOrders() // Refresh the archive list
+            loadWorkOrders() // Refresh the main list
+        } catch (error) {
+            console.error('Failed to unarchive work order:', error)
+            toast.error('Failed to restore work order')
+        }
+    }
+
+    const isWorkOrderCompleted = (workOrder: WorkOrder) => {
+        return workOrder.steps && workOrder.steps.every(step => {
+            const status = typeof step.status === 'string' ? step.status :
+                (step.status && typeof step.status === 'object' && 'S' in step.status) ?
+                    (step.status as { S: string }).S : 'ready'
+            return status === 'complete'
+        })
+    }
 
     const loadParticipantName = async (pid: string) => {
         if (!pid || participantNames[pid]) return
@@ -61,34 +149,33 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
     }
 
     const loadWorkOrders = async () => {
+        setLoading(true)
         try {
-            setLoading(true);
-            console.log('[DEBUG] Loading work orders...');
-            const response = await callDbApi('getWorkOrders', {});
-            console.log('[DEBUG] API response:', response);
-            console.log('[DEBUG] Response type:', typeof response);
-            console.log('[DEBUG] Response keys:', Object.keys(response || {}));
+            const result = await callDbApi('getWorkOrders', {})
+            if (result && result.workOrders) {
+                // Filter out archived work orders from the main list
+                const activeWorkOrders = result.workOrders.filter((wo: WorkOrder) => !wo.archived)
+                setWorkOrders(activeWorkOrders)
 
-            // The API returns { data: { workOrders: [...] } }
-            const orders = response?.workOrders || [];
-            console.log('[DEBUG] Work orders found:', orders.length, orders);
-            console.log('[DEBUG] Orders type:', typeof orders);
-            console.log('[DEBUG] Is array:', Array.isArray(orders));
+                // Load participant names for all work orders
+                const uniquePids = new Set<string>()
+                activeWorkOrders.forEach(wo => {
+                    if (wo.createdBy) uniquePids.add(wo.createdBy)
+                })
 
-            setWorkOrders(orders);
-
-            // Load participant names for all work orders
-            orders.forEach(order => {
-                if (order.createdBy) {
-                    loadParticipantName(order.createdBy);
-                }
-            });
+                uniquePids.forEach(pid => {
+                    if (!participantNames[pid]) {
+                        loadParticipantName(pid)
+                    }
+                })
+            }
         } catch (error) {
-            console.error('[DEBUG] Error loading work orders:', error);
+            console.error('Failed to load work orders:', error)
+            toast.error('Failed to load work orders')
         } finally {
-            setLoading(false);
+            setLoading(false)
         }
-    };
+    }
 
     useEffect(() => {
         loadWorkOrders()
@@ -159,6 +246,13 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                     zoomId: workOrder.zoomId,
                     inPerson: workOrder.inPerson,
                     config: workOrder.config || {},
+                    testers: workOrder.testers || [],
+                    sendContinuously: workOrder.sendContinuously,
+                    sendUntil: workOrder.sendUntil,
+                    dryRunRecipients: workOrder.dryRunRecipients || [],
+                    archived: workOrder.archived,
+                    archivedAt: workOrder.archivedAt,
+                    archivedBy: workOrder.archivedBy,
                 }
 
                 console.log('[DEBUG] Converted work order for state update:', updatedWorkOrder);
@@ -269,7 +363,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
         }
     }
 
-    const handleStepAction = async (id: string, stepName: 'Count' | 'Prepare' | 'Test' | 'Send', isStarting: boolean) => {
+    const handleStepAction = async (id: string, stepName: 'Count' | 'Prepare' | 'Dry-Run' | 'Test' | 'Send-Once' | 'Send-Continuously', isStarting: boolean) => {
         console.log(`[STEP-ACTION] Starting step action for work order ${id}, step ${stepName}, isStarting: ${isStarting}`);
         console.log(`[STEP-ACTION] Timestamp: ${new Date().toISOString()}`);
 
@@ -368,7 +462,15 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                             )}
                         </div>
                     </div>
-                    <div></div>
+                    <div>
+                        <Button
+                            variant="outline-secondary"
+                            onClick={openArchiveModal}
+                            size="sm"
+                        >
+                            📁 Archived Work Orders
+                        </Button>
+                    </div>
                 </div>
                 <div className="d-flex justify-content-center align-items-center" style={{ height: '300px', color: '#bbb', fontSize: '1.5rem' }}>
                     Work Order List is Empty
@@ -400,7 +502,15 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                         )}
                     </div>
                 </div>
-                <div></div>
+                <div>
+                    <Button
+                        variant="outline-secondary"
+                        onClick={openArchiveModal}
+                        size="sm"
+                    >
+                        📁 Archived Work Orders
+                    </Button>
+                </div>
             </div>
             <div style={{ height: '600px', overflowY: 'auto' }}>
                 <Table borderless hover variant="dark" className="mb-0">
@@ -413,7 +523,6 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                             <th style={{ border: 'none' }}>Languages</th>
                             <th style={{ border: 'none' }}>Email Account</th>
                             <th style={{ border: 'none' }}>Created By</th>
-                            <th style={{ border: 'none' }}>Zoom/Type</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -426,12 +535,30 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                     style={{ cursor: workOrder.locked ? 'not-allowed' : 'pointer' }}
                                 >
                                     <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
-                                        <Badge
-                                            bg={workOrder.locked ? 'danger' : 'success'}
-                                            className="px-3 py-2"
-                                        >
-                                            {workOrder.locked ? 'Locked' : 'Edit'}
-                                        </Badge>
+                                        <div className="d-flex align-items-center">
+                                            <Badge
+                                                bg={workOrder.locked ? 'danger' : 'success'}
+                                                className="px-3 py-2"
+                                            >
+                                                {workOrder.locked ? 'Locked' : 'Edit'}
+                                            </Badge>
+                                            {!workOrder.archived && isWorkOrderCompleted(workOrder) && (
+                                                <Button
+                                                    variant="outline-warning"
+                                                    size="sm"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation()
+                                                        if (confirm('Are you sure you want to archive this completed work order?')) {
+                                                            archiveWorkOrder(workOrder.id)
+                                                        }
+                                                    }}
+                                                    style={{ marginLeft: 8 }}
+                                                    title="Archive completed work order"
+                                                >
+                                                    📁
+                                                </Button>
+                                            )}
+                                        </div>
                                     </td>
                                     <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
                                         {workOrder.eventCode}
@@ -441,22 +568,9 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                     <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{Object.keys(workOrder.languages || {}).join(',')}</td>
                                     <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.account}</td>
                                     <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{participantNames[workOrder.createdBy] || workOrder.createdBy}</td>
-                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
-                                        {workOrder.stage === 'reg-confirm' ? (
-                                            workOrder.inPerson ? (
-                                                <Badge bg="success">In-Person</Badge>
-                                            ) : workOrder.zoomId ? (
-                                                <span title={`Zoom ID: ${workOrder.zoomId}`}>Zoom</span>
-                                            ) : (
-                                                <span className="text-muted">No Zoom ID</span>
-                                            )
-                                        ) : (
-                                            <span className="text-muted">-</span>
-                                        )}
-                                    </td>
                                 </tr>
                                 <tr>
-                                    <td colSpan={9} style={{ padding: 0, background: 'transparent', border: 'none' }}>
+                                    <td colSpan={8} style={{ padding: 0, background: 'transparent', border: 'none' }}>
                                         {(workOrder.steps || []).map((step, index) => {
                                             // Helper function to extract string values from DynamoDB format or plain strings
                                             const extractString = (value: any): string => {
@@ -539,6 +653,23 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                 const countStep = workOrder.steps.find(s => extractString(s.name) === 'Count');
                                                 const countStatus = countStep ? extractString(countStep.status) : 'ready';
                                                 finalCanStart = canStart && countStatus === 'complete';
+                                            } else if (stepName === 'Dry-Run') {
+                                                const prepareStep = workOrder.steps.find(s => extractString(s.name) === 'Prepare');
+                                                const prepareStatus = prepareStep ? extractString(prepareStep.status) : 'ready';
+                                                finalCanStart = canStart && prepareStatus === 'complete';
+                                            } else if (stepName === 'Test') {
+                                                const dryRunStep = workOrder.steps.find(s => extractString(s.name) === 'Dry-Run');
+                                                const dryRunStatus = dryRunStep ? extractString(dryRunStep.status) : 'ready';
+                                                finalCanStart = canStart && dryRunStatus === 'complete';
+                                            } else if (stepName === 'Send-Once') {
+                                                const testStep = workOrder.steps.find(s => extractString(s.name) === 'Test');
+                                                const testStatus = testStep ? extractString(testStep.status) : 'ready';
+                                                finalCanStart = canStart && testStatus === 'complete';
+                                            } else if (stepName === 'Send-Continuously') {
+                                                const sendOnceStep = workOrder.steps.find(s => extractString(s.name) === 'Send-Once');
+                                                const sendOnceStatus = sendOnceStep ? extractString(sendOnceStep.status) : 'ready';
+                                                const hasSendContinuously = workOrder.sendContinuously || false;
+                                                finalCanStart = canStart && sendOnceStatus === 'complete' && hasSendContinuously;
                                             }
 
                                             return (
@@ -554,7 +685,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                             <Button
                                                                 variant={buttonVariant}
                                                                 size="sm"
-                                                                onClick={e => { e.stopPropagation(); handleStepAction(workOrder.id, stepName as 'Count' | 'Prepare' | 'Test' | 'Send', !isWorking) }}
+                                                                onClick={e => { e.stopPropagation(); handleStepAction(workOrder.id, stepName as 'Count' | 'Prepare' | 'Dry-Run' | 'Test' | 'Send-Once' | 'Send-Continuously', !isWorking) }}
                                                                 disabled={buttonDisabled || !finalCanStart}
                                                                 style={isComplete ? { backgroundColor: '#0d6efd', color: '#fff', borderColor: '#0d6efd' } : {}}
                                                             >
@@ -562,12 +693,42 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                             </Button>
                                                         </div>
                                                         <div style={{ flex: 1 }}>
-                                                            <Badge bg={badgeBg} className="px-3 py-2" style={badgeStyle}>
+                                                            <span
+                                                                className="px-3 py-2"
+                                                                style={{
+                                                                    color: isPending || isComplete ? '#bbb'
+                                                                        : isInterrupted ? '#ff9800'
+                                                                            : isError ? '#dc3545'
+                                                                                : isException ? '#6f42c1'
+                                                                                    : isWorking ? '#0d6efd'
+                                                                                        : '#fff',
+                                                                    fontSize: '0.95rem',
+                                                                    fontWeight: 'normal',
+                                                                    background: 'none',
+                                                                    border: 'none',
+                                                                    borderRadius: 0,
+                                                                    padding: 0
+                                                                }}
+                                                            >
                                                                 {isPending ? 'pending' : stepStatus}
-                                                            </Badge>
+                                                            </span>
                                                         </div>
                                                         <div style={{ flex: 4, color: isInterrupted ? '#fff' : messageColor }}>
-                                                            {stepMessage}
+                                                            {stepName === 'Dry-Run' && workOrder.dryRunRecipients && workOrder.dryRunRecipients.length > 0 ? (
+                                                                <div className="d-flex align-items-center">
+                                                                    <span style={{ flex: 1 }}>{stepMessage}</span>
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant="outline-info"
+                                                                        onClick={() => workOrder.dryRunRecipients && openRecipientsModal(workOrder.dryRunRecipients)}
+                                                                        style={{ marginLeft: 8 }}
+                                                                    >
+                                                                        View Results ({workOrder.dryRunRecipients.length})
+                                                                    </Button>
+                                                                </div>
+                                                            ) : (
+                                                                <span>{stepMessage}</span>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -580,6 +741,157 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                     </tbody>
                 </Table>
             </div>
+
+            {/* Recipients Modal */}
+            <Modal
+                show={showRecipientsModal}
+                onHide={() => setShowRecipientsModal(false)}
+                size="lg"
+                dialogClassName="modal-xl"
+            >
+                <Modal.Header closeButton>
+                    <Modal.Title>Dry-Run Recipients ({currentRecipients.length})</Modal.Title>
+                </Modal.Header>
+                <Modal.Body style={{ maxHeight: '70vh', overflow: 'hidden' }}>
+                    <div style={{ marginBottom: 16 }}>
+                        <Button
+                            variant="outline-success"
+                            size="sm"
+                            onClick={() => downloadRecipientsCSV(currentRecipients)}
+                        >
+                            📥 Download CSV
+                        </Button>
+                    </div>
+                    <div style={{
+                        maxHeight: '60vh',
+                        overflowY: 'auto',
+                        border: '1px solid #dee2e6',
+                        borderRadius: '4px',
+                        padding: '8px'
+                    }}>
+                        <table className="table table-sm table-striped">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Name</th>
+                                    <th>Email</th>
+                                    <th>ID</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {currentRecipients.map((recipient, index) => (
+                                    <tr key={recipient.id}>
+                                        <td>{index + 1}</td>
+                                        <td><strong>{recipient.name}</strong></td>
+                                        <td>{recipient.email}</td>
+                                        <td style={{ fontSize: '0.85em', color: '#666' }}>{recipient.id}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </Modal.Body>
+                <Modal.Footer>
+                    <Button variant="secondary" onClick={() => setShowRecipientsModal(false)}>
+                        Close
+                    </Button>
+                </Modal.Footer>
+            </Modal>
+
+            {/* Archive Modal */}
+            <Modal
+                show={showArchiveModal}
+                onHide={() => setShowArchiveModal(false)}
+                size="xl"
+                dialogClassName="modal-fullscreen-lg-down"
+            >
+                <Modal.Header closeButton>
+                    <Modal.Title>Archived Work Orders ({archivedWorkOrders.length})</Modal.Title>
+                </Modal.Header>
+                <Modal.Body style={{ maxHeight: '80vh', overflow: 'hidden' }}>
+                    {loadingArchived ? (
+                        <div className="text-center py-4">
+                            <div className="spinner-border" role="status">
+                                <span className="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    ) : archivedWorkOrders.length === 0 ? (
+                        <div className="text-center py-4 text-muted">
+                            No archived work orders found.
+                        </div>
+                    ) : (
+                        <div style={{
+                            maxHeight: '70vh',
+                            overflowY: 'auto'
+                        }}>
+                            <Table borderless hover variant="dark" className="mb-0">
+                                <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: '#212529' }}>
+                                    <tr style={{ border: 'none' }}>
+                                        <th style={{ border: 'none' }}>Actions</th>
+                                        <th style={{ border: 'none' }}>Event Code</th>
+                                        <th style={{ border: 'none' }}>Sub Event</th>
+                                        <th style={{ border: 'none' }}>Stage</th>
+                                        <th style={{ border: 'none' }}>Languages</th>
+                                        <th style={{ border: 'none' }}>Email Account</th>
+                                        <th style={{ border: 'none' }}>Created By</th>
+                                        <th style={{ border: 'none' }}>Archived</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {archivedWorkOrders.map(workOrder => (
+                                        <tr key={workOrder.id}>
+                                            <td style={{ border: 'none', verticalAlign: 'middle' }}>
+                                                <Button
+                                                    variant="outline-success"
+                                                    size="sm"
+                                                    onClick={() => unarchiveWorkOrder(workOrder.id)}
+                                                    title="Restore work order"
+                                                >
+                                                    🔄 Restore
+                                                </Button>
+                                            </td>
+                                            <td style={{ border: 'none', verticalAlign: 'middle' }}>
+                                                {workOrder.eventCode}
+                                            </td>
+                                            <td style={{ border: 'none', verticalAlign: 'middle' }}>
+                                                {workOrder.subEvent}
+                                            </td>
+                                            <td style={{ border: 'none', verticalAlign: 'middle' }}>
+                                                {workOrder.stage}
+                                            </td>
+                                            <td style={{ border: 'none', verticalAlign: 'middle' }}>
+                                                {Object.keys(workOrder.languages || {}).join(',')}
+                                            </td>
+                                            <td style={{ border: 'none', verticalAlign: 'middle' }}>
+                                                {workOrder.account}
+                                            </td>
+                                            <td style={{ border: 'none', verticalAlign: 'middle' }}>
+                                                {participantNames[workOrder.createdBy] || workOrder.createdBy}
+                                            </td>
+                                            <td style={{ border: 'none', verticalAlign: 'middle' }}>
+                                                <div>
+                                                    <div style={{ fontSize: '0.85em' }}>
+                                                        {workOrder.archivedAt ? new Date(workOrder.archivedAt).toLocaleDateString() : 'Unknown'}
+                                                    </div>
+                                                    <div style={{ fontSize: '0.75em', color: '#888' }}>
+                                                        by {participantNames[workOrder.archivedBy || ''] || workOrder.archivedBy || 'Unknown'}
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </Table>
+                        </div>
+                    )}
+                </Modal.Body>
+                <Modal.Footer>
+                    <Button variant="secondary" onClick={() => setShowArchiveModal(false)}>
+                        Close
+                    </Button>
+                </Modal.Footer>
+            </Modal>
+
             <style>{`
                 .workorder-main-row {
                     background: #3a3d40 !important;
@@ -591,4 +903,4 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
             `}</style>
         </div>
     )
-} 
+}

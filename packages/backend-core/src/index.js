@@ -55,6 +55,9 @@ export {
     handleLockWorkOrder,
     handleUnlockWorkOrder,
     sendWorkOrderMessageAction,
+    handleArchiveWorkOrder,
+    handleUnarchiveWorkOrder,
+    handleGetArchivedWorkOrders,
 } from './db-actions.js';
 
 // Export from auth-logic.js

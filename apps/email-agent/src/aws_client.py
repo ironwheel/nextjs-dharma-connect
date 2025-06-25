@@ -15,6 +15,11 @@ WEBSOCKET_API_URL = config.websocket_api_url
 CONNECTIONS_TABLE = config.connections_table
 EVENTS_TABLE = config.events_table
 
+# Import table names from config
+STUDENT_TABLE = os.getenv('STUDENT_TABLE', 'students')
+POOLS_TABLE = os.getenv('POOLS_TABLE', 'pools')
+PROMPTS_TABLE = os.getenv('PROMPTS_TABLE', 'prompts')
+
 class AWSClient:
     def __init__(self):
         self.dynamodb = boto3.resource('dynamodb', region_name=config.aws_region)
@@ -251,7 +256,7 @@ class AWSClient:
                 ReturnValues='ALL_NEW'
             )
             print(f"[DEBUG] Successfully unlocked work order {id}")
-            print(f"[DEBUG] Updated item: {result.get('Attributes', {})}")
+            #print(f"[DEBUG] Updated item: {result.get('Attributes', {})}")
             return True
         except ClientError as e:
             print(f"Error unlocking work order: {e}")
@@ -418,6 +423,61 @@ class AWSClient:
         except ClientError as e:
             print(f"Error getting event: {e}")
             return None
+
+    def get_student(self, student_id: str) -> Optional[Dict]:
+        """Get a student record from the student table."""
+        try:
+            student_table = self.dynamodb.Table(STUDENT_TABLE)
+            response = student_table.get_item(Key={'id': student_id})
+            if 'Item' in response:
+                return response['Item']
+            return None
+        except ClientError as e:
+            print(f"Error getting student: {e}")
+            return None
+
+    def get_s3_object_content(self, s3_url: str) -> Optional[str]:
+        """Get the content of an S3 object from its URL."""
+        try:
+            # Parse S3 URL to get bucket and key
+            # URL format: https://bucket-name.s3.amazonaws.com/key
+            if not s3_url.startswith('https://'):
+                raise ValueError("Invalid S3 URL format")
+            
+            # Remove https:// prefix
+            url_parts = s3_url[8:].split('/')
+            if len(url_parts) < 3:
+                raise ValueError("Invalid S3 URL format")
+            
+            bucket_name = url_parts[0].split('.')[0]  # Remove .s3.amazonaws.com
+            key = '/'.join(url_parts[1:])
+            
+            # Get S3 object
+            s3 = boto3.client('s3', region_name=config.aws_region)
+            response = s3.get_object(Bucket=bucket_name, Key=key)
+            
+            # Read content as string
+            content = response['Body'].read().decode('utf-8')
+            return content
+            
+        except Exception as e:
+            print(f"Error getting S3 object content: {e}")
+            return None
+
+    def update_student_emails(self, student_id: str, emails: Dict) -> bool:
+        """Update the emails field of a student record."""
+        try:
+            student_table = self.dynamodb.Table(STUDENT_TABLE)
+            student_table.update_item(
+                Key={'id': student_id},
+                UpdateExpression='SET #emails = :emails',
+                ExpressionAttributeNames={'#emails': 'emails'},
+                ExpressionAttributeValues={':emails': emails}
+            )
+            return True
+        except ClientError as e:
+            print(f"Error updating student emails: {e}")
+            return False
 
     def _get_full_language_name(self, language_code: str) -> str:
         """Convert two-letter language code to full language name."""
@@ -611,4 +671,59 @@ class AWSClient:
             print(f"  Full Language Name: {self._get_full_language_name(language)}")
             print(f"  S3 URL: {s3_url}")
             print(f"  Events Table: {EVENTS_TABLE}")
+            return False
+
+    def check_for_stop_messages(self, work_order_id: str) -> bool:
+        """
+        Check for stop messages for a specific work order without blocking.
+        This is used during long-running operations to check for stop requests.
+        
+        Args:
+            work_order_id: The work order ID to check for stop messages
+            
+        Returns:
+            True if a stop message was found and processed, False otherwise
+        """
+        try:
+            # Receive messages with a very short timeout
+            messages = self.sqs.receive_message(
+                QueueUrl=SQS_QUEUE_URL,
+                MaxNumberOfMessages=10,
+                WaitTimeSeconds=0,  # Non-blocking
+                AttributeNames=['All'],
+                MessageAttributeNames=['All']
+            )
+            
+            if 'Messages' not in messages:
+                return False
+            
+            for message in messages['Messages']:
+                try:
+                    body = json.loads(message['Body'])
+                    
+                    # Check if this is a stop message for our work order
+                    if (body.get('workOrderId') == work_order_id and 
+                        body.get('action') == 'stop'):
+                        
+                        print(f"[STOP-CHECK] Found stop message for work order {work_order_id}")
+                        
+                        # Set the stopRequested flag in the work order
+                        self.update_work_order({
+                            'id': work_order_id,
+                            'updates': {'stopRequested': True}
+                        })
+                        
+                        # Delete the message
+                        self.delete_sqs_message(message['ReceiptHandle'])
+                        
+                        return True
+                        
+                except Exception as e:
+                    print(f"[STOP-CHECK] Error processing message: {e}")
+                    continue
+            
+            return False
+            
+        except Exception as e:
+            print(f"[STOP-CHECK] Error checking for stop messages: {e}")
             return False 

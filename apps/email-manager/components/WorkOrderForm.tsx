@@ -27,6 +27,10 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
     const [zoomId, setZoomId] = useState('')
     const [inPerson, setInPerson] = useState(false)
     const [optionsLoaded, setOptionsLoaded] = useState(false)
+    const [testers, setTesters] = useState<string[]>([])
+    const [sendContinuously, setSendContinuously] = useState(false)
+    const [sendUntil, setSendUntil] = useState('')
+    const [testParticipantOptions, setTestParticipantOptions] = useState<Array<{ id: string, name: string }>>([])
     const loadedSubEventRef = useRef<string | null>(null)
     const loadedWorkOrderRef = useRef<any>(null)
 
@@ -37,14 +41,39 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
             callDbApi('getEvents', {}),
             callDbApi('getConfig', { key: 'emailAccountList' }),
             callDbApi('getConfig', { key: 'emailStageList' }),
-            callDbApi('getConfig', { key: 'emailLanguageList' })
-        ]).then(([eventsResp, accountResp, stageResp, langResp]) => {
+            callDbApi('getConfig', { key: 'emailLanguageList' }),
+            callDbApi('getConfig', { key: 'emailTestIDs' })
+        ]).then(([eventsResp, accountResp, stageResp, langResp, testIDsResp]) => {
             // Only show events with config.emailManager === true
             const filteredEvents = (eventsResp || []).filter((ev: any) => ev.config && ev.config.emailManager)
             setEvents(filteredEvents)
             setAccountList(accountResp?.value || [])
             setStageList(stageResp?.value || [])
             setLanguageList(langResp?.value || [])
+
+            // Load test participant names
+            const testIDs = testIDsResp?.value || []
+            const loadTestParticipantNames = async () => {
+                const options: Array<{ id: string, name: string }> = []
+                for (const testID of testIDs) {
+                    try {
+                        const participant = await callDbApi('handleFindParticipant', { id: testID })
+                        if (participant && (participant.first || participant.last)) {
+                            options.push({
+                                id: testID,
+                                name: `${participant.first || ''} ${participant.last || ''}`.trim()
+                            })
+                        } else {
+                            options.push({ id: testID, name: testID })
+                        }
+                    } catch (err) {
+                        options.push({ id: testID, name: testID })
+                    }
+                }
+                setTestParticipantOptions(options)
+            }
+            loadTestParticipantNames()
+
             if (!id) {
                 setEventCode('') // No event selected by default
                 setSubEvents([])
@@ -75,6 +104,9 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                     setLanguages(response.languages || {})
                     setZoomId(response.zoomId || '')
                     setInPerson(response.inPerson || false)
+                    setTesters(response.testers || [])
+                    setSendContinuously(response.sendContinuously || false)
+                    setSendUntil(response.sendUntil || '')
                 }
             }).catch(error => {
                 console.error('Error loading work order:', error)
@@ -96,6 +128,9 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
             setLanguages(response.languages || {})
             setZoomId(response.zoomId || '')
             setInPerson(response.inPerson || false)
+            setTesters(response.testers || [])
+            setSendContinuously(response.sendContinuously || false)
+            setSendUntil(response.sendUntil || '')
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [optionsLoaded])
@@ -153,6 +188,9 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                 account,
                 zoomId: stage === 'reg-confirm' && !inPerson ? zoomId : undefined,
                 inPerson: inPerson ? true : false,
+                testers,
+                sendContinuously,
+                sendUntil: sendContinuously ? sendUntil : undefined,
                 createdBy: userPid,
                 config: {
                     pool: pool
@@ -171,17 +209,29 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                         isActive: false
                     },
                     {
+                        name: 'Dry-Run',
+                        status: 'ready',
+                        message: '',
+                        isActive: false
+                    },
+                    {
                         name: 'Test',
                         status: 'ready',
                         message: '',
                         isActive: false
                     },
                     {
-                        name: 'Send',
+                        name: 'Send-Once',
                         status: 'ready',
                         message: '',
                         isActive: false
-                    }
+                    },
+                    ...(sendContinuously ? [{
+                        name: 'Send-Continuously',
+                        status: 'ready',
+                        message: '',
+                        isActive: false
+                    }] : [])
                 ]
             }
 
@@ -375,6 +425,58 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                             </Form.Text>
                         </>
                     )}
+                </Form.Group>
+            )}
+
+            <Form.Group className="mb-3">
+                <Form.Label>Testers</Form.Label>
+                <Form.Select
+                    multiple
+                    value={testers}
+                    onChange={e => {
+                        const selectedOptions = Array.from(e.target.selectedOptions, option => option.value)
+                        setTesters(selectedOptions)
+                    }}
+                    className="bg-dark text-light border-secondary"
+                >
+                    {testParticipantOptions.map(option => (
+                        <option key={option.id} value={option.id}>
+                            {option.name}
+                        </option>
+                    ))}
+                </Form.Select>
+                <Form.Text className="text-muted">
+                    Select one or more testers to receive test emails (hold Ctrl/Cmd to select multiple)
+                </Form.Text>
+            </Form.Group>
+
+            <Form.Group className="mb-3">
+                <Form.Check
+                    type="checkbox"
+                    id="sendContinuously"
+                    label="Enable Continuous Sending"
+                    checked={sendContinuously}
+                    onChange={e => setSendContinuously(e.target.checked)}
+                    className="bg-dark text-light border-secondary"
+                />
+                <Form.Text className="text-muted">
+                    When enabled, emails will be sent continuously until the specified date
+                </Form.Text>
+            </Form.Group>
+
+            {sendContinuously && (
+                <Form.Group className="mb-3">
+                    <Form.Label>Send Until Date</Form.Label>
+                    <Form.Control
+                        type="datetime-local"
+                        value={sendUntil}
+                        onChange={e => setSendUntil(e.target.value)}
+                        className="bg-dark text-light border-secondary"
+                        required={sendContinuously}
+                    />
+                    <Form.Text className="text-muted">
+                        Continuous sending will stop on this date and time
+                    </Form.Text>
                 </Form.Group>
             )}
         </Form>

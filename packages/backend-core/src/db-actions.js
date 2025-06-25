@@ -51,7 +51,11 @@ export {
     handleUpdateStepStatus,
     handleLockWorkOrder,
     handleUnlockWorkOrder,
-    sendWorkOrderMessageAction
+    sendWorkOrderMessageAction,
+    // Archive handlers
+    handleArchiveWorkOrder,
+    handleUnarchiveWorkOrder,
+    handleGetArchivedWorkOrders
 };
 
 /**
@@ -739,13 +743,16 @@ async function handleCreateWorkOrder(payload) {
         zoomId: zoomId || null,
         inPerson: inPerson || false,
         config: config || {},
+        testers: payload.testers || [],
         locked: false,
         lockedBy: "",
         steps: [
             { name: 'Count', status: 'ready', message: '', isActive: true },
             { name: 'Prepare', status: 'ready', message: '', isActive: false },
+            { name: 'Dry-Run', status: 'ready', message: '', isActive: false },
             { name: 'Test', status: 'ready', message: '', isActive: false },
-            { name: 'Send', status: 'ready', message: '', isActive: false }
+            { name: 'Send-Once', status: 'ready', message: '', isActive: false },
+            ...(payload.sendContinuously ? [{ name: 'Send-Continuously', status: 'ready', message: '', isActive: false }] : [])
         ],
         createdAt: now,
         updatedAt: now
@@ -1249,6 +1256,153 @@ async function sendWorkOrderMessageAction(payload) {
         return { success: true, messageId: result.MessageId };
     } catch (error) {
         console.error(`[SQS-SEND] ERROR: Failed to send ${action} message for work order ${workOrderId}, step ${stepName}:`, error);
+        throw error;
+    }
+}
+
+/**
+ * Archives a work order.
+ * @async
+ * @function handleArchiveWorkOrder
+ * @param {object} payload - The request payload.
+ * @param {string} payload.workOrderId - The work order ID.
+ * @param {string} payload.archivedBy - The user PID who archived the work order.
+ * @returns {Promise<object>} Success indicator.
+ */
+async function handleArchiveWorkOrder(payload) {
+    const { workOrderId, archivedBy } = payload;
+    if (!workOrderId || !archivedBy) {
+        throw new Error("Missing 'workOrderId' or 'archivedBy' in payload for handleArchiveWorkOrder.");
+    }
+
+    const client = getDocClient();
+    const now = new Date().toISOString();
+
+    try {
+        const params = {
+            TableName: getTableName('WORK_ORDERS'),
+            Key: { id: workOrderId },
+            UpdateExpression: "SET archived = :archived, archivedAt = :archivedAt, archivedBy = :archivedBy, updatedAt = :updatedAt",
+            ExpressionAttributeValues: {
+                ":archived": true,
+                ":archivedAt": now,
+                ":archivedBy": archivedBy,
+                ":updatedAt": now
+            },
+            ReturnValues: 'ALL_NEW'
+        };
+
+        const result = await client.send(new UpdateCommand(params));
+
+        // Log the archive action
+        try {
+            await handleLogWorkOrderAudit({
+                workOrderId,
+                action: 'archived',
+                userPid: archivedBy,
+                details: { archivedAt: now }
+            });
+        } catch (auditError) {
+            console.warn('Failed to log archive audit:', auditError);
+        }
+
+        return {
+            success: true,
+            workOrder: result.Attributes
+        };
+    } catch (error) {
+        console.error(`[ARCHIVE] ERROR: Failed to archive work order ${workOrderId}:`, error);
+        throw error;
+    }
+}
+
+/**
+ * Unarchives a work order.
+ * @async
+ * @function handleUnarchiveWorkOrder
+ * @param {object} payload - The request payload.
+ * @param {string} payload.workOrderId - The work order ID.
+ * @returns {Promise<object>} Success indicator.
+ */
+async function handleUnarchiveWorkOrder(payload) {
+    const { workOrderId } = payload;
+    if (!workOrderId) {
+        throw new Error("Missing 'workOrderId' in payload for handleUnarchiveWorkOrder.");
+    }
+
+    const client = getDocClient();
+    const now = new Date().toISOString();
+
+    try {
+        const params = {
+            TableName: getTableName('WORK_ORDERS'),
+            Key: { id: workOrderId },
+            UpdateExpression: "REMOVE archived, archivedAt, archivedBy SET updatedAt = :updatedAt",
+            ExpressionAttributeValues: {
+                ":updatedAt": now
+            },
+            ReturnValues: 'ALL_NEW'
+        };
+
+        const result = await client.send(new UpdateCommand(params));
+
+        // Log the unarchive action
+        try {
+            await handleLogWorkOrderAudit({
+                workOrderId,
+                action: 'unarchived',
+                userPid: 'system', // We don't track who unarchives
+                details: { unarchivedAt: now }
+            });
+        } catch (auditError) {
+            console.warn('Failed to log unarchive audit:', auditError);
+        }
+
+        return {
+            success: true,
+            workOrder: result.Attributes
+        };
+    } catch (error) {
+        console.error(`[UNARCHIVE] ERROR: Failed to unarchive work order ${workOrderId}:`, error);
+        throw error;
+    }
+}
+
+/**
+ * Gets all archived work orders.
+ * @async
+ * @function handleGetArchivedWorkOrders
+ * @param {object} payload - The request payload (optional).
+ * @returns {Promise<object>} List of archived work orders.
+ */
+async function handleGetArchivedWorkOrders(payload = {}) {
+    const client = getDocClient();
+
+    try {
+        const params = {
+            TableName: getTableName('WORK_ORDERS'),
+            FilterExpression: "archived = :archived",
+            ExpressionAttributeValues: {
+                ":archived": true
+            }
+        };
+
+        const result = await client.send(new ScanCommand(params));
+
+        // Sort by archivedAt descending (most recently archived first)
+        const archivedWorkOrders = result.Items || [];
+        archivedWorkOrders.sort((a, b) => {
+            const aDate = a.archivedAt || '1970-01-01';
+            const bDate = b.archivedAt || '1970-01-01';
+            return new Date(bDate) - new Date(aDate);
+        });
+
+        return {
+            workOrders: archivedWorkOrders,
+            count: archivedWorkOrders.length
+        };
+    } catch (error) {
+        console.error(`[GET-ARCHIVED] ERROR: Failed to get archived work orders:`, error);
         throw error;
     }
 }

@@ -6,12 +6,20 @@ from .models import Step, StepStatus, WorkOrder
 from .aws_client import AWSClient
 from .steps import PrepareStep
 from .steps.count import CountStep
+from .steps.test import TestStep
+from .steps.dry_run import DryRunStep
+from .steps.send_once import SendOnceStep
+from .steps.send_continuously import SendContinuouslyStep
 
 class StepProcessor:
     def __init__(self, aws_client: AWSClient):
         self.aws_client = aws_client
         self.count_step = CountStep(aws_client)
         self.prepare_step = PrepareStep(aws_client)
+        self.test_step = TestStep(aws_client)
+        self.dry_run_step = DryRunStep(aws_client)
+        self.send_once_step = SendOnceStep(aws_client)
+        self.send_continuously_step = SendContinuouslyStep(aws_client)
 
     async def process_step(self, work_order: WorkOrder, step: Step) -> bool:
         """Process a single step of a work order."""
@@ -32,6 +40,9 @@ class StepProcessor:
                         success_message = step.message
                         await self._update_step_status(work_order, step, StepStatus.COMPLETE, success_message)
                         return True
+                except InterruptedError:
+                    await self._update_step_status(work_order, step, StepStatus.INTERRUPTED, "Step interrupted by stop request.")
+                    return False
                 except Exception as e:
                     error_message = str(e)
                     print(f"[ERROR] Error in {step.name} step: {error_message}")
@@ -44,15 +55,74 @@ class StepProcessor:
                         error_message = "Step failed"
                         await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
                         return False
+                except InterruptedError:
+                    await self._update_step_status(work_order, step, StepStatus.INTERRUPTED, "Step interrupted by stop request.")
+                    return False
+                except Exception as e:
+                    error_message = str(e)
+                    print(f"[ERROR] Error in {step.name} step: {error_message}")
+                    await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
+                    return False
+            elif step.name == "Dry-Run":
+                try:
+                    success = await self.dry_run_step.process(work_order, step)
+                    if not success:
+                        error_message = "Step failed"
+                        await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
+                        return False
+                except InterruptedError:
+                    await self._update_step_status(work_order, step, StepStatus.INTERRUPTED, "Step interrupted by stop request.")
+                    return False
                 except Exception as e:
                     error_message = str(e)
                     print(f"[ERROR] Error in {step.name} step: {error_message}")
                     await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
                     return False
             elif step.name == "Test":
-                success = await self._process_test(work_order, step)
-            elif step.name == "Send":
-                success = await self._process_send(work_order, step)
+                try:
+                    success = await self.test_step.process(work_order, step)
+                    if not success:
+                        error_message = "Step failed"
+                        await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
+                        return False
+                except InterruptedError:
+                    await self._update_step_status(work_order, step, StepStatus.INTERRUPTED, "Step interrupted by stop request.")
+                    return False
+                except Exception as e:
+                    error_message = str(e)
+                    print(f"[ERROR] Error in {step.name} step: {error_message}")
+                    await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
+                    return False
+            elif step.name == "Send-Once":
+                try:
+                    success = await self.send_once_step.process(work_order, step)
+                    if not success:
+                        error_message = "Step failed"
+                        await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
+                        return False
+                except InterruptedError:
+                    await self._update_step_status(work_order, step, StepStatus.INTERRUPTED, "Step interrupted by stop request.")
+                    return False
+                except Exception as e:
+                    error_message = str(e)
+                    print(f"[ERROR] Error in {step.name} step: {error_message}")
+                    await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
+                    return False
+            elif step.name == "Send-Continuously":
+                try:
+                    success = await self.send_continuously_step.process(work_order, step)
+                    if not success:
+                        error_message = "Step failed"
+                        await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
+                        return False
+                except InterruptedError:
+                    await self._update_step_status(work_order, step, StepStatus.INTERRUPTED, "Step interrupted by stop request.")
+                    return False
+                except Exception as e:
+                    error_message = str(e)
+                    print(f"[ERROR] Error in {step.name} step: {error_message}")
+                    await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
+                    return False
             else:
                 error_message = f"Unknown step type: {step.name}"
                 await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
@@ -116,20 +186,6 @@ class StepProcessor:
         except Exception as e:
             print(f"[ERROR] Error updating step status in DynamoDB: {e}")
             raise  # Re-raise the exception to be caught by the caller
-
-    async def _process_test(self, work_order: WorkOrder, step: Step) -> bool:
-        """Process the Test step."""
-        print(f"[STUB] Would perform TEST step for work order {work_order.id}")
-        # TODO: Implement actual test logic here
-        await asyncio.sleep(2)  # Simulate work
-        return True
-
-    async def _process_send(self, work_order: WorkOrder, step: Step) -> bool:
-        """Process the Send step."""
-        print(f"[STUB] Would perform SEND step for work order {work_order.id}")
-        # TODO: Implement actual send logic here
-        await asyncio.sleep(2)  # Simulate work
-        return True
 
     def _send_websocket_update(self, work_order: WorkOrder, step: Step, status: StepStatus, message: str):
         """Send a WebSocket message to notify clients of step status changes."""
