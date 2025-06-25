@@ -2,7 +2,6 @@ import React, { useEffect, useState, useRef } from 'react'
 import { Table, Button, Badge, Modal } from 'react-bootstrap'
 import { toast } from 'react-toastify'
 import { callDbApi } from '@dharma/shared/src/clientApi'
-import { FiPlus } from 'react-icons/fi'
 import { useWebSocketContext } from '../context/WebSocketProvider'
 import { unmarshall } from '@aws-sdk/util-dynamodb'
 import OverlayTrigger from 'react-bootstrap/OverlayTrigger'
@@ -447,9 +446,8 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                             variant="primary"
                             onClick={onNew}
                             style={{ borderRadius: '50%', width: 40, height: 40, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                            aria-label="New Work Order"
                         >
-                            {React.createElement(FiPlus, { size: 24 })}
+                            +
                         </Button>
                         <div className="ms-3">
                             <Badge bg={status === 'open' ? 'success' : status === 'connecting' ? 'warning' : 'danger'}>
@@ -487,9 +485,8 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                         variant="primary"
                         onClick={onNew}
                         style={{ borderRadius: '50%', width: 40, height: 40, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                        aria-label="New Work Order"
                     >
-                        {React.createElement(FiPlus, { size: 24 })}
+                        +
                     </Button>
                     <div className="ms-3">
                         <Badge bg={status === 'open' ? 'success' : status === 'connecting' ? 'warning' : 'danger'}>
