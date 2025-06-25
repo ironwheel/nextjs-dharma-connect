@@ -449,7 +449,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                             style={{ borderRadius: '50%', width: 40, height: 40, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                             aria-label="New Work Order"
                         >
-                            <FiPlus size={24} />
+                            {React.createElement(FiPlus, { size: 24 })}
                         </Button>
                         <div className="ms-3">
                             <Badge bg={status === 'open' ? 'success' : status === 'connecting' ? 'warning' : 'danger'}>
@@ -489,7 +489,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                         style={{ borderRadius: '50%', width: 40, height: 40, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                         aria-label="New Work Order"
                     >
-                        <FiPlus size={24} />
+                        {React.createElement(FiPlus, { size: 24 })}
                     </Button>
                     <div className="ms-3">
                         <Badge bg={status === 'open' ? 'success' : status === 'connecting' ? 'warning' : 'danger'}>
