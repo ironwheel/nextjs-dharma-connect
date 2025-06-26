@@ -30,8 +30,14 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
     const [sendContinuously, setSendContinuously] = useState(false)
     const [sendUntil, setSendUntil] = useState('')
     const [testParticipantOptions, setTestParticipantOptions] = useState<Array<{ id: string, name: string }>>([])
+    const [stages, setStages] = useState<Array<{ stage: string, description: string, order?: number, parentStage?: string }>>([])
+    const [selectedStageRecord, setSelectedStageRecord] = useState<any>(null)
+    const [inheritedFields, setInheritedFields] = useState<{ s3HTMLPaths?: any, languages?: any, subjects?: any }>({})
+    const [stageValidating, setStageValidating] = useState(false)
     const loadedSubEventRef = useRef<string | null>(null)
     const loadedWorkOrderRef = useRef<any>(null)
+    const lastValidationRef = useRef<{ eventCode: string, subEvent: string, stage: string } | null>(null)
+    const attemptedStageRef = useRef<string>('')
 
     // Fetch events and config on mount
     useEffect(() => {
@@ -39,15 +45,15 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
         Promise.all([
             callDbApi('getEvents', {}),
             callDbApi('getConfig', { key: 'emailAccountList' }),
-            callDbApi('getConfig', { key: 'emailStageList' }),
+            callDbApi('getStages', {}),
             callDbApi('getConfig', { key: 'emailLanguageList' }),
             callDbApi('getConfig', { key: 'emailTestIDs' })
-        ]).then(([eventsResp, accountResp, stageResp, langResp, testIDsResp]) => {
+        ]).then(([eventsResp, accountResp, stagesResp, langResp, testIDsResp]) => {
             // Only show events with config.emailManager === true
             const filteredEvents = (eventsResp || []).filter((ev: any) => ev.config && ev.config.emailManager)
             setEvents(filteredEvents)
             setAccountList(accountResp?.value || [])
-            setStageList(stageResp?.value || [])
+            setStages(stagesResp?.stages || [])
             setLanguageList(langResp?.value || [])
 
             // Load test participant names
@@ -163,12 +169,96 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
         }
     }, [eventCode, events])
 
+    // Re-validate parent stage when eventCode or subEvent changes
+    useEffect(() => {
+        if (stage && selectedStageRecord?.parentStage && eventCode && subEvent) {
+            const currentValidation = { eventCode, subEvent, stage }
+            const lastValidation = lastValidationRef.current
+
+            // Only re-validate if the event/sub-event combination has actually changed
+            if (!lastValidation ||
+                lastValidation.eventCode !== eventCode ||
+                lastValidation.subEvent !== subEvent) {
+                lastValidationRef.current = currentValidation
+                handleStageChange(stage)
+            }
+        }
+    }, [eventCode, subEvent])
+
+    // New function to handle stage selection with immediate validation
+    const handleStageChange = async (newStage: string) => {
+        // Store the attempted stage selection
+        attemptedStageRef.current = newStage;
+
+        if (!newStage) {
+            setStage('')
+            setSelectedStageRecord(null)
+            setInheritedFields({})
+            return
+        }
+
+        const stageRecord = stages.find(s => s.stage === newStage)
+
+        // If stage has parentStage, validate immediately before setting
+        if (stageRecord?.parentStage && eventCode && subEvent) {
+            setStageValidating(true)
+            try {
+                const parentWorkOrder = await callDbApi('handleFindParentWorkOrder', {
+                    eventCode,
+                    subEvent,
+                    parentStage: stageRecord.parentStage
+                })
+
+                if (parentWorkOrder) {
+                    // Parent work order found, proceed with stage selection
+                    setStage(newStage)
+                    setSelectedStageRecord(stageRecord)
+                    setInheritedFields({
+                        s3HTMLPaths: parentWorkOrder.s3HTMLPaths,
+                        languages: parentWorkOrder.languages,
+                        subjects: parentWorkOrder.subjects
+                    })
+
+                    // Update last validation ref
+                    lastValidationRef.current = { eventCode, subEvent, stage: newStage }
+
+                    // Auto-populate inherited fields if not already set
+                    if (!Object.keys(languages).length && parentWorkOrder.languages) {
+                        setLanguages(parentWorkOrder.languages)
+                    }
+                    if (!Object.keys(subjects).length && parentWorkOrder.subjects) {
+                        setSubjects(parentWorkOrder.subjects)
+                    }
+                } else {
+                    // Parent work order not found, show error and don't set stage
+                    toast.error(`Parent work order not found for stage '${stageRecord.parentStage}'. Cannot use stage '${newStage}'.`)
+                    // Don't set the stage - keep current selection
+                    // Reset the attempted stage ref since validation failed
+                    attemptedStageRef.current = stage;
+                }
+            } catch (error) {
+                console.error('Error finding parent work order:', error)
+                toast.error(`Error finding parent work order for stage '${stageRecord.parentStage}'`)
+                // Don't set the stage - keep current selection
+                // Reset the attempted stage ref since validation failed
+                attemptedStageRef.current = stage;
+            } finally {
+                setStageValidating(false)
+            }
+        } else {
+            // No parent stage, proceed normally
+            setStage(newStage)
+            setSelectedStageRecord(stageRecord)
+            setInheritedFields({})
+        }
+    }
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
 
-        // Validate zoomId is present for reg-confirm stage (only if not in-person)
-        if (stage === 'reg-confirm' && !inPerson && !zoomId) {
-            toast.error('Zoom ID is required for registration confirmation emails')
+        // Validate zoomId is present if qaStepCheckZoomId is enabled (only if not in-person)
+        if (selectedStageRecord?.qaStepCheckZoomId && !inPerson && !zoomId) {
+            toast.error('Zoom ID is required for this stage')
             return
         }
 
@@ -185,7 +275,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                 languages,
                 subjects,
                 account,
-                zoomId: stage === 'reg-confirm' && !inPerson ? zoomId : undefined,
+                zoomId: selectedStageRecord?.qaStepCheckZoomId && !inPerson ? zoomId : undefined,
                 inPerson: inPerson ? true : false,
                 testers,
                 sendContinuously,
@@ -194,6 +284,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                 config: {
                     pool: pool
                 },
+                // Inherit s3HTMLPaths from parent if available
+                s3HTMLPaths: inheritedFields.s3HTMLPaths,
                 steps: [
                     {
                         name: 'Count',
@@ -201,12 +293,13 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                         message: '',
                         isActive: true
                     },
-                    {
+                    // Skip Prepare step if parent stage exists (files already prepared)
+                    ...(selectedStageRecord?.parentStage ? [] : [{
                         name: 'Prepare',
                         status: 'ready',
                         message: '',
                         isActive: false
-                    },
+                    }]),
                     {
                         name: 'Dry-Run',
                         status: 'ready',
@@ -338,16 +431,37 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
             <Form.Group className="mb-3">
                 <Form.Label>Stage</Form.Label>
                 <Form.Select
-                    value={stage}
-                    onChange={e => setStage(e.target.value)}
+                    value={stageValidating ? attemptedStageRef.current : stage}
+                    onChange={e => handleStageChange(e.target.value)}
                     required
+                    disabled={stageValidating}
                     className="bg-dark text-light border-secondary"
                 >
                     <option value="">Select Stage</option>
-                    {stageList.map(st => (
-                        <option key={st} value={st}>{st}</option>
+                    {stages.map(st => (
+                        <option key={st.stage} value={st.stage}>
+                            {st.order ? `[${st.order}] ` : ''}{st.stage} - {st.description}
+                        </option>
                     ))}
                 </Form.Select>
+                {stageValidating && (
+                    <Form.Text className="text-info">
+                        <Spinner
+                            as="span"
+                            animation="border"
+                            size="sm"
+                            role="status"
+                            aria-hidden="true"
+                            className="me-2"
+                        />
+                        Validating parent stage...
+                    </Form.Text>
+                )}
+                {selectedStageRecord?.parentStage && (
+                    <Form.Text className="text-info">
+                        This stage inherits content from parent stage: {selectedStageRecord.parentStage}
+                    </Form.Text>
+                )}
             </Form.Group>
 
             <Form.Group className="mb-3">
@@ -361,10 +475,16 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                             label={lang}
                             checked={!!languages[lang]}
                             onChange={e => setLanguages(langs => ({ ...langs, [lang]: e.target.checked }))}
+                            disabled={selectedStageRecord?.parentStage}
                             className="bg-dark text-light border-secondary"
                         />
                     ))}
                 </div>
+                {selectedStageRecord?.parentStage && (
+                    <Form.Text className="text-info">
+                        Languages are inherited from parent stage and cannot be modified
+                    </Form.Text>
+                )}
             </Form.Group>
 
             <Form.Group className="mb-3">
@@ -377,10 +497,16 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                             value={subjects[lang] || ''}
                             onChange={e => setSubjects(s => ({ ...s, [lang]: e.target.value }))}
                             placeholder={`Subject for ${lang.toUpperCase()}`}
+                            disabled={selectedStageRecord?.parentStage}
                             className="bg-dark text-light border-secondary mb-2"
                         />
                     </div>
                 ))}
+                {selectedStageRecord?.parentStage && (
+                    <Form.Text className="text-info">
+                        Subjects are inherited from parent stage and cannot be modified
+                    </Form.Text>
+                )}
             </Form.Group>
 
             <Form.Group className="mb-3">
@@ -398,7 +524,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                 </Form.Select>
             </Form.Group>
 
-            {stage === 'reg-confirm' && (
+            {selectedStageRecord?.qaStepCheckZoomId && (
                 <Form.Group className="mb-3">
                     {inPerson ? (
                         <>
@@ -420,7 +546,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                                 required
                             />
                             <Form.Text className="text-muted">
-                                Required for registration confirmation emails
+                                Required for this stage
                             </Form.Text>
                         </>
                     )}

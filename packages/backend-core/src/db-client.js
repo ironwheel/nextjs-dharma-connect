@@ -28,6 +28,7 @@ const TABLE_MAP = {
     AUTH: process.env.DYNAMODB_TABLE_AUTH,
     WORK_ORDERS: process.env.DYNAMODB_TABLE_WORK_ORDERS,
     WORK_ORDER_AUDIT_LOGS: process.env.DYNAMODB_TABLE_WORK_ORDER_AUDIT_LOGS,
+    STAGES: process.env.DYNAMODB_TABLE_STAGES,
 };
 
 let docClientInstance; // Singleton instance for the DynamoDB Document Client

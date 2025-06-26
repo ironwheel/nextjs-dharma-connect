@@ -58,6 +58,10 @@ export {
     handleArchiveWorkOrder,
     handleUnarchiveWorkOrder,
     handleGetArchivedWorkOrders,
+    handleGetStage,
+    handleGetStages,
+    handlePutStage,
+    handleFindParentWorkOrder,
 } from './db-actions.js';
 
 // Export from auth-logic.js

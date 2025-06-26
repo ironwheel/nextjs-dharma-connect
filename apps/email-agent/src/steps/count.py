@@ -9,6 +9,7 @@ from ..models import WorkOrder, Step
 from ..aws_client import AWSClient
 from ..eligible import check_eligibility
 from ..config import STUDENT_TABLE, POOLS_TABLE
+from .shared import passes_stage_filter, build_campaign_string, code_to_full_language
 
 
 class CountStep:
@@ -31,8 +32,11 @@ class CountStep:
             await self._update_progress(work_order, "Starting count process...")
             
             # Get campaign string
-            campaign_string = self._build_campaign_string(work_order)
+            campaign_string = build_campaign_string(work_order.eventCode, work_order.subEvent, work_order.stage, self._get_language_code(work_order))
             await self._update_progress(work_order, f"Campaign string: {campaign_string}")
+            
+            # Get stage record for filtering
+            stage_record = self._get_stage_record(work_order.stage)
             
             # Scan both tables
             await self._update_progress(work_order, f"Scanning student table: {STUDENT_TABLE}")
@@ -46,7 +50,7 @@ class CountStep:
             # Count recipients
             await self._update_progress(work_order, "Processing student records for eligibility...")
             received_count, will_receive_count = self._count_recipients_simple(
-                student_data, pools_data, work_order, campaign_string
+                student_data, pools_data, work_order, campaign_string, stage_record
             )
             
             total_count = received_count + will_receive_count
@@ -65,45 +69,28 @@ class CountStep:
             await self._update_progress(work_order, f"Error: {error_message}")
             raise Exception(error_message)
 
-    def _build_campaign_string(self, work_order: WorkOrder) -> str:
-        """
-        Build the campaign string from work order data.
-        Format: {eventCode}_{subEvent}_{stage}_{languageCode}
-        """
-        event_code = work_order.eventCode or ""
-        sub_event = work_order.subEvent or ""
-        stage = work_order.stage or ""
-
-        # Stage fixup
-        if stage == 'eligible' or stage == 'offering-reminder' or stage == 'reg-reminder':
-            stage = 'reg'
-        
-        # Get language code from languages dict, default to "EN"
-        language_code = "EN"
+    def _get_language_code(self, work_order: WorkOrder) -> str:
+        """Get the primary language code from work order languages"""
         if work_order.languages and isinstance(work_order.languages, dict):
             # Get the first language code available
             for lang in work_order.languages.keys():
                 if lang:
-                    language_code = lang.upper()
-                    break
-        
-        campaign_string = f"{event_code}_{sub_event}_{stage}_{language_code}"
-        return campaign_string
+                    return lang.upper()
+        return "EN"
 
-    LANG_CODE_TO_NAME = {
-        "EN": "English",
-        "FR": "French",
-        "ES": "Spanish",
-        "DE": "German",
-        "IT": "Italian",
-        "CZ": "Czech",
-        "PT": "Portuguese"
-    }
-    def code_to_full_language(self, code):
-        return self.LANG_CODE_TO_NAME.get(code.upper(), code)
+    def _get_stage_record(self, stage: str) -> Dict:
+        """Get the stage record from DynamoDB stages table"""
+        try:
+            stages_table = self.aws_client.get_table_name('stages')
+            if stages_table:
+                stage_record = self.aws_client.get_item(stages_table, {'stage': stage})
+                return stage_record or {}
+        except Exception as e:
+            print(f"[WARNING] Failed to get stage record for {stage}: {e}")
+        return {}
 
     def _count_recipients_simple(self, student_data: List[Dict], pools_data: List[Dict], 
-                                work_order: WorkOrder, campaign_string: str) -> Tuple[int, int]:
+                                work_order: WorkOrder, campaign_string: str, stage_record: Dict) -> Tuple[int, int]:
         """
         Simplified count logic - only check unsubscribe status and campaign string presence.
         Adds language eligibility logic as described by user.
@@ -112,7 +99,7 @@ class CountStep:
         will_receive_count = 0
         selected_lang_codes = set(work_order.languages.keys())
         has_english = 'EN' in selected_lang_codes
-        selected_full_names = set(self.code_to_full_language(code).lower() for code in selected_lang_codes)
+        selected_full_names = set(code_to_full_language(code).lower() for code in selected_lang_codes)
         
         for student in student_data:
             # Skip if unsubscribe is true
@@ -144,75 +131,24 @@ class CountStep:
             if not is_eligible:
                 continue
             
-            # Apply stage-specific filtering
-            if self._passes_stage_filter(student, work_order):
+            # Apply stage-specific filtering using shared function
+            if passes_stage_filter(stage_record, self._create_eligible_object(student, work_order.eventCode, pools_data)):
                 will_receive_count += 1
         
         return received_count, will_receive_count
 
-    def _passes_stage_filter(self, student: Dict, work_order: WorkOrder) -> bool:
-        """
-        Apply stage-specific filtering logic.
-        
-        Args:
-            student: Student record to check
-            work_order: Work order being processed
+    def _create_eligible_object(self, student: Dict, event_code: str, pools_data: List[Dict]):
+        """Create an object with check_eligibility method for the shared function"""
+        class EligibleChecker:
+            def __init__(self, student, event_code, pools_data):
+                self.student = student
+                self.event_code = event_code
+                self.pools_data = pools_data
             
-        Returns:
-            True if student passes stage filter, False otherwise
-        """
-        stage = work_order.stage
-        event_code = work_order.eventCode
+            def check_eligibility(self, pool_name):
+                return check_eligibility(pool_name, self.student, self.event_code, self.pools_data)
         
-        # For std or reg stages, anyone who passed previous filters is eligible
-        if stage in ['std', 'eligible']:
-            return True
-        
-        # Get the program data for this event
-        programs = student.get('programs', {})
-        program = programs.get(event_code, {})
-
-        if stage == 'reg':
-            # join: true, withdrawn: false|undefined
-            return (program.get('join', False) and 
-                   not program.get('withdrawn', False))
-        
-        if stage == 'accept':
-            # join: true, accepted: true, withdrawn: false|undefined
-            return (program.get('join', False) and 
-                   program.get('accepted', False) and 
-                   not program.get('withdrawn', False))
-        
-        elif stage == 'reg-confirm':
-            # join: true, withdrawn: false|undefined, offeringHistory.<subevent>.offeringIntent: exists
-            if not (program.get('join', False) and not program.get('withdrawn', False)):
-                return False
-            
-            # Check if offeringIntent exists for the subevent
-            sub_event = work_order.subEvent
-            if not sub_event:
-                return False
-                
-            offering_history = program.get('offeringHistory', {})
-            subevent_data = offering_history.get(sub_event, {})
-            return 'offeringIntent' in subevent_data
-        
-        elif stage == 'offering-reminder':
-            # join: true, withdrawn: false|undefined, offeringHistory.<subevent>.offeringIntent: does not exist
-            if not (program.get('join', False) and not program.get('withdrawn', False)):
-                return False
-            
-            # Check if offeringIntent exists for the subevent
-            sub_event = work_order.subEvent
-            if not sub_event:
-                return False
-                
-            offering_history = program.get('offeringHistory', {})
-            subevent_data = offering_history.get(sub_event, {})
-            return 'offeringIntent' not in subevent_data
-        
-        # For other stages, return False (will be added later as mentioned)
-        return False
+        return EligibleChecker(student, event_code, pools_data)
 
     async def _update_progress(self, work_order: WorkOrder, message: str):
         """Update the work order progress message."""
