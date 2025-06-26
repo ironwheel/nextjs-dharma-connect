@@ -55,7 +55,12 @@ export {
     // Archive handlers
     handleArchiveWorkOrder,
     handleUnarchiveWorkOrder,
-    handleGetArchivedWorkOrders
+    handleGetArchivedWorkOrders,
+    // Stages handlers
+    handleGetStage,
+    handleGetStages,
+    handlePutStage,
+    handleFindParentWorkOrder
 };
 
 /**
@@ -1405,4 +1410,149 @@ async function handleGetArchivedWorkOrders(payload = {}) {
         console.error(`[GET-ARCHIVED] ERROR: Failed to get archived work orders:`, error);
         throw error;
     }
+}
+
+/**
+ * Handles getting a stage record from the stages table.
+ * @async
+ * @function handleGetStage
+ * @param {object} payload - The request payload.
+ * @param {string} payload.stage - The stage name.
+ * @returns {Promise<object>} The stage record.
+ * @throws {Error} If stage is missing, stage not found, or DB error.
+ */
+async function handleGetStage(payload) {
+    const { stage } = payload;
+    if (!stage) throw new Error("Missing 'stage' in payload for handleGetStage.");
+
+    const client = getDocClient();
+    const params = {
+        TableName: getTableName('STAGES'),
+        Key: { stage: stage },
+    };
+    const command = new GetCommand(params);
+    const data = await client.send(command);
+    if (!data.Item) {
+        console.warn(`handleGetStage: STAGE_NOT_FOUND for stage: ${stage}`);
+        throw new Error("STAGE_NOT_FOUND");
+    }
+    return data.Item;
+}
+
+/**
+ * Handles getting all stages from the stages table.
+ * @async
+ * @function handleGetStages
+ * @param {object} payload - The request payload (optional).
+ * @returns {Promise<object>} All stage records sorted by order field.
+ * @throws {Error} If DB error occurs.
+ */
+async function handleGetStages(payload = {}) {
+    const client = getDocClient();
+    const params = {
+        TableName: getTableName('STAGES'),
+    };
+    const command = new ScanCommand(params);
+    const data = await client.send(command);
+
+    // Sort stages by order field, then alphabetically by stage name
+    const stages = data.Items || [];
+    stages.sort((a, b) => {
+        const orderA = a.order || 999999; // Default to high number if no order
+        const orderB = b.order || 999999;
+
+        if (orderA !== orderB) {
+            return orderA - orderB; // Sort by order first
+        }
+
+        // If order is the same, sort alphabetically by stage name
+        return (a.stage || '').localeCompare(b.stage || '');
+    });
+
+    return { stages: stages };
+}
+
+/**
+ * Handles creating or updating a stage record.
+ * @async
+ * @function handlePutStage
+ * @param {object} payload - The request payload.
+ * @param {string} payload.stage - The stage name.
+ * @param {string} payload.description - The stage description.
+ * @param {number} payload.order - The display order (optional).
+ * @param {string} payload.parentStage - The parent stage (optional).
+ * @param {Array} payload.pools - The pools list (optional).
+ * @param {object} payload.prefix - The prefix mapping (optional).
+ * @returns {Promise<object>} Success indicator.
+ * @throws {Error} If required fields missing or DB error.
+ */
+async function handlePutStage(payload) {
+    const { stage, description, order, parentStage, pools, prefix } = payload;
+    if (!stage || !description) {
+        throw new Error("Missing required fields 'stage' and 'description' for handlePutStage.");
+    }
+
+    const client = getDocClient();
+    const item = {
+        stage: stage,
+        description: description,
+    };
+
+    if (order !== undefined) item.order = order;
+    if (parentStage !== undefined) item.parentStage = parentStage;
+    if (pools !== undefined) item.pools = pools;
+    if (prefix !== undefined) item.prefix = prefix;
+
+    const params = {
+        TableName: getTableName('STAGES'),
+        Item: item,
+    };
+    const command = new PutCommand(params);
+    await client.send(command);
+    return { success: true };
+}
+
+/**
+ * Handles finding a parent work order for inheritance.
+ * @async
+ * @function handleFindParentWorkOrder
+ * @param {object} payload - The request payload.
+ * @param {string} payload.eventCode - The event code.
+ * @param {string} payload.subEvent - The sub event.
+ * @param {string} payload.parentStage - The parent stage.
+ * @returns {Promise<object>} The parent work order or null.
+ * @throws {Error} If required fields missing or DB error.
+ */
+async function handleFindParentWorkOrder(payload) {
+    const { eventCode, subEvent, parentStage } = payload;
+    if (!eventCode || !subEvent || !parentStage) {
+        throw new Error("Missing required fields 'eventCode', 'subEvent', or 'parentStage' for handleFindParentWorkOrder.");
+    }
+
+    const client = getDocClient();
+    const params = {
+        TableName: getTableName('WORK_ORDERS'),
+        FilterExpression: "eventCode = :eventCode AND subEvent = :subEvent AND stage = :stage AND (attribute_not_exists(archived) OR archived = :archived)",
+        ExpressionAttributeValues: {
+            ":eventCode": eventCode,
+            ":subEvent": subEvent,
+            ":stage": parentStage,
+            ":archived": false
+        },
+    };
+    const command = new ScanCommand(params);
+    const data = await client.send(command);
+
+    if (!data.Items || data.Items.length === 0) {
+        return null;
+    }
+
+    // Return the most recent parent work order (by createdAt timestamp)
+    const sortedItems = data.Items.sort((a, b) => {
+        const aTime = new Date(a.createdAt || 0).getTime();
+        const bTime = new Date(b.createdAt || 0).getTime();
+        return bTime - aTime;
+    });
+
+    return sortedItems[0];
 }

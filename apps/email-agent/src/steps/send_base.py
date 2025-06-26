@@ -11,6 +11,7 @@ from ..aws_client import AWSClient
 from ..email import send_email
 from ..eligible import check_eligibility
 from ..config import STUDENT_TABLE, POOLS_TABLE, PROMPTS_TABLE, EVENTS_TABLE, EMAIL_BURST_SIZE, EMAIL_RECOVERY_SLEEP_SECS
+from .shared import passes_stage_filter, build_campaign_string, code_to_full_language, get_stage_prefix
 
 
 async def async_interruptible_sleep(total_seconds, work_order, aws_client, check_interval=1):
@@ -28,30 +29,6 @@ class SendBaseStep:
         self.aws_client = aws_client
         self.step_name = step_name
         self.dryrun = dryrun
-    
-    LANG_CODE_TO_NAME = {
-        "EN": "English",
-        "FR": "French",
-        "ES": "Spanish",
-        "DE": "German",
-        "IT": "Italian",
-        "CZ": "Czech",
-        "PT": "Portuguese"
-    }
-    LANG_NAME_TO_CODE = {v: k for k, v in LANG_CODE_TO_NAME.items()}
-
-    OFFERING_REMINDER_PREFIX = {
-        "EN": "Offering Reminder: ",
-        "FR": "Rappel d'offrande : ",
-        "SP": "Recordatorio de ofrenda: ",
-        "DE": "Spenden-Erinnerung: ",
-        "IT": "Promemoria dell'offerta: ",
-        "CZ": "Připomenutí příspěvku: ",
-        "PT": "Lembrete de oferta: "
-    }
-
-    def code_to_full_language(self, code):
-        return self.LANG_CODE_TO_NAME.get(code.upper(), code)
 
     async def process(self, work_order: WorkOrder, step: Step) -> bool:
         """
@@ -69,8 +46,11 @@ class SendBaseStep:
             await self._update_progress(work_order, f"Starting {self.step_name.lower()} process...")
             
             # Get campaign string
-            campaign_string = self._build_campaign_string(work_order)
+            campaign_string = build_campaign_string(work_order.eventCode, work_order.subEvent, work_order.stage, self._get_language_code(work_order))
             await self._update_progress(work_order, f"Campaign string: {campaign_string}")
+            
+            # Get stage record for filtering and prefix
+            stage_record = self._get_stage_record(work_order.stage)
             
             # Get required data
             await self._update_progress(work_order, "Loading required data...")
@@ -100,7 +80,7 @@ class SendBaseStep:
             # Find eligible students
             await self._update_progress(work_order, "Finding eligible students...")
             eligible_students = self._find_eligible_students(
-                student_data, pools_data, work_order, campaign_string
+                student_data, pools_data, work_order, campaign_string, stage_record
             )
 
             # For Dry-Run, store the recipient preview in the work order
@@ -147,7 +127,7 @@ class SendBaseStep:
                 if 'EN' in work_order.languages and work_order.languages['EN']:
                     try:
                         success = await self._send_student_email(
-                            student, 'EN', work_order, event_data, pools_data, prompts_data, campaign_string
+                            student, 'EN', work_order, event_data, pools_data, prompts_data, campaign_string, stage_record
                         )
                         if success:
                             emails_sent += 1
@@ -160,11 +140,11 @@ class SendBaseStep:
                 # Send writtenLangPref email if different from English
                 written_lang = student.get('writtenLangPref')
                 if written_lang and written_lang != 'English':
-                    lang_code = self.LANG_NAME_TO_CODE.get(written_lang)
+                    lang_code = self._get_lang_code_from_name(written_lang)
                     if lang_code and lang_code in work_order.languages and work_order.languages[lang_code]:
                         try:
                             success = await self._send_student_email(
-                                student, lang_code, work_order, event_data, pools_data, prompts_data, campaign_string
+                                student, lang_code, work_order, event_data, pools_data, prompts_data, campaign_string, stage_record
                             )
                             if success:
                                 emails_sent += 1
@@ -203,40 +183,40 @@ class SendBaseStep:
             await self._update_progress(work_order, f"Error: {error_message}")
             raise Exception(error_message)
 
-    def _build_campaign_string(self, work_order: WorkOrder) -> str:
-        """
-        Build the campaign string from work order data.
-        Format: {eventCode}_{subEvent}_{stage}_{languageCode}
-        """
-        event_code = work_order.eventCode or ""
-        sub_event = work_order.subEvent or ""
-        stage = work_order.stage or ""
-
-        # Stage fixup
-        if stage == 'eligible' or stage == 'offering-reminder' or stage == 'reg-reminder':
-            stage = 'reg'
-        
-        # Get language code from languages dict, default to "EN"
-        language_code = "EN"
+    def _get_language_code(self, work_order: WorkOrder) -> str:
+        """Get the primary language code from work order languages"""
         if work_order.languages and isinstance(work_order.languages, dict):
             # Get the first language code available
             for lang in work_order.languages.keys():
                 if lang:
-                    language_code = lang.upper()
-                    break
-        
-        campaign_string = f"{event_code}_{sub_event}_{stage}_{language_code}"
-        return campaign_string
+                    return lang.upper()
+        return "EN"
+
+    def _get_lang_code_from_name(self, lang_name: str) -> str:
+        """Convert language name to language code"""
+        lang_name_to_code = {v: k for k, v in code_to_full_language.__globals__['LANG_CODE_TO_NAME'].items()}
+        return lang_name_to_code.get(lang_name)
+
+    def _get_stage_record(self, stage: str) -> Dict:
+        """Get the stage record from DynamoDB stages table"""
+        try:
+            stages_table = self.aws_client.get_table_name('stages')
+            if stages_table:
+                stage_record = self.aws_client.get_item(stages_table, {'stage': stage})
+                return stage_record or {}
+        except Exception as e:
+            print(f"[WARNING] Failed to get stage record for {stage}: {e}")
+        return {}
 
     def _find_eligible_students(self, student_data: List[Dict], pools_data: List[Dict], 
-                               work_order: WorkOrder, campaign_string: str) -> List[Dict]:
+                               work_order: WorkOrder, campaign_string: str, stage_record: Dict) -> List[Dict]:
         """
         Find eligible students using the same logic as count.py, with language eligibility logic.
         """
         eligible_students = []
         selected_lang_codes = set(work_order.languages.keys())
         has_english = 'EN' in selected_lang_codes
-        selected_full_names = set(self.code_to_full_language(code).lower() for code in selected_lang_codes)
+        selected_full_names = set(code_to_full_language(code).lower() for code in selected_lang_codes)
         
         for student in student_data:
             if student.get('unsubscribe', False):
@@ -258,77 +238,27 @@ class SendBaseStep:
             )
             if not is_eligible:
                 continue
-            if self._passes_stage_filter(student, work_order):
+            # Apply stage-specific filtering using shared function
+            if passes_stage_filter(stage_record, self._create_eligible_object(student, work_order.eventCode, pools_data)):
                 eligible_students.append(student)
         return eligible_students
 
-    def _passes_stage_filter(self, student: Dict, work_order: WorkOrder) -> bool:
-        """
-        Apply stage-specific filtering logic.
-        
-        Args:
-            student: Student record to check
-            work_order: Work order being processed
+    def _create_eligible_object(self, student: Dict, event_code: str, pools_data: List[Dict]):
+        """Create an object with check_eligibility method for the shared function"""
+        class EligibleChecker:
+            def __init__(self, student, event_code, pools_data):
+                self.student = student
+                self.event_code = event_code
+                self.pools_data = pools_data
             
-        Returns:
-            True if student passes stage filter, False otherwise
-        """
-        stage = work_order.stage
-        event_code = work_order.eventCode
+            def check_eligibility(self, pool_name):
+                return check_eligibility(pool_name, self.student, self.event_code, self.pools_data)
         
-        # For std or reg stages, anyone who passed previous filters is eligible
-        if stage in ['std', 'eligible']:
-            return True
-        
-        # Get the program data for this event
-        programs = student.get('programs', {})
-        program = programs.get(event_code, {})
-
-        if stage == 'reg':
-            # join: true, withdrawn: false|undefined
-            return (program.get('join', False) and 
-                   not program.get('withdrawn', False))
-        
-        if stage == 'accept':
-            # join: true, accepted: true, withdrawn: false|undefined
-            return (program.get('join', False) and 
-                   program.get('accepted', False) and 
-                   not program.get('withdrawn', False))
-        
-        if stage == 'reg-confirm':
-            # join: true, withdrawn: false|undefined, offeringHistory.<subevent>.offeringIntent: exists
-            if not (program.get('join', False) and not program.get('withdrawn', False)):
-                return False
-            
-            # Check if offeringIntent exists for the subevent
-            sub_event = work_order.subEvent
-            if not sub_event:
-                return False
-                
-            offering_history = program.get('offeringHistory', {})
-            subevent_data = offering_history.get(sub_event, {})
-            return 'offeringIntent' in subevent_data
-        
-        if stage == 'offering-reminder':
-            # join: true, withdrawn: false|undefined, offeringHistory.<subevent>.offeringIntent: does not exist
-            if not (program.get('join', False) and not program.get('withdrawn', False)):
-                return False
-            
-            # Check if offeringIntent exists for the subevent
-            sub_event = work_order.subEvent
-            if not sub_event:
-                return False
-                
-            offering_history = program.get('offeringHistory', {})
-            subevent_data = offering_history.get(sub_event, {})
-            return 'offeringIntent' not in subevent_data
-        
-        # For other stages, return False
-        return False
+        return EligibleChecker(student, event_code, pools_data)
 
     async def _send_student_email(self, student: Dict, language: str, work_order: WorkOrder, 
                                  event_data: Dict, pools_data: List[Dict], prompts_data: List[Dict], 
-                                 campaign_string: str) -> bool:
+                                 campaign_string: str, stage_record: Dict) -> bool:
         """
         Send an email to a specific student in a specific language.
         
@@ -340,6 +270,7 @@ class SendBaseStep:
             pools_data: Pools data
             prompts_data: Prompts data
             campaign_string: Campaign string
+            stage_record: Stage record from DynamoDB
             
         Returns:
             True if successful, raises Exception if failed
@@ -356,8 +287,10 @@ class SendBaseStep:
             
             # Get subject for this language
             subject = work_order.subjects.get(language, f"Email for {language}")
-            if work_order.stage == 'offering-reminder':
-                prefix = self.OFFERING_REMINDER_PREFIX.get(language, "Offering Reminder: ")
+            
+            # Apply stage-specific prefix if defined
+            prefix = get_stage_prefix(stage_record, language)
+            if prefix:
                 subject = f"{prefix}{subject}"
 
             # Send the email

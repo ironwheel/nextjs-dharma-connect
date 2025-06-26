@@ -19,6 +19,7 @@ EVENTS_TABLE = config.events_table
 STUDENT_TABLE = os.getenv('STUDENT_TABLE', 'students')
 POOLS_TABLE = os.getenv('POOLS_TABLE', 'pools')
 PROMPTS_TABLE = os.getenv('PROMPTS_TABLE', 'prompts')
+STAGES_TABLE = os.getenv('DYNAMODB_TABLE_STAGES', 'stages')
 
 class AWSClient:
     def __init__(self):
@@ -726,4 +727,28 @@ class AWSClient:
             
         except Exception as e:
             print(f"[STOP-CHECK] Error checking for stop messages: {e}")
-            return False 
+            return False
+
+    def get_table_name(self, table_key: str) -> str:
+        """Get the actual table name for a given key"""
+        table_mapping = {
+            'stages': STAGES_TABLE,
+            'students': STUDENT_TABLE,
+            'pools': POOLS_TABLE,
+            'prompts': PROMPTS_TABLE,
+            'events': EVENTS_TABLE,
+            'work_orders': DYNAMODB_TABLE
+        }
+        return table_mapping.get(table_key)
+
+    def get_item(self, table_name: str, key: Dict) -> Optional[Dict]:
+        """Get a single item from a DynamoDB table"""
+        try:
+            table = self.dynamodb.Table(table_name)
+            response = table.get_item(Key=key)
+            if 'Item' in response:
+                return response['Item']
+            return None
+        except ClientError as e:
+            print(f"Error getting item from {table_name}: {e}")
+            return None 

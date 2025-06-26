@@ -14,7 +14,11 @@ import {
     sendWorkOrderMessageAction,
     handleArchiveWorkOrder,
     handleUnarchiveWorkOrder,
-    handleGetArchivedWorkOrders
+    handleGetArchivedWorkOrders,
+    handleGetStage,
+    handleGetStages,
+    handlePutStage,
+    handleFindParentWorkOrder
 } from '@dharma/backend-core';
 
 export async function POST(request) {
@@ -81,6 +85,22 @@ export async function POST(request) {
                 break;
             case 'getArchivedWorkOrders':
                 responseData = await handleGetArchivedWorkOrders(args);
+                break;
+            case 'getStage':
+            case 'handleGetStage':
+                responseData = await handleGetStage(args);
+                break;
+            case 'getStages':
+            case 'handleGetStages':
+                responseData = await handleGetStages(args);
+                break;
+            case 'putStage':
+            case 'handlePutStage':
+                responseData = await handlePutStage(args);
+                break;
+            case 'findParentWorkOrder':
+            case 'handleFindParentWorkOrder':
+                responseData = await handleFindParentWorkOrder(args);
                 break;
             default:
                 status = 400;

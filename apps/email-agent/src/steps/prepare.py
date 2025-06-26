@@ -299,7 +299,11 @@ class PrepareStep:
         if "||name||" not in html:
             raise ValueError("QA Failure: missing '||name||' in HTML")
 
-        if work_order.stage == "reg-confirm":
+        # Get stage record to check QA fields
+        stage_record = self._get_stage_record(work_order.stage)
+        
+        # Check zoom ID if qaStepCheckZoomId is enabled
+        if stage_record.get('qaStepCheckZoomId', False):
             print(f"[DEBUG] QA Check - Stage: {work_order.stage}, inPerson: {work_order.inPerson}, zoomId: {work_order.zoomId}")
             if work_order.inPerson:
                 # Skip zoom ID check for in-person events
@@ -311,7 +315,8 @@ class PrepareStep:
                 if not any(work_order.zoomId in link for link in zoom_links):
                     raise ValueError("QA Failure: zoom link with zoom ID not found")
 
-        if work_order.stage == "reg":
+        # Check registration links if qaStepCheckRegLink is enabled
+        if stage_record.get('qaStepCheckRegLink', False):
             reg_links = re.findall(r'https://(?:reg|csf)\.slsupport\.link/[^\s"]+', html)
             aid_ok = any(f"&aid={work_order.eventCode}" in link for link in reg_links)
             pid_ok = any("?pid=123456789" in link for link in reg_links)
@@ -322,4 +327,16 @@ class PrepareStep:
         """Upload HTML content to S3."""
         session = boto3.session.Session(profile_name=self.aws_profile)
         s3 = session.client('s3')
-        s3.put_object(Bucket=self.s3_bucket, Key=key, Body=html, ContentType='text/html') 
+        s3.put_object(Bucket=self.s3_bucket, Key=key, Body=html, ContentType='text/html')
+
+    def _get_stage_record(self, stage: str) -> Dict:
+        """Get the stage record from DynamoDB stages table"""
+        try:
+            if self.aws_client:
+                stages_table = self.aws_client.get_table_name('stages')
+                if stages_table:
+                    stage_record = self.aws_client.get_item(stages_table, {'stage': stage})
+                    return stage_record or {}
+        except Exception as e:
+            print(f"[WARNING] Failed to get stage record for {stage}: {e}")
+        return {} 
