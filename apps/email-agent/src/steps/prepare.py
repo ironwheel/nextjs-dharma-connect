@@ -61,13 +61,7 @@ class PrepareStep:
             if not work_order.languages[lang]:
                 continue  # Skip disabled languages
 
-            # Fixup stage
-            if work_order.stage == 'eligible' or work_order.stage == 'offering-reminder' or work_order.stage == 'reg-reminder':
-                stage = 'reg'
-            else:
-                stage = work_order.stage
-
-            template_name = f"{work_order.eventCode}-{work_order.subEvent}-{stage}-{lang}"
+            template_name = f"{work_order.eventCode}-{work_order.subEvent}-{work_order.stage}-{lang}"
             object_name = template_name + ".html"
             s3_key = f"{work_order.eventCode}/{object_name}"
 
@@ -309,7 +303,7 @@ class PrepareStep:
                 # Skip zoom ID check for in-person events
                 print(f"[DEBUG] In-person event detected, skipping zoom ID check")
             elif not work_order.zoomId:
-                raise ValueError("QA Failure: zoom ID required for 'reg-confirm'")
+                raise ValueError("QA Failure: zoom ID required for stage")
             else:
                 zoom_links = re.findall(r'https://[^\s"]*zoom\.us/[^\s"]*', html)
                 if not any(work_order.zoomId in link for link in zoom_links):

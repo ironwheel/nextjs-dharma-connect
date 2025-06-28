@@ -31,14 +31,10 @@ class CountStep:
             # Update initial progress message
             await self._update_progress(work_order, "Starting count process...")
             
-            # Get campaign string
-            campaign_string = build_campaign_string(work_order.eventCode, work_order.subEvent, work_order.stage, self._get_language_code(work_order))
-            await self._update_progress(work_order, f"Campaign string: {campaign_string}")
-            
             # Get stage record for filtering
             stage_record = self._get_stage_record(work_order.stage)
             
-            # Scan both tables
+            # Scan both tables (do this once before language loop)
             await self._update_progress(work_order, f"Scanning student table: {STUDENT_TABLE}")
             student_data = self.aws_client.scan_table(STUDENT_TABLE)
             await self._update_progress(work_order, f"Found {len(student_data)} student records")
@@ -47,14 +43,37 @@ class CountStep:
             pools_data = self.aws_client.scan_table(POOLS_TABLE)
             await self._update_progress(work_order, f"Found {len(pools_data)} pool definitions")
             
-            # Count recipients
-            await self._update_progress(work_order, "Processing student records for eligibility...")
-            received_count, will_receive_count = self._count_recipients_simple(
-                student_data, pools_data, work_order, campaign_string, stage_record
-            )
+            # Initialize counters for each language
+            received_counts = {}
+            will_receive_counts = {}
             
-            total_count = received_count + will_receive_count
-            success_message = f"Already received: {received_count}, Will send: {will_receive_count}, Total: {total_count}"
+            # Process each language in the work order
+            for lang in work_order.languages.keys():
+                if not work_order.languages[lang]:
+                    continue  # Skip disabled languages
+                
+                await self._update_progress(work_order, f"Processing {lang} language...")
+                
+                # Get campaign string for this language
+                campaign_string = build_campaign_string(work_order.eventCode, work_order.subEvent, work_order.stage, lang)
+                await self._update_progress(work_order, f"Campaign string for {lang}: {campaign_string}")
+                
+                # Count recipients for this language
+                received_count, will_receive_count = self._count_recipients(
+                    student_data, pools_data, work_order, campaign_string, stage_record, lang
+                )
+                
+                received_counts[lang] = received_count
+                will_receive_counts[lang] = will_receive_count
+                
+                await self._update_progress(work_order, f"Completed {lang} language")
+            
+            # Build final result string
+            received_parts = [f"{lang}:{received_counts[lang]}" for lang in received_counts.keys()]
+            will_receive_parts = [f"{lang}:{will_receive_counts[lang]}" for lang in will_receive_counts.keys()]
+            total_parts = [f"{lang}:{received_counts[lang] + will_receive_counts[lang]}" for lang in received_counts.keys()]
+            
+            success_message = f"Already received: {', '.join(received_parts)}, Will send: {', '.join(will_receive_parts)}, Total: {', '.join(total_parts)}"
             
             await self._update_progress(work_order, success_message)
             
@@ -69,15 +88,6 @@ class CountStep:
             await self._update_progress(work_order, f"Error: {error_message}")
             raise Exception(error_message)
 
-    def _get_language_code(self, work_order: WorkOrder) -> str:
-        """Get the primary language code from work order languages"""
-        if work_order.languages and isinstance(work_order.languages, dict):
-            # Get the first language code available
-            for lang in work_order.languages.keys():
-                if lang:
-                    return lang.upper()
-        return "EN"
-
     def _get_stage_record(self, stage: str) -> Dict:
         """Get the stage record from DynamoDB stages table"""
         try:
@@ -89,17 +99,15 @@ class CountStep:
             print(f"[WARNING] Failed to get stage record for {stage}: {e}")
         return {}
 
-    def _count_recipients_simple(self, student_data: List[Dict], pools_data: List[Dict], 
-                                work_order: WorkOrder, campaign_string: str, stage_record: Dict) -> Tuple[int, int]:
+    def _count_recipients(self, student_data: List[Dict], pools_data: List[Dict], 
+                                work_order: WorkOrder, campaign_string: str, stage_record: Dict, lang: str) -> Tuple[int, int]:
         """
-        Simplified count logic - only check unsubscribe status and campaign string presence.
+        Count recipients for a specific language.
         Adds language eligibility logic as described by user.
         """
         received_count = 0
         will_receive_count = 0
-        selected_lang_codes = set(work_order.languages.keys())
-        has_english = 'EN' in selected_lang_codes
-        selected_full_names = set(code_to_full_language(code).lower() for code in selected_lang_codes)
+        lang_full_name = code_to_full_language(lang).lower()
         
         for student in student_data:
             # Skip if unsubscribe is true
@@ -114,9 +122,13 @@ class CountStep:
                 continue
             
             # Language eligibility check
-            if not has_english:
+            if lang_full_name == 'english':
+                # If the language is English, all eligible students get the email
+                pass
+            else:
+                # If the language is not English, only students with matching writtenLangPref get the email
                 written_lang = student.get('writtenLangPref')
-                if not written_lang or written_lang.lower() not in selected_full_names:
+                if not written_lang or written_lang.lower() != lang_full_name:
                     continue
             
             # For "will receive" count, apply all filters
