@@ -2,10 +2,12 @@
 Shared functions for email agent steps
 """
 
+from ..eligible import check_eligibility
+
 LANG_CODE_TO_NAME = {
     "EN": "English",
     "FR": "French", 
-    "ES": "Spanish",
+    "SP": "Spanish",
     "DE": "German",
     "IT": "Italian",
     "CZ": "Czech",
@@ -71,4 +73,62 @@ def get_stage_prefix(stage_record, language):
         return ""
     
     prefixes = stage_record.get('prefix', {})
-    return prefixes.get(language, "") 
+    return prefixes.get(language, "")
+
+def find_eligible_students(student_data, pools_data, work_order, campaign_string, stage_record, lang, create_eligible_object_func):
+    """
+    Find eligible students using consistent logic across all steps.
+    
+    Args:
+        student_data: List of student records
+        pools_data: List of pool definitions
+        work_order: The work order being processed
+        campaign_string: The campaign string for this language
+        stage_record: The stage record from DynamoDB
+        lang: The language code being processed
+        create_eligible_object_func: Function to create eligible object for stage filtering
+        
+    Returns:
+        List[Dict]: List of eligible student records
+    """
+    eligible_students = []
+    lang_full_name = code_to_full_language(lang).lower()
+    
+    for student in student_data:
+        # Skip if unsubscribe is true
+        if student.get('unsubscribe', False):
+            continue
+        
+        # Check if already received the email
+        emails = student.get('emails', {})
+        has_received = campaign_string in emails
+        if has_received:
+            continue
+        
+        # Language eligibility check
+        if lang_full_name == 'english':
+            # If the language is English, all eligible students get the email
+            pass
+        else:
+            # If the language is not English, only students with matching writtenLangPref get the email
+            written_lang = student.get('writtenLangPref')
+            if not written_lang or written_lang.lower() != lang_full_name:
+                continue
+        
+        # Apply all filters
+        pool_name = work_order.config.get('pool') if hasattr(work_order, 'config') and work_order.config else None
+        if not pool_name:
+            continue
+            
+        is_eligible = check_eligibility(
+            pool_name, student, work_order.eventCode, pools_data
+        )
+        
+        if not is_eligible:
+            continue
+        
+        # Apply stage-specific filtering using shared function
+        if passes_stage_filter(stage_record, create_eligible_object_func(student, work_order.eventCode, pools_data)):
+            eligible_students.append(student)
+    
+    return eligible_students 

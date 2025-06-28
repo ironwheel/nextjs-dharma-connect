@@ -12,7 +12,7 @@ from ..aws_client import AWSClient
 from ..email import send_email
 from ..eligible import check_eligibility
 from ..config import STUDENT_TABLE, POOLS_TABLE, PROMPTS_TABLE, EVENTS_TABLE, EMAIL_BURST_SIZE, EMAIL_RECOVERY_SLEEP_SECS, EMAIL_CONTINUOUS_SLEEP_SECS
-from .shared import build_campaign_string, passes_stage_filter, code_to_full_language
+from .shared import build_campaign_string, passes_stage_filter, code_to_full_language, find_eligible_students
 
 
 async def async_interruptible_sleep(total_seconds, work_order, aws_client, check_interval=1):
@@ -54,11 +54,7 @@ class SendContinuouslyStep:
             
             await self._update_progress(work_order, f"Continuous sending until {work_order.sendUntil}")
             
-            # Get campaign string
-            campaign_string = build_campaign_string(work_order.eventCode, work_order.subEvent, work_order.stage, self._get_language_code(work_order))
-            await self._update_progress(work_order, f"Campaign string: {campaign_string}")
-            
-            # Get required data
+            # Get required data (do this once before language loop)
             await self._update_progress(work_order, "Loading required data...")
             
             # Get pools data
@@ -99,18 +95,31 @@ class SendContinuouslyStep:
                 student_data = self.aws_client.scan_table(STUDENT_TABLE)
                 await self._update_progress(work_order, f"Cycle {cycle_count}: Loaded {len(student_data)} student records")
                 
-                # Find eligible students
-                eligible_students = self._find_eligible_students(
-                    student_data, pools_data, work_order, campaign_string
-                )
+                # Process each language in the work order
+                cycle_emails_sent = 0
                 
-                await self._update_progress(work_order, f"Cycle {cycle_count}: Found {len(eligible_students)} eligible students")
-                
-                if len(eligible_students) == 0:
-                    await self._update_progress(work_order, f"Cycle {cycle_count}: No eligible students found, sleeping...")
-                else:
-                    # Send emails in this cycle
-                    cycle_emails_sent = 0
+                for lang in work_order.languages.keys():
+                    if not work_order.languages[lang]:
+                        continue  # Skip disabled languages
+                    
+                    await self._update_progress(work_order, f"Cycle {cycle_count}: Processing {lang} language...")
+                    
+                    # Get campaign string for this language
+                    campaign_string = build_campaign_string(work_order.eventCode, work_order.subEvent, work_order.stage, lang)
+                    await self._update_progress(work_order, f"Cycle {cycle_count}: Campaign string for {lang}: {campaign_string}")
+                    
+                    # Find eligible students for this language
+                    eligible_students = find_eligible_students(
+                        student_data, pools_data, work_order, campaign_string, self._get_stage_record(work_order.stage), lang, self._create_eligible_object
+                    )
+                    
+                    await self._update_progress(work_order, f"Cycle {cycle_count}: Found {len(eligible_students)} eligible students for {lang}")
+                    
+                    if len(eligible_students) == 0:
+                        await self._update_progress(work_order, f"Cycle {cycle_count}: No eligible students found for {lang}")
+                        continue
+                    
+                    # Send emails for this language
                     for i, student in enumerate(eligible_students):
                         # Check for stop request before processing each student
                         latest_work_order = self.aws_client.get_work_order(work_order.id)
@@ -128,44 +137,26 @@ class SendContinuouslyStep:
                                 step.message = "Step interrupted by stop request."
                                 return False
                         
-                        # Send English email (always)
-                        if 'EN' in work_order.languages and work_order.languages['EN']:
-                            try:
-                                success = await self._send_student_email(
-                                    student, 'EN', work_order, event_data, pools_data, prompts_data, campaign_string
-                                )
-                                if success:
-                                    cycle_emails_sent += 1
-                                    total_emails_sent += 1
-                            except Exception as e:
-                                # Email failure is terminal - stop processing and report error
-                                error_message = f"Email sending failed: {str(e)}"
-                                await self._update_progress(work_order, error_message)
-                                raise Exception(error_message)
-                        
-                        # Send writtenLangPref email if different from English
-                        written_lang = student.get('writtenLangPref')
-                        if written_lang and written_lang != 'English' and written_lang in work_order.languages and work_order.languages[written_lang]:
-                            try:
-                                success = await self._send_student_email(
-                                    student, written_lang, work_order, event_data, pools_data, prompts_data, campaign_string
-                                )
-                                if success:
-                                    cycle_emails_sent += 1
-                                    total_emails_sent += 1
-                            except Exception as e:
-                                # Email failure is terminal - stop processing and report error
-                                error_message = f"Email sending failed: {str(e)}"
-                                await self._update_progress(work_order, error_message)
-                                raise Exception(error_message)
+                        try:
+                            success = await self._send_student_email(
+                                student, lang, work_order, event_data, pools_data, prompts_data, campaign_string
+                            )
+                            if success:
+                                cycle_emails_sent += 1
+                                total_emails_sent += 1
+                        except Exception as e:
+                            # Email failure is terminal - stop processing and report error
+                            error_message = f"Email sending failed for {lang}: {str(e)}"
+                            await self._update_progress(work_order, error_message)
+                            raise Exception(error_message)
                         
                         # Progress update
                         if (i + 1) % 10 == 0:
-                            await self._update_progress(work_order, f"Cycle {cycle_count}: Processed {i + 1}/{len(eligible_students)} students, sent {cycle_emails_sent} emails")
+                            await self._update_progress(work_order, f"Cycle {cycle_count}: Processed {i + 1}/{len(eligible_students)} students for {lang}, sent {cycle_emails_sent} emails")
                         
                         # Burst control
                         if (i + 1) % EMAIL_BURST_SIZE == 0 and i + 1 < len(eligible_students):
-                            await self._update_progress(work_order, f"Cycle {cycle_count}: Burst limit reached, sleeping for {EMAIL_RECOVERY_SLEEP_SECS} seconds...")
+                            await self._update_progress(work_order, f"Cycle {cycle_count}: Burst limit reached for {lang}, sleeping for {EMAIL_RECOVERY_SLEEP_SECS} seconds...")
                             try:
                                 await async_interruptible_sleep(EMAIL_RECOVERY_SLEEP_SECS, work_order, self.aws_client)
                             except InterruptedError:
@@ -174,7 +165,9 @@ class SendContinuouslyStep:
                                 step.message = "Step interrupted by stop request."
                                 return False
                     
-                    await self._update_progress(work_order, f"Cycle {cycle_count}: Sent {cycle_emails_sent} emails")
+                    await self._update_progress(work_order, f"Cycle {cycle_count}: Completed {lang} language")
+                
+                await self._update_progress(work_order, f"Cycle {cycle_count}: Sent {cycle_emails_sent} emails")
                 
                 # Check if we've reached the sendUntil date
                 if datetime.now(timezone.utc) >= send_until_date:
@@ -210,54 +203,6 @@ class SendContinuouslyStep:
             print(f"[ERROR] [SendContinuouslyStep] Error in continuous send process: {error_message}")
             await self._update_progress(work_order, f"Error: {error_message}")
             raise Exception(error_message)
-
-    def _get_language_code(self, work_order: WorkOrder) -> str:
-        """Get the language code from the work order's languages dictionary."""
-        if work_order.languages and isinstance(work_order.languages, dict):
-            # Get the first language code available
-            for lang in work_order.languages.keys():
-                if lang:
-                    return lang.upper()
-        return "EN"
-
-    def _find_eligible_students(self, student_data: List[Dict], pools_data: List[Dict], 
-                               work_order: WorkOrder, campaign_string: str) -> List[Dict]:
-        """
-        Find eligible students using the same logic as count.py, with language eligibility logic.
-        """
-        eligible_students = []
-        selected_lang_codes = set(work_order.languages.keys())
-        has_english = 'EN' in selected_lang_codes
-        selected_full_names = set(code_to_full_language(code).lower() for code in selected_lang_codes)
-        
-        # Get stage record for filtering
-        stage_record = self._get_stage_record(work_order.stage)
-        
-        for student in student_data:
-            if student.get('unsubscribe', False):
-                continue
-            emails = student.get('emails', {})
-            has_received = campaign_string in emails
-            if has_received:
-                continue
-            # Language eligibility check
-            if not has_english:
-                written_lang = student.get('writtenLangPref')
-                if not written_lang or written_lang.lower() not in selected_full_names:
-                    continue
-            pool_name = work_order.config.get('pool') if hasattr(work_order, 'config') and work_order.config else None
-            if not pool_name:
-                continue
-            is_eligible = check_eligibility(
-                pool_name, student, work_order.eventCode, pools_data
-            )
-            if not is_eligible:
-                continue
-            # Apply stage-specific filtering using shared function
-            if passes_stage_filter(stage_record, self._create_eligible_object(student, work_order.eventCode, pools_data)):
-                eligible_students.append(student)
-        
-        return eligible_students
 
     def _get_stage_record(self, stage: str) -> Dict:
         """Get the stage record from DynamoDB stages table"""
