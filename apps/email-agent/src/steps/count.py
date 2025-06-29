@@ -137,30 +137,31 @@ class CountStep:
                 continue
                 
             is_eligible = check_eligibility(
-                pool_name, student, work_order.eventCode, pools_data
+                pool_name, student, work_order.eventCode, pools_data, work_order.subEvent
             )
             
             if not is_eligible:
                 continue
             
             # Apply stage-specific filtering using shared function
-            if passes_stage_filter(stage_record, self._create_eligible_object(student, work_order.eventCode, pools_data)):
+            if passes_stage_filter(stage_record, self._create_eligible_object(student, work_order.eventCode, pools_data, work_order.subEvent)):
                 will_receive_count += 1
         
         return received_count, will_receive_count
 
-    def _create_eligible_object(self, student: Dict, event_code: str, pools_data: List[Dict]):
+    def _create_eligible_object(self, student: Dict, event_code: str, pools_data: List[Dict], sub_event: str):
         """Create an object with check_eligibility method for the shared function"""
         class EligibleChecker:
-            def __init__(self, student, event_code, pools_data):
+            def __init__(self, student, event_code, pools_data, sub_event):
                 self.student = student
                 self.event_code = event_code
                 self.pools_data = pools_data
+                self.sub_event = sub_event
             
             def check_eligibility(self, pool_name):
-                return check_eligibility(pool_name, self.student, self.event_code, self.pools_data)
+                return check_eligibility(pool_name, self.student, self.event_code, self.pools_data, self.sub_event)
         
-        return EligibleChecker(student, event_code, pools_data)
+        return EligibleChecker(student, event_code, pools_data, sub_event)
 
     async def _update_progress(self, work_order: WorkOrder, message: str):
         """Update the work order progress message."""

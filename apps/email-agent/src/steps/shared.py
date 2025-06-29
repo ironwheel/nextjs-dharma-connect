@@ -121,14 +121,14 @@ def find_eligible_students(student_data, pools_data, work_order, campaign_string
             continue
             
         is_eligible = check_eligibility(
-            pool_name, student, work_order.eventCode, pools_data
+            pool_name, student, work_order.eventCode, pools_data, work_order.subEvent
         )
         
         if not is_eligible:
             continue
         
         # Apply stage-specific filtering using shared function
-        if passes_stage_filter(stage_record, create_eligible_object_func(student, work_order.eventCode, pools_data)):
+        if passes_stage_filter(stage_record, create_eligible_object_func(student, work_order.eventCode, pools_data, work_order.subEvent)):
             eligible_students.append(student)
     
     return eligible_students 
