@@ -8,7 +8,7 @@
 from typing import Dict, List, Any, Optional
 
 
-def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid: str, all_pools_data: List[Dict[str, Any]]) -> bool:
+def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid: str, all_pools_data: List[Dict[str, Any]], current_subevent: str = None) -> bool:
     """
     Checks if a student is eligible for content based on pool definitions.
     Recursive function to handle nested pool logic.
@@ -18,6 +18,7 @@ def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid:
         student_data: The student data object containing programs, practice info, etc.
         current_aid: The AID of the current event context, for program-specific checks.
         all_pools_data: The complete array of pool definition objects. Should be an array.
+        current_subevent: The current subevent for program-specific checks.
 
     Returns:
         True if the student is eligible according to the specified pool, false otherwise.
@@ -43,13 +44,13 @@ def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid:
         if attr_type == 'true':
             is_eligible = True
         elif attr_type == 'pool':
-            is_eligible = check_eligibility(attr['name'], student_data, current_aid, all_pools_data)
+            is_eligible = check_eligibility(attr['name'], student_data, current_aid, all_pools_data, current_subevent)
         elif attr_type == 'pooldiff':
-            is_eligible = (check_eligibility(attr['inpool'], student_data, current_aid, all_pools_data) and
-                          not check_eligibility(attr['outpool'], student_data, current_aid, all_pools_data))
+            is_eligible = (check_eligibility(attr['inpool'], student_data, current_aid, all_pools_data, current_subevent) and
+                          not check_eligibility(attr['outpool'], student_data, current_aid, all_pools_data, current_subevent))
         elif attr_type == 'pooland':
-            is_eligible = (check_eligibility(attr['pool1'], student_data, current_aid, all_pools_data) and
-                          check_eligibility(attr['pool2'], student_data, current_aid, all_pools_data))
+            is_eligible = (check_eligibility(attr['pool1'], student_data, current_aid, all_pools_data, current_subevent) and
+                          check_eligibility(attr['pool2'], student_data, current_aid, all_pools_data, current_subevent))
         elif attr_type == 'practice':
             field = attr.get('field')
             is_eligible = bool(student_data.get('practice', {}).get(field))
@@ -60,7 +61,13 @@ def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid:
             program = programs.get(aid, {})
             offering_history = program.get('offeringHistory', {})
             subevent_data = offering_history.get(subevent, {})
-            is_eligible = bool(subevent_data.get('offeringSKU'))
+            is_eligible = bool(subevent_data.get('offeringSKU')) and not bool(program.get('withdrawn')) 
+        elif attr_type == 'currenteventoffering':
+            programs = student_data.get('programs', {})
+            program = programs.get(current_aid, {})
+            offering_history = program.get('offeringHistory', {})
+            subevent_data = offering_history.get(current_subevent, {})
+            is_eligible = bool(subevent_data.get('offeringSKU')) and not bool(program.get('withdrawn')) 
         elif attr_type == 'notoffering':
             aid = attr.get('aid')
             subevent = attr.get('subevent')
@@ -77,7 +84,7 @@ def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid:
             program = programs.get(aid, {})
             offering_history = program.get('offeringHistory', {})
             if subevent in offering_history:
-                is_eligible = any(check_eligibility(p, student_data, current_aid, all_pools_data) for p in pools)
+                is_eligible = any(check_eligibility(p, student_data, current_aid, all_pools_data, current_subevent) for p in pools)
         elif attr_type == 'oath':
             aid = attr.get('aid')
             programs = student_data.get('programs', {})
@@ -93,6 +100,14 @@ def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid:
             programs = student_data.get('programs', {})
             program = programs.get(aid, {})
             is_eligible = bool(program.get('join'))   
+        elif attr_type == 'currenteventjoin':
+            programs = student_data.get('programs', {})
+            program = programs.get(current_aid, {})
+            is_eligible = bool(program.get('join'))   
+        elif attr_type == 'currenteventaccept':
+            programs = student_data.get('programs', {})
+            program = programs.get(current_aid, {})
+            is_eligible = bool(program.get('accepted'))   
         elif attr_type == 'notjoin':
             aid = attr.get('aid')
             programs = student_data.get('programs', {})

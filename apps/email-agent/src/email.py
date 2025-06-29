@@ -211,7 +211,7 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
                 index = line.index('#if')
                 largs = re.split("[ <]", line[index+4:])
                 if largs[0] == 'oathed':
-                    condition = check_eligibility('oath', student, event['aid'], pools_array)
+                    condition = check_eligibility('oath', student, event['aid'], pools_array, event.get('subevent'))
                 elif largs[0] == 'offering':
                     try:
                         installments = event['config']['offeringPresentation'] == 'installments'

@@ -57,7 +57,65 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
     const [showArchiveModal, setShowArchiveModal] = useState(false)
     const [archivedWorkOrders, setArchivedWorkOrders] = useState<WorkOrder[]>([])
     const [loadingArchived, setLoadingArchived] = useState(false)
+    const [currentWorkOrderIndex, setCurrentWorkOrderIndex] = useState(0)
     const { lastMessage, status, connectionId } = useWebSocketContext()
+
+    // Navigation functions
+    const goToNextWorkOrder = () => {
+        if (currentWorkOrderIndex < workOrders.length - 1) {
+            setCurrentWorkOrderIndex(currentWorkOrderIndex + 1)
+        }
+    }
+
+    const goToPreviousWorkOrder = () => {
+        if (currentWorkOrderIndex > 0) {
+            setCurrentWorkOrderIndex(currentWorkOrderIndex - 1)
+        }
+    }
+
+    const goToFirstWorkOrder = () => {
+        setCurrentWorkOrderIndex(0)
+    }
+
+    const goToLastWorkOrder = () => {
+        setCurrentWorkOrderIndex(workOrders.length - 1)
+    }
+
+    // Reset current index when work orders change
+    useEffect(() => {
+        if (workOrders.length > 0 && currentWorkOrderIndex >= workOrders.length) {
+            setCurrentWorkOrderIndex(0)
+        }
+    }, [workOrders, currentWorkOrderIndex])
+
+    // Keyboard navigation
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (workOrders.length === 0) return
+
+            switch (event.key) {
+                case 'ArrowUp':
+                    event.preventDefault()
+                    goToPreviousWorkOrder()
+                    break
+                case 'ArrowDown':
+                    event.preventDefault()
+                    goToNextWorkOrder()
+                    break
+                case 'Home':
+                    event.preventDefault()
+                    goToFirstWorkOrder()
+                    break
+                case 'End':
+                    event.preventDefault()
+                    goToLastWorkOrder()
+                    break
+            }
+        }
+
+        window.addEventListener('keydown', handleKeyDown)
+        return () => window.removeEventListener('keydown', handleKeyDown)
+    }, [currentWorkOrderIndex, workOrders.length])
 
     const downloadRecipientsCSV = (recipients: { id: string; name: string; email: string }[]) => {
         const csvContent = [
@@ -445,7 +503,18 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                         <Button
                             variant="primary"
                             onClick={onNew}
-                            style={{ borderRadius: '50%', width: 40, height: 40, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            style={{
+                                borderRadius: '50%',
+                                width: 40,
+                                height: 40,
+                                padding: 0,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: 32,
+                                fontWeight: 900,
+                                lineHeight: 1
+                            }}
                         >
                             +
                         </Button>
@@ -484,7 +553,18 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                     <Button
                         variant="primary"
                         onClick={onNew}
-                        style={{ borderRadius: '50%', width: 40, height: 40, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        style={{
+                            borderRadius: '50%',
+                            width: 40,
+                            height: 40,
+                            padding: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 32,
+                            fontWeight: 900,
+                            lineHeight: 1
+                        }}
                     >
                         +
                     </Button>
@@ -499,7 +579,62 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                         )}
                     </div>
                 </div>
-                <div>
+                <div className="d-flex align-items-center">
+                    {/* Navigation Controls */}
+                    <div className="d-flex align-items-center me-3 flex-column" style={{ minWidth: 60, padding: 0, margin: 0 }}>
+                        {/* Work order count above arrows */}
+                        <div style={{ fontWeight: 700, fontSize: 22, color: '#51cfef', marginBottom: 2, marginTop: 0, textAlign: 'center', lineHeight: 1 }}>
+                            {workOrders.length}
+                        </div>
+                        <div className="d-flex flex-row align-items-center justify-content-center" style={{ gap: 12, margin: 0, padding: 0 }}>
+                            <Button
+                                variant="light"
+                                onClick={goToPreviousWorkOrder}
+                                disabled={currentWorkOrderIndex === 0}
+                                size="lg"
+                                style={{
+                                    borderRadius: '50%',
+                                    boxShadow: '0 2px 8px rgba(0,0,0,0.10)',
+                                    width: 48,
+                                    height: 48,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: 32,
+                                    margin: 0
+                                }}
+                                title="Previous work order"
+                            >
+                                <span style={{ lineHeight: 1 }}>&#8592;</span>
+                            </Button>
+                            <Button
+                                variant="light"
+                                onClick={goToNextWorkOrder}
+                                disabled={currentWorkOrderIndex === workOrders.length - 1}
+                                size="lg"
+                                style={{
+                                    borderRadius: '50%',
+                                    boxShadow: '0 2px 8px rgba(0,0,0,0.10)',
+                                    width: 48,
+                                    height: 48,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: 32,
+                                    margin: 0
+                                }}
+                                title="Next work order"
+                            >
+                                <span style={{ lineHeight: 1 }}>&#8594;</span>
+                            </Button>
+                        </div>
+                        <span className="mt-1 text-muted" style={{ fontSize: 13, textAlign: 'center', width: '100%', margin: 0, padding: 0, lineHeight: 1 }}>
+                            {workOrders.length > 0 ? `${currentWorkOrderIndex + 1} of ${workOrders.length}` : 'No work orders'}
+                        </span>
+                        <small className="text-muted" style={{ textAlign: 'center', width: '100%', margin: 0, padding: 0, lineHeight: 1 }}>
+                            (←→ arrows, Home/End keys)
+                        </small>
+                    </div>
                     <Button
                         variant="outline-secondary"
                         onClick={openArchiveModal}
@@ -509,235 +644,306 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                     </Button>
                 </div>
             </div>
-            <div style={{ height: '600px', overflowY: 'auto' }}>
-                <Table borderless hover variant="dark" className="mb-0">
-                    <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: '#212529' }}>
-                        <tr style={{ border: 'none' }}>
-                            <th style={{ border: 'none' }}>Status</th>
-                            <th style={{ border: 'none' }}>Event Code</th>
-                            <th style={{ border: 'none' }}>Sub Event</th>
-                            <th style={{ border: 'none' }}>Stage</th>
-                            <th style={{ border: 'none' }}>Languages</th>
-                            <th style={{ border: 'none' }}>Email Account</th>
-                            <th style={{ border: 'none' }}>Created By</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {workOrders.map(workOrder => (
-                            <React.Fragment key={workOrder.id}>
-                                <tr
-                                    onClick={() => handleRowClick(workOrder)}
-                                    onMouseEnter={() => setHoveredRow(workOrder.id)}
-                                    onMouseLeave={() => setHoveredRow(null)}
-                                    style={{ cursor: workOrder.locked ? 'not-allowed' : 'pointer' }}
-                                >
-                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
-                                        <div className="d-flex align-items-center">
-                                            <Badge
-                                                bg={workOrder.locked ? 'danger' : 'success'}
-                                                className="px-3 py-2"
-                                            >
-                                                {workOrder.locked ? 'Locked' : 'Edit'}
-                                            </Badge>
-                                            {!workOrder.archived && isWorkOrderCompleted(workOrder) && (
-                                                <Button
-                                                    variant="outline-warning"
-                                                    size="sm"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation()
-                                                        if (confirm('Are you sure you want to archive this completed work order?')) {
-                                                            archiveWorkOrder(workOrder.id)
-                                                        }
-                                                    }}
-                                                    style={{ marginLeft: 8 }}
-                                                    title="Archive completed work order"
-                                                >
-                                                    📁
-                                                </Button>
-                                            )}
-                                        </div>
-                                    </td>
-                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
-                                        {workOrder.eventCode}
-                                    </td>
-                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.subEvent}</td>
-                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.stage}</td>
-                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{Object.keys(workOrder.languages || {}).join(',')}</td>
-                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.account}</td>
-                                    <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{participantNames[workOrder.createdBy] || workOrder.createdBy}</td>
-                                </tr>
-                                <tr>
-                                    <td colSpan={8} style={{ padding: 0, background: 'transparent', border: 'none' }}>
-                                        {(workOrder.steps || []).map((step, index) => {
-                                            // Helper function to extract string values from DynamoDB format or plain strings
-                                            const extractString = (value: any): string => {
-                                                if (typeof value === 'string') return value;
-                                                if (value && typeof value === 'object' && 'S' in value) return (value as { S: string }).S;
-                                                if (value && typeof value === 'object' && 'value' in value) return (value as { value: string }).value;
-                                                return String(value || '');
-                                            };
+            
+            {/* Single Work Order Display */}
+            {workOrders.length > 0 ? (
+                <div>
+                    <Table borderless hover variant="dark" className="mb-0">
+                        <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: '#212529' }}>
+                            <tr style={{ border: 'none' }}>
+                                <th style={{ border: 'none' }}>Status</th>
+                                <th style={{ border: 'none' }}>Event Code</th>
+                                <th style={{ border: 'none' }}>Sub Event</th>
+                                <th style={{ border: 'none' }}>Stage</th>
+                                <th style={{ border: 'none' }}>Languages</th>
+                                <th style={{ border: 'none' }}>Email Account</th>
+                                <th style={{ border: 'none' }}>Created By</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {(() => {
+                                const workOrder = workOrders[currentWorkOrderIndex]
+                                return (
+                                    <React.Fragment key={workOrder.id}>
+                                        <tr
+                                            onClick={() => handleRowClick(workOrder)}
+                                            onMouseEnter={() => setHoveredRow(workOrder.id)}
+                                            onMouseLeave={() => setHoveredRow(null)}
+                                            style={{ cursor: workOrder.locked ? 'not-allowed' : 'pointer' }}
+                                        >
+                                            <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
+                                                <div className="d-flex align-items-center">
+                                                    <Badge
+                                                        bg={workOrder.locked ? 'danger' : 'success'}
+                                                        className="px-3 py-2"
+                                                    >
+                                                        {workOrder.locked ? 'Locked' : 'Edit'}
+                                                    </Badge>
+                                                    {!workOrder.archived && isWorkOrderCompleted(workOrder) && (
+                                                        <Button
+                                                            variant="outline-warning"
+                                                            size="sm"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation()
+                                                                if (confirm('Are you sure you want to archive this completed work order?')) {
+                                                                    archiveWorkOrder(workOrder.id)
+                                                                }
+                                                            }}
+                                                            style={{ marginLeft: 8 }}
+                                                            title="Archive completed work order"
+                                                        >
+                                                            📁
+                                                        </Button>
+                                                    )}
+                                                </div>
+                                            </td>
+                                            <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
+                                                {workOrder.eventCode}
+                                            </td>
+                                            <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.subEvent}</td>
+                                            <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.stage}</td>
+                                            <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{Object.keys(workOrder.languages || {}).join(',')}</td>
+                                            <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.account}</td>
+                                            <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{participantNames[workOrder.createdBy] || workOrder.createdBy}</td>
+                                        </tr>
+                                        <tr>
+                                            <td colSpan={8} style={{ padding: 0, background: 'transparent', border: 'none' }}>
+                                                {(workOrder.steps || []).map((step, index) => {
+                                                    // Helper function to extract string values from DynamoDB format or plain strings
+                                                    const extractString = (value: any): string => {
+                                                        if (typeof value === 'string') return value;
+                                                        if (value && typeof value === 'object' && 'S' in value) return (value as { S: string }).S;
+                                                        if (value && typeof value === 'object' && 'value' in value) return (value as { value: string }).value;
+                                                        return String(value || '');
+                                                    };
 
-                                            // Extract all step properties as strings
-                                            const stepName = extractString(step.name);
-                                            const stepStatus = extractString(step.status);
-                                            const stepMessage = extractString(step.message);
-                                            const stepIsActive = typeof step.isActive === 'boolean' ? step.isActive :
-                                                (step.isActive && typeof step.isActive === 'object' && 'BOOL' in step.isActive) ?
-                                                    (step.isActive as { BOOL: boolean }).BOOL : false;
+                                                    // Extract all step properties as strings
+                                                    const stepName = extractString(step.name);
+                                                    const stepStatus = extractString(step.status);
+                                                    const stepMessage = extractString(step.message);
+                                                    const stepIsActive = typeof step.isActive === 'boolean' ? step.isActive :
+                                                        (step.isActive && typeof step.isActive === 'object' && 'BOOL' in step.isActive) ?
+                                                            (step.isActive as { BOOL: boolean }).BOOL : false;
 
-                                            // Debug logging for step data
-                                            if (stepStatus === 'error' || stepMessage) {
-                                                console.log('[DEBUG] Step data for', workOrder.id, stepName, ':', {
-                                                    step,
-                                                    stepName,
-                                                    stepStatus,
-                                                    stepMessage,
-                                                    stepIsActive,
-                                                    rawMessage: step.message,
-                                                    messageType: typeof step.message,
-                                                    messageKeys: step.message && typeof step.message === 'object' ? Object.keys(step.message) : 'N/A'
-                                                });
-                                            }
+                                                    // Debug logging for step data
+                                                    if (stepStatus === 'error' || stepMessage) {
+                                                        console.log('[DEBUG] Step data for', workOrder.id, stepName, ':', {
+                                                            step,
+                                                            stepName,
+                                                            stepStatus,
+                                                            stepMessage,
+                                                            stepIsActive,
+                                                            rawMessage: step.message,
+                                                            messageType: typeof step.message,
+                                                            messageKeys: step.message && typeof step.message === 'object' ? Object.keys(step.message) : 'N/A'
+                                                        });
+                                                    }
 
-                                            const isPending = !stepIsActive && stepStatus === 'ready';
-                                            const isReadyActive = stepIsActive && stepStatus === 'ready';
-                                            const isComplete = stepStatus === 'complete';
-                                            const isInterrupted = stepStatus === 'interrupted';
-                                            const isError = stepStatus === 'error';
-                                            const isException = stepStatus === 'exception';
-                                            const isWorking = stepStatus === 'working';
+                                                    const isWorking = stepStatus === 'working' || stepIsActive;
+                                                    const isComplete = stepStatus === 'complete';
+                                                    const isError = stepStatus === 'error' || stepStatus === 'exception';
+                                                    const isInterrupted = stepStatus === 'interrupted';
+                                                    const isPending = stepStatus === 'ready';
 
-                                            const stepTextColor = (isPending || isComplete) ? '#bbb' : '#fff';
-                                            const indentColor = (isPending || isComplete) ? '#bbb' : '#fff';
+                                                    const messageColor = isError ? '#ff6b6b' :
+                                                        isComplete ? '#51cf66' :
+                                                            isInterrupted ? '#ffd43b' :
+                                                                isWorking ? '#74c0fc' : '#adb5bd';
 
-                                            // Button styling based on status
-                                            let buttonVariant = 'primary';
-                                            let buttonText = 'Start';
-                                            let buttonDisabled = false;
+                                                    // Spinner only for 'working' status
+                                                    const showSpinner = stepStatus === 'working';
 
-                                            if (isWorking) {
-                                                buttonVariant = 'danger';
-                                                buttonText = 'Stop';
-                                            } else if (isInterrupted || isError || isException || isComplete) {
-                                                buttonVariant = 'primary';
-                                                buttonText = 'Restart';
-                                            } else if (isReadyActive) {
-                                                buttonVariant = 'primary';
-                                                buttonText = 'Start';
-                                            } else {
-                                                buttonVariant = 'primary';
-                                                buttonText = 'Start';
-                                                buttonDisabled = true; // Disabled for pending steps
-                                            }
+                                                    // Button label logic
+                                                    let buttonLabel = 'Start';
+                                                    if (stepStatus === 'working') buttonLabel = 'Stop';
+                                                    else if (stepStatus === 'complete' || stepStatus === 'error') buttonLabel = 'Restart';
 
-                                            const badgeStyle = isPending || isComplete
-                                                ? { color: '#444', background: '#ccc', border: '1px solid #bbb' }
-                                                : isInterrupted
-                                                    ? { color: '#fff', background: '#ff9800', border: '1px solid #ff9800' }
-                                                    : isError
-                                                        ? { color: '#fff', background: '#dc3545', border: '1px solid #dc3545' }
-                                                        : isException
-                                                            ? { color: '#fff', background: '#6f42c1', border: '1px solid #6f42c1' }
-                                                            : {};
-                                            const badgeBg = isReadyActive ? 'bg-primary' : isInterrupted ? '' : isError ? '' : isException ? '' : getStatusBadgeClass(stepStatus, stepIsActive);
-                                            const messageColor = isComplete ? '#bbb' : '#fff';
-                                            const prevStepComplete = index === 0 || (workOrder.steps && workOrder.steps[index - 1] && extractString(workOrder.steps[index - 1].status) === 'complete');
-                                            const canStart = prevStepComplete || isError || isInterrupted || isException || isComplete;
+                                                    // Badge color logic
+                                                    let badgeStyle = {};
+                                                    let badgeBg = getStatusBadgeClass(stepStatus, stepIsActive);
+                                                    if (stepStatus === 'error') {
+                                                        badgeStyle = { backgroundColor: '#dc3545', color: '#fff' };
+                                                    } else if (stepStatus === 'complete') {
+                                                        badgeStyle = { backgroundColor: '#51cfef', color: '#222' };
+                                                    }
 
-                                            // Special logic for Prepare step - only enable if Count is complete
-                                            let finalCanStart = canStart;
-                                            if (stepName === 'Prepare') {
-                                                const countStep = workOrder.steps.find(s => extractString(s.name) === 'Count');
-                                                const countStatus = countStep ? extractString(countStep.status) : 'ready';
-                                                finalCanStart = canStart && countStatus === 'complete';
-                                            } else if (stepName === 'Dry-Run') {
-                                                const prepareStep = workOrder.steps.find(s => extractString(s.name) === 'Prepare');
-                                                const prepareStatus = prepareStep ? extractString(prepareStep.status) : 'ready';
-                                                finalCanStart = canStart && prepareStatus === 'complete';
-                                            } else if (stepName === 'Test') {
-                                                const dryRunStep = workOrder.steps.find(s => extractString(s.name) === 'Dry-Run');
-                                                const dryRunStatus = dryRunStep ? extractString(dryRunStep.status) : 'ready';
-                                                finalCanStart = canStart && dryRunStatus === 'complete';
-                                            } else if (stepName === 'Send-Once') {
-                                                const testStep = workOrder.steps.find(s => extractString(s.name) === 'Test');
-                                                const testStatus = testStep ? extractString(testStep.status) : 'ready';
-                                                finalCanStart = canStart && testStatus === 'complete';
-                                            } else if (stepName === 'Send-Continuously') {
-                                                const sendOnceStep = workOrder.steps.find(s => extractString(s.name) === 'Send-Once');
-                                                const sendOnceStatus = sendOnceStep ? extractString(sendOnceStep.status) : 'ready';
-                                                const hasSendContinuously = workOrder.sendContinuously || false;
-                                                finalCanStart = canStart && sendOnceStatus === 'complete' && hasSendContinuously;
-                                            }
-
-                                            return (
-                                                <div key={`${workOrder.id}-${stepName}`} style={{ background: '#2c3034', padding: '12px' }}>
-                                                    <div className="d-flex align-items-center">
-                                                        <div style={{ flex: 2 }} className="ps-5">
-                                                            <div className="d-flex align-items-center">
-                                                                <div className="me-2" style={{ color: isInterrupted ? '#fff' : indentColor }}>└─</div>
-                                                                <div style={{ color: isInterrupted ? '#fff' : stepTextColor }}>{stepName}</div>
+                                                    return (
+                                                        <div key={index} style={{
+                                                            padding: '12px 16px',
+                                                            borderBottom: index < (workOrder.steps?.length || 0) - 1 ? '1px solid #495057' : 'none',
+                                                            background: isWorking ? '#2b3035' : 'transparent'
+                                                        }}>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                                                <div style={{ flex: 1 }}>
+                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                                                                        <span style={{
+                                                                            fontSize: '0.9rem',
+                                                                            fontWeight: 'bold',
+                                                                            color:
+                                                                                !stepIsActive ? '#adb5bd' :
+                                                                                (stepIsActive && stepStatus === 'ready') ? '#fff' :
+                                                                                stepStatus === 'error' ? '#dc3545' :
+                                                                                stepStatus === 'complete' ? '#51cfef' :
+                                                                                stepStatus === 'working' ? '#fff' :
+                                                                                '#adb5bd',
+                                                                        }}>
+                                                                            {stepName}
+                                                                        </span>
+                                                                        {stepStatus !== 'ready' && (
+                                                                            <span
+                                                                                style={{
+                                                                                    fontSize: '0.85rem',
+                                                                                    fontWeight: 600,
+                                                                                    marginLeft: 8,
+                                                                                    color:
+                                                                                        stepStatus === 'error' ? '#dc3545' :
+                                                                                        stepStatus === 'complete' ? '#51cfef' :
+                                                                                        stepStatus === 'working' ? '#fff' :
+                                                                                        '#adb5bd',
+                                                                                    letterSpacing: 0.5,
+                                                                                }}
+                                                                            >
+                                                                                {stepStatus}
+                                                                            </span>
+                                                                        )}
+                                                                        {showSpinner && (
+                                                                            <div className="spinner-border spinner-border-sm" role="status" style={{ width: '12px', height: '12px' }}>
+                                                                                <span className="visually-hidden">Loading...</span>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                    <div style={{ flex: 4, color: isInterrupted ? '#fff' : messageColor }}>
+                                                                        {stepName === 'Dry-Run' && workOrder.dryRunRecipients && workOrder.dryRunRecipients.length > 0 ? (
+                                                                            <div className="d-flex align-items-center">
+                                                                                <span style={{ flex: 1 }}>{stepMessage}</span>
+                                                                                <Button
+                                                                                    size="sm"
+                                                                                    variant="outline-info"
+                                                                                    onClick={() => workOrder.dryRunRecipients && openRecipientsModal(workOrder.dryRunRecipients)}
+                                                                                    style={{ marginLeft: 8 }}
+                                                                                >
+                                                                                    View Results ({workOrder.dryRunRecipients.length})
+                                                                                </Button>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <span>{stepMessage}</span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                                <div style={{ display: 'flex', gap: '4px' }}>
+                                                                    {/* Button logic for each step */}
+                                                                    {stepName === 'Count' && (
+                                                                        <Button
+                                                                            size="sm"
+                                                                            variant={stepStatus === 'working' ? 'warning' : 'success'}
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation()
+                                                                                handleStepAction(workOrder.id, 'Count', stepStatus !== 'working')
+                                                                            }}
+                                                                            disabled={workOrder.locked}
+                                                                        >
+                                                                            {buttonLabel}
+                                                                        </Button>
+                                                                    )}
+                                                                    {stepName === 'Prepare' && (
+                                                                        <Button
+                                                                            size="sm"
+                                                                            variant={stepStatus === 'working' ? 'warning' : 'success'}
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation()
+                                                                                handleStepAction(workOrder.id, 'Prepare', stepStatus !== 'working')
+                                                                            }}
+                                                                            disabled={workOrder.locked || !(() => {
+                                                                                const countStep = workOrder.steps?.find(s => extractString(s.name) === 'Count')
+                                                                                return countStep && extractString(countStep.status) === 'complete'
+                                                                            })()}
+                                                                        >
+                                                                            {buttonLabel}
+                                                                        </Button>
+                                                                    )}
+                                                                    {stepName === 'Dry-Run' && (
+                                                                        <Button
+                                                                            size="sm"
+                                                                            variant={stepStatus === 'working' ? 'warning' : 'success'}
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation()
+                                                                                handleStepAction(workOrder.id, 'Dry-Run', stepStatus !== 'working')
+                                                                            }}
+                                                                            disabled={workOrder.locked || !(() => {
+                                                                                const prepareStep = workOrder.steps?.find(s => extractString(s.name) === 'Prepare')
+                                                                                return prepareStep && extractString(prepareStep.status) === 'complete'
+                                                                            })()}
+                                                                        >
+                                                                            {buttonLabel}
+                                                                        </Button>
+                                                                    )}
+                                                                    {stepName === 'Test' && (
+                                                                        <Button
+                                                                            size="sm"
+                                                                            variant={stepStatus === 'working' ? 'warning' : 'success'}
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation()
+                                                                                handleStepAction(workOrder.id, 'Test', stepStatus !== 'working')
+                                                                            }}
+                                                                            disabled={workOrder.locked || !(() => {
+                                                                                const dryRunStep = workOrder.steps?.find(s => extractString(s.name) === 'Dry-Run')
+                                                                                return dryRunStep && extractString(dryRunStep.status) === 'complete'
+                                                                            })()}
+                                                                        >
+                                                                            {buttonLabel}
+                                                                        </Button>
+                                                                    )}
+                                                                    {stepName === 'Send-Once' && (
+                                                                        <Button
+                                                                            size="sm"
+                                                                            variant={stepStatus === 'working' ? 'warning' : 'success'}
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation()
+                                                                                handleStepAction(workOrder.id, 'Send-Once', stepStatus !== 'working')
+                                                                            }}
+                                                                            disabled={workOrder.locked || !(() => {
+                                                                                const testStep = workOrder.steps?.find(s => extractString(s.name) === 'Test')
+                                                                                return testStep && extractString(testStep.status) === 'complete'
+                                                                            })()}
+                                                                        >
+                                                                            {buttonLabel}
+                                                                        </Button>
+                                                                    )}
+                                                                    {stepName === 'Send-Continuously' && (
+                                                                        <Button
+                                                                            size="sm"
+                                                                            variant={stepStatus === 'working' ? 'warning' : 'success'}
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation()
+                                                                                handleStepAction(workOrder.id, 'Send-Continuously', stepStatus !== 'working')
+                                                                            }}
+                                                                            disabled={workOrder.locked || !(() => {
+                                                                                const sendOnceStep = workOrder.steps?.find(s => extractString(s.name) === 'Send-Once')
+                                                                                const hasSendContinuously = workOrder.sendContinuously || false
+                                                                                return sendOnceStep && extractString(sendOnceStep.status) === 'complete' && hasSendContinuously
+                                                                            })()}
+                                                                        >
+                                                                            {buttonLabel}
+                                                                        </Button>
+                                                                    )}
+                                                                </div>
                                                             </div>
                                                         </div>
-                                                        <div style={{ flex: 1 }}>
-                                                            <Button
-                                                                variant={buttonVariant}
-                                                                size="sm"
-                                                                onClick={e => { e.stopPropagation(); handleStepAction(workOrder.id, stepName as 'Count' | 'Prepare' | 'Dry-Run' | 'Test' | 'Send-Once' | 'Send-Continuously', !isWorking) }}
-                                                                disabled={buttonDisabled || !finalCanStart}
-                                                                style={isComplete ? { backgroundColor: '#0d6efd', color: '#fff', borderColor: '#0d6efd' } : {}}
-                                                            >
-                                                                {buttonText}
-                                                            </Button>
-                                                        </div>
-                                                        <div style={{ flex: 1 }}>
-                                                            <span
-                                                                className="px-3 py-2"
-                                                                style={{
-                                                                    color: isPending || isComplete ? '#bbb'
-                                                                        : isInterrupted ? '#ff9800'
-                                                                            : isError ? '#dc3545'
-                                                                                : isException ? '#6f42c1'
-                                                                                    : isWorking ? '#0d6efd'
-                                                                                        : '#fff',
-                                                                    fontSize: '0.95rem',
-                                                                    fontWeight: 'normal',
-                                                                    background: 'none',
-                                                                    border: 'none',
-                                                                    borderRadius: 0,
-                                                                    padding: 0
-                                                                }}
-                                                            >
-                                                                {isPending ? 'pending' : stepStatus}
-                                                            </span>
-                                                        </div>
-                                                        <div style={{ flex: 4, color: isInterrupted ? '#fff' : messageColor }}>
-                                                            {stepName === 'Dry-Run' && workOrder.dryRunRecipients && workOrder.dryRunRecipients.length > 0 ? (
-                                                                <div className="d-flex align-items-center">
-                                                                    <span style={{ flex: 1 }}>{stepMessage}</span>
-                                                                    <Button
-                                                                        size="sm"
-                                                                        variant="outline-info"
-                                                                        onClick={() => workOrder.dryRunRecipients && openRecipientsModal(workOrder.dryRunRecipients)}
-                                                                        style={{ marginLeft: 8 }}
-                                                                    >
-                                                                        View Results ({workOrder.dryRunRecipients.length})
-                                                                    </Button>
-                                                                </div>
-                                                            ) : (
-                                                                <span>{stepMessage}</span>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            )
-                                        })}
-                                    </td>
-                                </tr>
-                            </React.Fragment>
-                        ))}
-                    </tbody>
-                </Table>
-            </div>
+                                                    )
+                                                })}
+                                            </td>
+                                        </tr>
+                                    </React.Fragment>
+                                )
+                            })()}
+                        </tbody>
+                    </Table>
+                </div>
+            ) : (
+                <div className="d-flex justify-content-center align-items-center" style={{ height: '300px', color: '#bbb', fontSize: '1.5rem' }}>
+                    No work orders available
+                </div>
+            )}
 
             {/* Recipients Modal */}
             <Modal

@@ -215,18 +215,19 @@ class SendContinuouslyStep:
             print(f"[WARNING] Failed to get stage record for {stage}: {e}")
         return {}
 
-    def _create_eligible_object(self, student: Dict, event_code: str, pools_data: List[Dict]):
+    def _create_eligible_object(self, student: Dict, event_code: str, pools_data: List[Dict], sub_event: str):
         """Create an object with check_eligibility method for the shared function"""
         class EligibleChecker:
-            def __init__(self, student, event_code, pools_data):
+            def __init__(self, student, event_code, pools_data, sub_event):
                 self.student = student
                 self.event_code = event_code
                 self.pools_data = pools_data
+                self.sub_event = sub_event
             
             def check_eligibility(self, pool_name):
-                return check_eligibility(pool_name, self.student, self.event_code, self.pools_data)
+                return check_eligibility(pool_name, self.student, self.event_code, self.pools_data, self.sub_event)
         
-        return EligibleChecker(student, event_code, pools_data)
+        return EligibleChecker(student, event_code, pools_data, sub_event)
 
     async def _send_student_email(self, student: Dict, language: str, work_order: WorkOrder, 
                                  event_data: Dict, pools_data: List[Dict], prompts_data: List[Dict], 
