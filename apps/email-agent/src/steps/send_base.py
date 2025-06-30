@@ -9,7 +9,7 @@ from typing import Dict, List, Any, Tuple
 from datetime import datetime, timezone
 from ..models import WorkOrder, Step, StepStatus
 from ..aws_client import AWSClient
-from ..email import send_email
+from ..email_sender import send_email
 from ..eligible import check_eligibility
 from ..config import STUDENT_TABLE, POOLS_TABLE, PROMPTS_TABLE, EVENTS_TABLE, EMAIL_BURST_SIZE, EMAIL_RECOVERY_SLEEP_SECS
 from .shared import passes_stage_filter, build_campaign_string, code_to_full_language, get_stage_prefix, find_eligible_students
@@ -26,10 +26,20 @@ async def async_interruptible_sleep(total_seconds, work_order, aws_client, check
             raise InterruptedError('Step interrupted by stop request')
 
 class SendBaseStep:
-    def __init__(self, aws_client: AWSClient, step_name: str, dryrun: bool):
+    def __init__(self, aws_client: AWSClient, step_name: str, dryrun: bool, logging_config=None):
         self.aws_client = aws_client
-        self.step_name = step_name
+        self.step_name = step_name  # Display name (e.g., "Send-Once", "Send-Continuously", "Dry-Run")
+        self.actual_step_name = "Send"  # Actual step name in work order (always "Send")
         self.dryrun = dryrun
+        self.logging_config = logging_config
+
+    def log(self, level, message):
+        """Log a message if the level is enabled."""
+        if self.logging_config:
+            self.logging_config.log(level, message)
+        else:
+            # Fallback to always logging if no config provided
+            print(message)
 
     async def process(self, work_order: WorkOrder, step: Step) -> bool:
         """
@@ -189,7 +199,7 @@ class SendBaseStep:
             
         except Exception as e:
             error_message = str(e)
-            print(f"[ERROR] [{self.step_name}Step] Error in {self.step_name.lower()} process: {error_message}")
+            self.log('error', f"[ERROR] [{self.step_name}Step] Error in {self.step_name.lower()} process: {error_message}")
             await self._update_progress(work_order, f"Error: {error_message}")
             raise Exception(error_message)
 
@@ -283,7 +293,7 @@ class SendBaseStep:
             
         except Exception as e:
             error_msg = f"Error sending email to {student.get('email')} in {language}: {str(e)}"
-            print(f"[ERROR] {error_msg}")
+            self.log('error', f"[ERROR] {error_msg}")
             raise Exception(error_msg)
 
     async def _update_progress(self, work_order: WorkOrder, message: str):
@@ -295,9 +305,9 @@ class SendBaseStep:
                 if current_work_order:
                     steps = current_work_order.steps.copy()
                     for i, s in enumerate(steps):
-                        if s.name == self.step_name:
+                        if s.name == self.actual_step_name:
                             steps[i] = Step(
-                                name=self.step_name,
+                                name=self.actual_step_name,
                                 status=s.status,
                                 message=message,
                                 isActive=s.isActive,
@@ -322,8 +332,8 @@ class SendBaseStep:
                         'id': work_order.id,
                         'updates': {'steps': plain_steps}
                     })
-                    print(f"[PROGRESS] {message}")
+                    self.log('progress', f"[PROGRESS] {message}")
             except Exception as e:
-                print(f"[WARNING] Failed to update progress message: {e}")
+                self.log('warning', f"[WARNING] Failed to update progress message: {e}")
         else:
-            print(f"[PROGRESS] {message}") 
+            self.log('progress', f"[PROGRESS] {message}") 

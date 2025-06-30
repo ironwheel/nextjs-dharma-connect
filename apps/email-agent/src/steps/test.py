@@ -8,7 +8,7 @@ import time
 from typing import Dict, List, Any
 from ..models import WorkOrder, Step, StepStatus
 from ..aws_client import AWSClient
-from ..email import send_email
+from ..email_sender import send_email
 from ..config import STUDENT_TABLE, POOLS_TABLE, PROMPTS_TABLE, EVENTS_TABLE
 
 
@@ -23,8 +23,9 @@ async def async_interruptible_sleep(total_seconds, work_order, aws_client, check
             raise InterruptedError('Step interrupted by stop request')
 
 class TestStep:
-    def __init__(self, aws_client: AWSClient):
+    def __init__(self, aws_client: AWSClient, logging_config=None):
         self.aws_client = aws_client
+        self.logging_config = logging_config
 
     OFFERING_REMINDER_PREFIX = {
         "EN": "Offering Reminder: ",
@@ -177,7 +178,7 @@ class TestStep:
             return False
         except Exception as e:
             error_message = str(e)
-            print(f"[ERROR] [TestStep] Error in test process: {error_message}")
+            self.log('error', f"[ERROR] [TestStep] Error in test process: {error_message}")
             await self._update_progress(work_order, f"Error: {error_message}")
             raise Exception(error_message)
 
@@ -217,8 +218,16 @@ class TestStep:
                         'id': work_order.id,
                         'updates': {'steps': plain_steps}
                     })
-                    print(f"[PROGRESS] {message}")
+                    self.log('progress', f"[PROGRESS] {message}")
             except Exception as e:
-                print(f"[WARNING] Failed to update progress message: {e}")
+                self.log('warning', f"[WARNING] Failed to update progress message: {e}")
         else:
-            print(f"[PROGRESS] {message}") 
+            self.log('progress', f"[PROGRESS] {message}")
+
+    def log(self, level, message):
+        """Log a message if the level is enabled."""
+        if self.logging_config:
+            self.logging_config.log(level, message)
+        else:
+            # Fallback to always logging if no config provided
+            print(message) 

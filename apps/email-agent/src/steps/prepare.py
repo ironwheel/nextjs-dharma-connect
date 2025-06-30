@@ -17,20 +17,28 @@ class PrepareStep:
     4. Updating embeddedEmails in the events table
     """
     
-    def __init__(self, aws_client: Optional[AWSClient] = None):
+    def __init__(self, aws_client: AWSClient, logging_config=None):
         """Initialize the prepare step handler using environment variables."""
-        self.api_key = os.environ.get('MAILCHIMP_API_KEY')
-        self.aws_profile = os.environ.get('AWS_PROFILE')
-        self.s3_bucket = os.environ.get('S3_BUCKET')
-        self.audience_name = os.environ.get('MAILCHIMP_AUDIENCE')
-        self.reply_to = os.environ.get('MAILCHIMP_REPLY_TO')
-        self.server_prefix = os.environ.get('MAILCHIMP_SERVER_PREFIX')
         self.aws_client = aws_client
+        self.api_key = os.getenv('MAILCHIMP_API_KEY')
+        self.server_prefix = os.getenv('MAILCHIMP_SERVER_PREFIX')
+        self.audience_name = os.getenv('MAILCHIMP_AUDIENCE')
+        self.reply_to = os.getenv('MAILCHIMP_REPLY_TO')
+        self.s3_bucket = os.getenv('S3_BUCKET')
+        self.logging_config = logging_config
         
-        if not all([self.api_key, self.aws_profile, self.s3_bucket, self.audience_name, self.reply_to, self.server_prefix]):
-            raise ValueError("Missing required environment variables: MAILCHIMP_API_KEY, AWS_PROFILE, S3_BUCKET, MAILCHIMP_AUDIENCE, MAILCHIMP_REPLY_TO, MAILCHIMP_SERVER_PREFIX")
+        if not all([self.api_key, self.server_prefix, self.audience_name, self.reply_to, self.s3_bucket]):
+            raise ValueError("Missing required environment variables: MAILCHIMP_API_KEY, MAILCHIMP_SERVER_PREFIX, MAILCHIMP_AUDIENCE, MAILCHIMP_REPLY_TO, S3_BUCKET")
         
         self.headers = {'Authorization': f'Bearer {self.api_key}'}
+
+    def log(self, level, message):
+        """Log a message if the level is enabled."""
+        if self.logging_config:
+            self.logging_config.log(level, message)
+        else:
+            # Fallback to always logging if no config provided
+            print(message)
 
     async def process(self, work_order: WorkOrder, step: Step) -> bool:
         """
@@ -50,11 +58,11 @@ class PrepareStep:
         await self._update_progress(work_order, "Starting prepare step...")
 
         # Debug: Print Mailchimp config values before any API call
-        print(f"[DEBUG] MAILCHIMP_API_KEY: {self.api_key}")
-        print(f"[DEBUG] MAILCHIMP_SERVER_PREFIX: {self.server_prefix}")
-        print(f"[DEBUG] MAILCHIMP_AUDIENCE: {self.audience_name}")
-        print(f"[DEBUG] MAILCHIMP_REPLY_TO: {self.reply_to}")
-        print(f"[DEBUG] S3_BUCKET: {self.s3_bucket}")
+        self.log('debug', f"[DEBUG] MAILCHIMP_API_KEY: {self.api_key}")
+        self.log('debug', f"[DEBUG] MAILCHIMP_SERVER_PREFIX: {self.server_prefix}")
+        self.log('debug', f"[DEBUG] MAILCHIMP_AUDIENCE: {self.audience_name}")
+        self.log('debug', f"[DEBUG] MAILCHIMP_REPLY_TO: {self.reply_to}")
+        self.log('debug', f"[DEBUG] S3_BUCKET: {self.s3_bucket}")
 
         # Process each language in the work order
         for lang in work_order.languages.keys():
@@ -120,9 +128,9 @@ class PrepareStep:
                     )
                     if not success:
                         error_msg = f"Failed to update embeddedEmails for {lang} - this is a critical error"
-                        print(f"[ERROR] {error_msg}")
-                        print(f"[ERROR] This failure indicates the events table update failed")
-                        print(f"[ERROR] Event details: {work_order.eventCode}/{work_order.subEvent}/{work_order.stage}/{lang}")
+                        self.log('error', f"[ERROR] {error_msg}")
+                        self.log('error', f"[ERROR] This failure indicates the events table update failed")
+                        self.log('error', f"[ERROR] Event details: {work_order.eventCode}/{work_order.subEvent}/{work_order.stage}/{lang}")
                         raise ValueError(error_msg)
                     
                     # Also store the S3 path in the work order for later use by other steps
@@ -138,14 +146,14 @@ class PrepareStep:
                         })
                 else:
                     error_msg = f"No AWS client available - cannot update embeddedEmails for {lang}"
-                    print(f"[ERROR] {error_msg}")
-                    print(f"[ERROR] This is a critical error as embeddedEmails update is required")
+                    self.log('error', f"[ERROR] {error_msg}")
+                    self.log('error', f"[ERROR] This is a critical error as embeddedEmails update is required")
                     raise ValueError(error_msg)
                 
                 await self._update_progress(work_order, f"Successfully completed {lang} language")
             except Exception as e:
                 error_message = str(e)
-                print(f"[ERROR] Error processing language {lang}: {error_message}")
+                self.log('error', f"[ERROR] Error processing language {lang}: {error_message}")
                 # Don't update progress message here - let the error be handled by the caller
                 raise ValueError(f"Failed to process language {lang}: {error_message}")
 
@@ -192,11 +200,11 @@ class PrepareStep:
                         'id': work_order.id,
                         'updates': {'steps': plain_steps}
                     })
-                    print(f"[PROGRESS] {message}")
+                    self.log('progress', f"[PROGRESS] {message}")
             except Exception as e:
-                print(f"[WARNING] Failed to update progress message: {e}")
+                self.log('warning', f"[WARNING] Failed to update progress message: {e}")
         else:
-            print(f"[PROGRESS] {message}")
+            self.log('progress', f"[PROGRESS] {message}")
 
     def _get_list_id_by_name(self, audience_name: str) -> str:
         """Get Mailchimp list ID by audience name."""
@@ -298,10 +306,10 @@ class PrepareStep:
         
         # Check zoom ID if qaStepCheckZoomId is enabled
         if stage_record.get('qaStepCheckZoomId', False):
-            print(f"[DEBUG] QA Check - Stage: {work_order.stage}, inPerson: {work_order.inPerson}, zoomId: {work_order.zoomId}")
+            self.log('debug', f"[DEBUG] QA Check - Stage: {work_order.stage}, inPerson: {work_order.inPerson}, zoomId: {work_order.zoomId}")
             if work_order.inPerson:
                 # Skip zoom ID check for in-person events
-                print(f"[DEBUG] In-person event detected, skipping zoom ID check")
+                self.log('debug', f"[DEBUG] In-person event detected, skipping zoom ID check")
             elif not work_order.zoomId:
                 raise ValueError("QA Failure: zoom ID required for stage")
             else:
@@ -319,7 +327,7 @@ class PrepareStep:
 
     def _upload_to_s3(self, key: str, html: str):
         """Upload HTML content to S3."""
-        session = boto3.session.Session(profile_name=self.aws_profile)
+        session = boto3.session.Session(profile_name=self.aws_client.aws_profile)
         s3 = session.client('s3')
         s3.put_object(Bucket=self.s3_bucket, Key=key, Body=html, ContentType='text/html')
 
@@ -332,5 +340,5 @@ class PrepareStep:
                     stage_record = self.aws_client.get_item(stages_table, {'stage': stage})
                     return stage_record or {}
         except Exception as e:
-            print(f"[WARNING] Failed to get stage record for {stage}: {e}")
+            self.log('warning', f"[WARNING] Failed to get stage record for {stage}: {e}")
         return {} 

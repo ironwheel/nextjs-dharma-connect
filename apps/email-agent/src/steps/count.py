@@ -13,8 +13,17 @@ from .shared import passes_stage_filter, build_campaign_string, code_to_full_lan
 
 
 class CountStep:
-    def __init__(self, aws_client: AWSClient):
+    def __init__(self, aws_client: AWSClient, logging_config=None):
         self.aws_client = aws_client
+        self.logging_config = logging_config
+
+    def log(self, level, message):
+        """Log a message if the level is enabled."""
+        if self.logging_config:
+            self.logging_config.log(level, message)
+        else:
+            # Fallback to always logging if no config provided
+            print(message)
 
     async def process(self, work_order: WorkOrder, step: Step) -> bool:
         """
@@ -84,7 +93,7 @@ class CountStep:
             
         except Exception as e:
             error_message = str(e)
-            print(f"[ERROR] [CountStep] Error in count process: {error_message}")
+            self.log('error', f"[ERROR] [CountStep] Error in count process: {error_message}")
             await self._update_progress(work_order, f"Error: {error_message}")
             raise Exception(error_message)
 
@@ -96,7 +105,7 @@ class CountStep:
                 stage_record = self.aws_client.get_item(stages_table, {'stage': stage})
                 return stage_record or {}
         except Exception as e:
-            print(f"[WARNING] Failed to get stage record for {stage}: {e}")
+            self.log('warning', f"[WARNING] Failed to get stage record for {stage}: {e}")
         return {}
 
     def _count_recipients(self, student_data: List[Dict], pools_data: List[Dict], 
@@ -199,8 +208,8 @@ class CountStep:
                         'id': work_order.id,
                         'updates': {'steps': plain_steps}
                     })
-                    print(f"[PROGRESS] {message}")
+                    self.log('progress', f"[PROGRESS] {message}")
             except Exception as e:
-                print(f"[WARNING] Failed to update progress message: {e}")
+                self.log('warning', f"[WARNING] Failed to update progress message: {e}")
         else:
-            print(f"[PROGRESS] {message}") 
+            self.log('progress', f"[PROGRESS] {message}") 
