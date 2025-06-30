@@ -327,8 +327,8 @@ class PrepareStep:
 
     def _upload_to_s3(self, key: str, html: str):
         """Upload HTML content to S3."""
-        session = boto3.session.Session(profile_name=self.aws_client.aws_profile)
-        s3 = session.client('s3')
+        # Use boto3 client directly with region from config
+        s3 = boto3.client('s3', region_name=os.getenv('AWS_REGION', 'us-east-1'))
         s3.put_object(Bucket=self.s3_bucket, Key=key, Body=html, ContentType='text/html')
 
     def _get_stage_record(self, stage: str) -> Dict:

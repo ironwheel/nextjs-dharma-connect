@@ -33,11 +33,22 @@ EMAIL_FROM = os.getenv('EMAIL_FROM', 'noreply@example.com')
 AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
 AWS_PROFILE = os.getenv('AWS_PROFILE', 'default')
 
-# Get AWS credentials from profile
-session = boto3.Session(profile_name=AWS_PROFILE)
-credentials = session.get_credentials()
-AWS_ACCESS_KEY_ID = credentials.access_key
-AWS_SECRET_ACCESS_KEY = credentials.secret_key
+# Get AWS credentials - try profile first, then fall back to IAM role
+try:
+    session = boto3.Session(profile_name=AWS_PROFILE)
+    credentials = session.get_credentials()
+    if credentials:
+        AWS_ACCESS_KEY_ID = credentials.access_key
+        AWS_SECRET_ACCESS_KEY = credentials.secret_key
+    else:
+        # No credentials in profile, will use IAM role or environment variables
+        AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+        AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+except Exception as e:
+    print(f"Warning: Could not load AWS credentials from profile '{AWS_PROFILE}': {e}")
+    print("Falling back to IAM role or environment variables")
+    AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 
 # DynamoDB configuration
 DYNAMODB_TABLE = os.getenv('DYNAMODB_TABLE', 'email-work-orders')
@@ -104,9 +115,12 @@ def validate_config():
     if missing_vars:
         raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
     
-    # Validate AWS credentials
+    # Validate AWS credentials - be more flexible for IAM roles
     if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
-        raise ValueError(f"Could not load AWS credentials from profile '{AWS_PROFILE}'. Please ensure the profile exists and has valid credentials.")
+        print(f"Warning: AWS credentials not found in profile '{AWS_PROFILE}' or environment variables.")
+        print("This is expected when using IAM roles on EC2 instances.")
+        print("AWS SDK will automatically use instance metadata service for credentials.")
+        # Don't raise an error here - let boto3 handle credential resolution
 
 # Validate configuration on import
 validate_config()
