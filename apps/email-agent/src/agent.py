@@ -131,6 +131,8 @@ class EmailAgent:
                         if current_work_order:
                             # Use sendInterval from work order if available, otherwise use EMAIL_CONTINUOUS_SLEEP_SECS
                             sleep_interval = getattr(current_work_order, 'sendInterval', EMAIL_CONTINUOUS_SLEEP_SECS)
+                            # Ensure sleep_interval is an integer
+                            sleep_interval = int(sleep_interval) if sleep_interval is not None else EMAIL_CONTINUOUS_SLEEP_SECS
                             new_sleep_until = now + timedelta(seconds=sleep_interval)
                             new_sleep_message = f"Sleeping until {new_sleep_until.isoformat()}"
                             
