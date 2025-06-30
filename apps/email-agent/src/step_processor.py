@@ -120,6 +120,8 @@ class StepProcessor:
                             if len(self.sleep_queue) < 8:
                                 # Use sendInterval from work order if available, otherwise use EMAIL_CONTINUOUS_SLEEP_SECS
                                 sleep_interval = getattr(work_order, 'sendInterval', EMAIL_CONTINUOUS_SLEEP_SECS)
+                                # Ensure sleep_interval is an integer
+                                sleep_interval = int(sleep_interval) if sleep_interval is not None else EMAIL_CONTINUOUS_SLEEP_SECS
                                 sleep_until = now + timedelta(seconds=sleep_interval)
                                 # Set work order state to Sleeping, set sleepUntil, set step message
                                 step_message = f"Sleeping until {sleep_until.isoformat()}"
