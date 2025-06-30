@@ -58,6 +58,8 @@ async def main():
                        choices=['progress', 'steps', 'workorder', 'debug', 'websocket'],
                        default=['progress'],
                        help='Log levels to enable (default: progress). Examples: --log-levels progress debug, --log-levels progress steps websocket')
+    parser.add_argument('--terminate-after-initialization', action='store_true',
+                       help='Terminate the email agent after completing initialization (useful for testing)')
     
     args = parser.parse_args()
     
@@ -87,7 +89,12 @@ async def main():
     try:
         # Create and start the agent with logging configuration
         agent = EmailAgent(logging_config=logging_config)
-        await agent.start()
+        
+        if args.terminate_after_initialization:
+            print("Starting agent with early termination after initialization...")
+            await agent.start(terminate_after_initialization=True)
+        else:
+            await agent.start()
     except Exception as e:
         print(f"Error in main: {e}")
         if 'agent' in locals():

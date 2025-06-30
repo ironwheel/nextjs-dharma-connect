@@ -90,7 +90,7 @@ class EmailAgent:
             self.last_connection_count = current_count
             self.last_connection_display = current_time
 
-    async def start(self):
+    async def start(self, terminate_after_initialization=False):
         """Start the email agent."""
         self.is_running = True
         self.log('progress', f"Email agent started with ID: {self.agent_id}")
@@ -110,15 +110,22 @@ class EmailAgent:
         # Reconstruct sleep queue from Sleeping work orders
         self.log('progress', "[SLEEP-QUEUE] Reconstructing sleep queue from Sleeping work orders...")
         all_work_orders = self.aws_client.scan_table(self.aws_client.table.name)
+        self.log('debug', f"[SLEEP-QUEUE] Scanned {len(all_work_orders)} total work orders")
         now = datetime.now(timezone.utc)
+        sleeping_count = 0
         for wo in all_work_orders:
             state = wo.get('state')
             sleep_until = wo.get('sleepUntil')
+            self.log('debug', f"[SLEEP-QUEUE] Work order {wo.get('id', 'unknown')}: state={state}, sleepUntil={sleep_until}")
             if state == 'Sleeping' and sleep_until:
+                sleeping_count += 1
                 try:
                     sleep_until_dt = datetime.fromisoformat(sleep_until)
-                    # If sleepUntil is in the past, update it to now + EMAIL_CONTINUOUS_SLEEP_SECS
+                    self.log('debug', f"[SLEEP-QUEUE] Found sleeping work order {wo['id']} with sleepUntil={sleep_until_dt}")
+                    
+                    # If sleepUntil is in the past, update it to now + sendInterval
                     if sleep_until_dt <= now:
+                        self.log('debug', f"[SLEEP-QUEUE] Sleep time is in the past, updating work order {wo['id']}")
                         # Get the current work order to update the Send step properly
                         current_work_order = self.aws_client.get_work_order(wo['id'])
                         if current_work_order:
@@ -127,42 +134,49 @@ class EmailAgent:
                             new_sleep_until = now + timedelta(seconds=sleep_interval)
                             new_sleep_message = f"Sleeping until {new_sleep_until.isoformat()}"
                             
-                            # Get the current work order to update the Send step properly
-                            current_work_order = self.aws_client.get_work_order(wo['id'])
-                            if current_work_order:
-                                steps = current_work_order.steps.copy()
-                                # Find and update the Send step
-                                for i, step in enumerate(steps):
-                                    if self.extract_s(step.name) == 'Send':
-                                        steps[i] = Step(
-                                            name='Send',
-                                            status=StepStatus.SLEEPING,
-                                            message=new_sleep_message,
-                                            isActive=True,
-                                            startTime=step.startTime,
-                                            endTime=step.endTime
-                                        )
-                                        break
-                                
-                                # Convert steps to plain dicts
-                                plain_steps = [self.step_to_plain_dict(s) for s in steps]
-                                
-                                self.aws_client.update_work_order({
-                                    'id': wo['id'],
-                                    'updates': {
-                                        'sleepUntil': new_sleep_until.isoformat(),
-                                        'steps': plain_steps
-                                    }
-                                })
-                                sleep_until_dt = new_sleep_until
-                                self.log('progress', f"[SLEEP-QUEUE] Updated past sleepUntil for work order {wo['id']} to {new_sleep_until.isoformat()}")
-                        # Lock the work order
-                        self.aws_client.lock_work_order(wo['id'], self.agent_id)
-                        if len(self.sleep_queue) < self.sleep_queue_limit:
-                            self.sleep_queue.append({'work_order_id': wo['id'], 'sleep_until': sleep_until_dt})
+                            steps = current_work_order.steps.copy()
+                            # Find and update the Send step
+                            for i, step in enumerate(steps):
+                                if self.extract_s(step.name) == 'Send':
+                                    steps[i] = Step(
+                                        name='Send',
+                                        status=StepStatus.SLEEPING,
+                                        message=new_sleep_message,
+                                        isActive=True,
+                                        startTime=step.startTime,
+                                        endTime=step.endTime
+                                    )
+                                    break
+                            
+                            # Convert steps to plain dicts
+                            plain_steps = [self.step_to_plain_dict(s) for s in steps]
+                            
+                            self.aws_client.update_work_order({
+                                'id': wo['id'],
+                                'updates': {
+                                    'sleepUntil': new_sleep_until.isoformat(),
+                                    'steps': plain_steps
+                                }
+                            })
+                            sleep_until_dt = new_sleep_until
+                            self.log('progress', f"[SLEEP-QUEUE] Updated past sleepUntil for work order {wo['id']} to {new_sleep_until.isoformat()}")
+                    
+                    # Lock the work order and add to sleep queue
+                    self.aws_client.lock_work_order(wo['id'], self.agent_id)
+                    if len(self.sleep_queue) < self.sleep_queue_limit:
+                        self.sleep_queue.append({'work_order_id': wo['id'], 'sleep_until': sleep_until_dt})
+                        self.log('debug', f"[SLEEP-QUEUE] Added work order {wo['id']} to sleep queue with sleep_until={sleep_until_dt}")
+                    else:
+                        self.log('warning', f"[SLEEP-QUEUE] Sleep queue limit reached, cannot add work order {wo['id']}")
                 except Exception as e:
                     self.log('error', f"[SLEEP-QUEUE] Error parsing sleepUntil for work order {wo['id']}: {e}")
-        self.log('progress', f"[SLEEP-QUEUE] Initialized with {len(self.sleep_queue)} sleeping work orders.")
+        
+        self.log('progress', f"[SLEEP-QUEUE] Found {sleeping_count} sleeping work orders, initialized queue with {len(self.sleep_queue)} work orders.")
+
+        # If terminate_after_initialization is True, exit after initialization
+        if terminate_after_initialization:
+            self.log('progress', "Initialization complete. Terminating as requested.")
+            return
 
         while self.is_running:
             try:
