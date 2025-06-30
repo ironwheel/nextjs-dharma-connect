@@ -268,6 +268,39 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
             const selectedEvent = events.find(ev => ev.aid === eventCode)
             const pool = selectedEvent?.config?.pool || ''
 
+            const steps = [
+                {
+                    name: 'Count',
+                    status: 'ready',
+                    message: '',
+                    isActive: false
+                },
+                {
+                    name: 'Prepare',
+                    status: 'ready',
+                    message: '',
+                    isActive: false
+                },
+                {
+                    name: 'Dry-Run',
+                    status: 'ready',
+                    message: '',
+                    isActive: false
+                },
+                {
+                    name: 'Test',
+                    status: 'ready',
+                    message: '',
+                    isActive: false
+                },
+                {
+                    name: 'Send',
+                    status: 'ready',
+                    message: '',
+                    isActive: false
+                }
+            ];
+
             const workOrder = {
                 eventCode,
                 subEvent,
@@ -286,45 +319,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                 },
                 // Inherit s3HTMLPaths from parent if available
                 s3HTMLPaths: inheritedFields.s3HTMLPaths,
-                steps: [
-                    {
-                        name: 'Count',
-                        status: 'ready',
-                        message: '',
-                        isActive: true
-                    },
-                    // Skip Prepare step if parent stage exists (files already prepared)
-                    ...(selectedStageRecord?.parentStage ? [] : [{
-                        name: 'Prepare',
-                        status: 'ready',
-                        message: '',
-                        isActive: false
-                    }]),
-                    {
-                        name: 'Dry-Run',
-                        status: 'ready',
-                        message: '',
-                        isActive: false
-                    },
-                    {
-                        name: 'Test',
-                        status: 'ready',
-                        message: '',
-                        isActive: false
-                    },
-                    {
-                        name: 'Send-Once',
-                        status: 'ready',
-                        message: '',
-                        isActive: false
-                    },
-                    ...(sendContinuously ? [{
-                        name: 'Send-Continuously',
-                        status: 'ready',
-                        message: '',
-                        isActive: false
-                    }] : [])
-                ]
+                steps: steps
             }
 
             if (id) {

@@ -4,11 +4,11 @@ import uuid
 import boto3
 import os
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import time
 
 from .aws_client import AWSClient
-from .config import config
+from .config import config, EMAIL_CONTINUOUS_SLEEP_SECS
 from .models import WorkOrder, Step, StepStatus
 from .step_processor import StepProcessor
 
@@ -29,6 +29,8 @@ class EmailAgent:
         self.last_connection_display = time.time()
         self.connection_cleanup_interval = 60  # Clean up connections every 60 seconds
         self.last_connection_cleanup = time.time()
+        self.sleep_queue = []
+        self.sleep_queue_limit = 8
 
         # Purge the entire pipeline on startup
         self._purge_pipeline()
@@ -102,17 +104,89 @@ class EmailAgent:
         except Exception as e:
             print(f"[ERROR] Error unlocking work orders on startup: {e}")
 
+        # Reconstruct sleep queue from Sleeping work orders
+        print("[SLEEP-QUEUE] Reconstructing sleep queue from Sleeping work orders...")
+        all_work_orders = self.aws_client.scan_table(self.aws_client.table.name)
+        now = datetime.now(timezone.utc)
+        for wo in all_work_orders:
+            state = wo.get('state')
+            sleep_until = wo.get('sleepUntil')
+            if state == 'Sleeping' and sleep_until:
+                try:
+                    sleep_until_dt = datetime.fromisoformat(sleep_until)
+                    # If sleepUntil is in the past, update it to now + EMAIL_CONTINUOUS_SLEEP_SECS
+                    if sleep_until_dt <= now:
+                        new_sleep_until = now + timedelta(seconds=EMAIL_CONTINUOUS_SLEEP_SECS)
+                        new_sleep_message = f"Sleeping until {new_sleep_until.isoformat()}"
+                        
+                        # Get the current work order to update the Send step properly
+                        current_work_order = self.aws_client.get_work_order(wo['id'])
+                        if current_work_order:
+                            steps = current_work_order.steps.copy()
+                            # Find and update the Send step
+                            for i, step in enumerate(steps):
+                                if self.extract_s(step.name) == 'Send':
+                                    steps[i] = Step(
+                                        name='Send',
+                                        status=StepStatus.SLEEPING,
+                                        message=new_sleep_message,
+                                        isActive=True,
+                                        startTime=step.startTime,
+                                        endTime=step.endTime
+                                    )
+                                    break
+                            
+                            # Convert steps to plain dicts
+                            plain_steps = [self.step_to_plain_dict(s) for s in steps]
+                            
+                            self.aws_client.update_work_order({
+                                'id': wo['id'],
+                                'updates': {
+                                    'sleepUntil': new_sleep_until.isoformat(),
+                                    'steps': plain_steps
+                                }
+                            })
+                            sleep_until_dt = new_sleep_until
+                            print(f"[SLEEP-QUEUE] Updated past sleepUntil for work order {wo['id']} to {new_sleep_until.isoformat()}")
+                    # Lock the work order
+                    self.aws_client.lock_work_order(wo['id'], self.agent_id)
+                    if len(self.sleep_queue) < self.sleep_queue_limit:
+                        self.sleep_queue.append({'work_order_id': wo['id'], 'sleep_until': sleep_until_dt})
+                except Exception as e:
+                    print(f"[SLEEP-QUEUE] Error parsing sleepUntil for work order {wo['id']}: {e}")
+        print(f"[SLEEP-QUEUE] Initialized with {len(self.sleep_queue)} sleeping work orders.")
+
         while self.is_running:
             try:
                 # Check WebSocket connections
                 self._check_websocket_connections()
-                
-                # Check for new messages
+
+                # --- Sleep queue polling ---
+                now = datetime.now(timezone.utc)
+                to_wake = [entry for entry in self.sleep_queue if entry['sleep_until'] <= now]
+                for entry in to_wake:
+                    work_order_id = entry['work_order_id']
+                    work_order = self.aws_client.get_work_order(work_order_id)
+                    if work_order:
+                        print(f"[SLEEP-QUEUE] Waking work order {work_order_id} from sleep queue.")
+                        # Unlock the work order before processing so the processing lock can work
+                        self.aws_client.unlock_work_order(work_order_id)
+                        await self._handle_start_request(work_order_id, work_order, 'Send')
+                    self.sleep_queue = [e for e in self.sleep_queue if e['work_order_id'] != work_order_id]
+
+                # Remove interrupted work orders from sleep queue
+                interrupted_ids = []
+                for entry in self.sleep_queue:
+                    work_order = self.aws_client.get_work_order(entry['work_order_id'])
+                    if work_order and getattr(work_order, 'stopRequested', False):
+                        print(f"[SLEEP-QUEUE] Removing interrupted work order {entry['work_order_id']} from sleep queue.")
+                        interrupted_ids.append(entry['work_order_id'])
+                self.sleep_queue = [e for e in self.sleep_queue if e['work_order_id'] not in interrupted_ids]
+
+                # --- SQS polling ---
                 messages = self.aws_client.receive_sqs_messages()
-                
                 if len(messages) > 0:
                     print(f"[SQS-POLL] Processing {len(messages)} message(s)...")
-                
                 for message in messages:
                     try:
                         # Process the message
@@ -230,8 +304,8 @@ class EmailAgent:
             
             # Validate current step status
             current_status = self.extract_s(step.status)
-            if current_status != StepStatus.WORKING:
-                print(f"[DEBUG] ERROR: Step {step_name} is not working (status: {current_status}) - ignoring stop request")
+            if current_status not in [StepStatus.WORKING, StepStatus.SLEEPING]:
+                print(f"[DEBUG] ERROR: Step {step_name} is not working or sleeping (status: {current_status}) - ignoring stop request")
                 # Don't update the step status since it's already in the correct state
                 return
             
@@ -264,9 +338,24 @@ class EmailAgent:
                     print(f"[DEBUG] Agent has work order but {step_name} step is not active, sending idle response")
                     await self._update_step_status(work_order, step_name, StepStatus.INTERRUPTED, f"Agent was idle when {step_name} step was stopped by user")
             else:
-                # Agent is not processing this work order
-                print(f"[DEBUG] Agent is not processing work order {work_order_id}, sending idle response")
-                await self._update_step_status(work_order, step_name, StepStatus.INTERRUPTED, f"Agent was idle when {step_name} step was stopped by user")
+                # Agent is not processing this work order - check if it's sleeping
+                if current_status == StepStatus.SLEEPING:
+                    print(f"[DEBUG] Work order {work_order_id} is sleeping, removing from sleep queue and stopping")
+                    
+                    # Remove from sleep queue if present
+                    self.sleep_queue = [e for e in self.sleep_queue if e['work_order_id'] != work_order_id]
+                    
+                    # Update the step status to interrupted
+                    await self._update_step_status(work_order, step_name, StepStatus.INTERRUPTED, f"{step_name} step stopped by user while sleeping")
+                    
+                    # Unlock the work order since we're stopping
+                    self.aws_client.unlock_work_order(work_order_id)
+                    
+                    print(f"[DEBUG] Successfully stopped sleeping {step_name} step")
+                else:
+                    # Agent is not processing this work order and it's not sleeping
+                    print(f"[DEBUG] Agent is not processing work order {work_order_id}, sending idle response")
+                    await self._update_step_status(work_order, step_name, StepStatus.INTERRUPTED, f"Agent was idle when {step_name} step was stopped by user")
                 
         except Exception as e:
             print(f"[DEBUG] ERROR: Exception during stop request: {str(e)}")
@@ -312,7 +401,7 @@ class EmailAgent:
                 print(f"[DEBUG] ERROR: Step {step_name} is already working - ignoring duplicate start request")
                 # Don't update the step status since it's already correct
                 return False
-            elif current_status not in [StepStatus.READY, StepStatus.COMPLETE, StepStatus.INTERRUPTED, StepStatus.ERROR, StepStatus.EXCEPTION]:
+            elif current_status not in [StepStatus.READY, StepStatus.COMPLETE, StepStatus.INTERRUPTED, StepStatus.ERROR, StepStatus.EXCEPTION, StepStatus.SLEEPING]:
                 print(f"[DEBUG] ERROR: Step {step_name} has invalid status for start: {current_status}")
                 await self._update_step_status(work_order, step_name, StepStatus.ERROR, f"Cannot start step with status: {current_status}")
                 return False
@@ -328,8 +417,13 @@ class EmailAgent:
             # Set the current work order to track that we're processing it
             self.current_work_order = work_order
             
-            # Update step status to working
-            await self._update_step_status(work_order, step_name, StepStatus.WORKING, "Work request received, beginning work")
+            # If the step was sleeping, change it to working first
+            if current_status == StepStatus.SLEEPING:
+                print(f"[DEBUG] Converting sleeping step {step_name} to working status")
+                await self._update_step_status(work_order, step_name, StepStatus.WORKING, "Waking from sleep, beginning work")
+            else:
+                # Update step status to working
+                await self._update_step_status(work_order, step_name, StepStatus.WORKING, "Work request received, beginning work")
             
             # Create a clean step object with extracted values for the processor
             clean_step = Step(

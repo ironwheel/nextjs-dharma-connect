@@ -56,7 +56,7 @@ def build_campaign_string(event_code, sub_event, stage, language):
     Returns:
         str: The campaign string
     """
-    return f"{event_code}-{sub_event}-{stage}-{language}"
+    return f"{event_code}_{sub_event}_{stage}_{language}"
 
 def get_stage_prefix(stage_record, language):
     """
