@@ -214,13 +214,12 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
         try {
             const result = await callDbApi('getWorkOrders', {})
             if (result && result.workOrders) {
-                // Filter out archived work orders from the main list
-                const activeWorkOrders = result.workOrders.filter((wo: WorkOrder) => !wo.archived)
-                setWorkOrders(activeWorkOrders)
+                // Backend now filters out archived work orders by default
+                setWorkOrders(result.workOrders)
 
                 // Load participant names for all work orders
                 const uniquePids = new Set<string>()
-                activeWorkOrders.forEach(wo => {
+                result.workOrders.forEach(wo => {
                     if (wo.createdBy) uniquePids.add(wo.createdBy)
                 })
 
@@ -684,7 +683,6 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                 <th style={{ border: 'none' }}>Languages</th>
                                 <th style={{ border: 'none' }}>Email Account</th>
                                 <th style={{ border: 'none' }}>Created By</th>
-                                <th style={{ border: 'none' }}>Archive</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -732,22 +730,6 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{Object.keys(workOrder.languages ?? {}).filter(lang => !!workOrder.languages?.[lang]).join(',')}</td>
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.account}</td>
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{participantNames[workOrder.createdBy] || workOrder.createdBy}</td>
-                                            <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40', textAlign: 'center' }}>
-                                                <Button
-                                                    variant="warning"
-                                                    size="sm"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        if (!workOrder.locked && confirm('Are you sure you want to archive this work order?')) {
-                                                            archiveWorkOrder(workOrder.id);
-                                                        }
-                                                    }}
-                                                    disabled={workOrder.locked}
-                                                    title={workOrder.locked ? 'Work order is locked' : 'Archive work order'}
-                                                >
-                                                    📁
-                                                </Button>
-                                            </td>
                                         </tr>
                                         <tr>
                                             <td colSpan={8} style={{ padding: 0, background: 'transparent', border: 'none' }}>

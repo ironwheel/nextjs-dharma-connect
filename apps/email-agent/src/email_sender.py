@@ -21,6 +21,7 @@ from .config import (
 )
 from .prompts import prompt_lookup
 from .eligible import check_eligibility
+from .steps.shared import code_to_full_language
 
 # Cache for email account credentials to avoid repeated DynamoDB calls
 _credentials_cache = {}
@@ -127,9 +128,11 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
         
         for key in keys:
             if student['programs'][event['aid']]['whichRetreats'][key]:
-                prompt_text = prompt_lookup(prompts_array, which_retreats_config[key]['prompt'], language, event['aid'])
+                # Convert language code to full language name for prompt_lookup
+                full_language = code_to_full_language(language)
+                prompt_text = prompt_lookup(prompts_array, which_retreats_config[key]['prompt'], full_language, event['aid'])
                 if not prompt_text:
-                    raise Exception(f"Can't use ||retreats||. No prompt found for: {which_retreats_config[key]['prompt']}, {language}")
+                    raise Exception(f"Can't use ||retreats||. No prompt found for: {which_retreats_config[key]['prompt']}, {full_language}")
                 at_least_one = True
                 retreats_html += f'<li><b>{prompt_text}</b></li>'
         

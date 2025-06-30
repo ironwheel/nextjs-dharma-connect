@@ -22,9 +22,10 @@ PROMPTS_TABLE = os.getenv('PROMPTS_TABLE', 'prompts')
 STAGES_TABLE = os.getenv('DYNAMODB_TABLE_STAGES', 'stages')
 
 class AWSClient:
-    def __init__(self):
+    def __init__(self, logging_config=None):
         self.dynamodb = boto3.resource('dynamodb', region_name=config.aws_region)
         self.sqs = boto3.client('sqs', region_name=config.aws_region)
+        self.logging_config = logging_config
         
         if not WEBSOCKET_API_URL:
             raise ValueError("WEBSOCKET_API_URL environment variable is not set")
@@ -59,6 +60,14 @@ class AWSClient:
         except Exception as e:
             print(f"[ERROR] Error parsing WebSocket URL: {str(e)}")
             raise
+
+    def log(self, level, message):
+        """Log a message if the level is enabled."""
+        if self.logging_config:
+            self.logging_config.log(level, message)
+        else:
+            # Fallback to always logging if no config provided
+            print(message)
 
     def get_work_order(self, id: str) -> Optional[WorkOrder]:
         try:
@@ -144,14 +153,14 @@ class AWSClient:
                         work_order_data['locked'] = locked
                         work_order_data['lockedBy'] = locked_by
                         
-                        print(f"[DEBUG] Current locked status from DynamoDB: locked={locked}, lockedBy={locked_by}")
+                        self.log('debug', f"[DEBUG] Current locked status from DynamoDB: locked={locked}, lockedBy={locked_by}")
                 except Exception as e:
-                    print(f"[DEBUG] Error getting current locked status: {e}")
+                    self.log('debug', f"[DEBUG] Error getting current locked status: {e}")
                 
-                print(f"[DEBUG] Sending WebSocket update for work order {update['id']}")
-                print(f"[DEBUG] Work order data: {work_order_data}")
-                print(f"[DEBUG] Steps data: {work_order_data.get('steps', [])}")
-                print(f"[DEBUG] Locked status in WebSocket update: {work_order_data.get('locked')}, lockedBy: {work_order_data.get('lockedBy')}")
+                self.log('debug', f"[DEBUG] Sending WebSocket update for work order {update['id']}")
+                self.log('debug', f"[DEBUG] Work order data: {work_order_data}")
+                self.log('debug', f"[DEBUG] Steps data: {work_order_data.get('steps', [])}")
+                self.log('debug', f"[DEBUG] Locked status in WebSocket update: {work_order_data.get('locked')}, lockedBy: {work_order_data.get('lockedBy')}")
                 self._send_websocket_update(update['id'], work_order_data)
             
             return True
@@ -241,7 +250,7 @@ class AWSClient:
             return False
 
     def unlock_work_order(self, id: str) -> bool:
-        print(f"[DEBUG] Unlocking work order: {id}")
+        self.log('debug', f"[DEBUG] Unlocking work order: {id}")
         try:
             result = self.table.update_item(
                 Key={'id': id},
@@ -258,8 +267,8 @@ class AWSClient:
                 },
                 ReturnValues='ALL_NEW'
             )
-            print(f"[DEBUG] Successfully unlocked work order {id}")
-            #print(f"[DEBUG] Updated item: {result.get('Attributes', {})}")
+            self.log('debug', f"[DEBUG] Successfully unlocked work order {id}")
+            #self.log('debug', f"[DEBUG] Updated item: {result.get('Attributes', {})}")
             return True
         except ClientError as e:
             print(f"Error unlocking work order: {e}")
@@ -321,7 +330,7 @@ class AWSClient:
             
             return unlocked_count
         except Exception as e:
-            print(f"[DEBUG] Error unlocking work orders: {str(e)}")
+            self.log('debug', f"[DEBUG] Error unlocking work orders: {str(e)}")
             return 0
 
     def scan_table(self, table_name: str) -> List[Dict]:
@@ -338,7 +347,7 @@ class AWSClient:
             Exception: If the scan operation fails
         """
         try:
-            print(f"[DEBUG] Scanning table: {table_name}")
+            self.log('debug', f"[DEBUG] Scanning table: {table_name}")
             table = self.dynamodb.Table(table_name)
             items = []
             
@@ -357,11 +366,11 @@ class AWSClient:
                 if not last_evaluated_key:
                     break
             
-            print(f"[DEBUG] Scanned {len(items)} items from table: {table_name}")
+            self.log('debug', f"[DEBUG] Scanned {len(items)} items from table: {table_name}")
             return items
             
         except Exception as e:
-            print(f"[DEBUG] Error scanning table {table_name}: {str(e)}")
+            self.log('debug', f"[DEBUG] Error scanning table {table_name}: {str(e)}")
             raise Exception(f"Failed to scan table {table_name}: {str(e)}")
 
     def get_active_websocket_connections(self) -> List[str]:
@@ -372,21 +381,21 @@ class AWSClient:
             )
             return [item['connectionId'] for item in response.get('Items', [])]
         except Exception as e:
-            print(f"[DEBUG] Error getting WebSocket connections: {str(e)}")
+            self.log('debug', f"[DEBUG] Error getting WebSocket connections: {str(e)}")
             return []
 
     def display_websocket_connections(self):
         """Display active WebSocket connections in a formatted way."""
         connections = self.get_active_websocket_connections()
         if connections:
-            print(f"\n[WEBSOCKET] Active connections ({len(connections)}):")
+            self.log('websocket', f"\n[WEBSOCKET] Active connections ({len(connections)}):")
             for i, conn_id in enumerate(connections, 1):
                 # Truncate the connection ID for cleaner display
                 short_id = conn_id[:8] + "..." if len(conn_id) > 8 else conn_id
-                print(f"[WEBSOCKET]   {i}. {short_id}")
+                self.log('websocket', f"[WEBSOCKET]   {i}. {short_id}")
         else:
-            print("\n[WEBSOCKET] No active connections")
-        print()  # Add spacing
+            self.log('websocket', "\n[WEBSOCKET] No active connections")
+        self.log('websocket', "")  # Add spacing
 
     def cleanup_stale_connections(self):
         """Test all connections and remove stale ones from DynamoDB."""
@@ -594,22 +603,22 @@ class AWSClient:
     def update_event_embedded_emails(self, event_code: str, sub_event: str, stage: str, language: str, s3_url: str) -> bool:
         """Update the embeddedEmails field in an event record."""
         try:
-            print(f"[DEBUG] update_event_embedded_emails called with:")
-            print(f"  Event Code: {event_code}")
-            print(f"  Sub Event: {sub_event}")
-            print(f"  Stage: {stage}")
-            print(f"  Language Code: {language}")
-            print(f"  S3 URL: {s3_url}")
-            print(f"  Events Table: {EVENTS_TABLE}")
+            self.log('debug', f"[DEBUG] update_event_embedded_emails called with:")
+            self.log('debug', f"  Event Code: {event_code}")
+            self.log('debug', f"  Sub Event: {sub_event}")
+            self.log('debug', f"  Stage: {stage}")
+            self.log('debug', f"  Language Code: {language}")
+            self.log('debug', f"  S3 URL: {s3_url}")
+            self.log('debug', f"  Events Table: {EVENTS_TABLE}")
             
             # Convert language code to full name
             full_language_name = self._get_full_language_name(language)
-            print(f"  Full Language Name: {full_language_name}")
+            self.log('debug', f"  Full Language Name: {full_language_name}")
             
             events_table = self.dynamodb.Table(EVENTS_TABLE)
             
             # First, try to get the current event to verify it exists
-            print(f"[DEBUG] Checking if event {event_code} exists...")
+            self.log('debug', f"[DEBUG] Checking if event {event_code} exists...")
             current_event = events_table.get_item(Key={'aid': event_code})
             if 'Item' not in current_event:
                 print(f"[ERROR] Event {event_code} not found in events table")
@@ -617,29 +626,29 @@ class AWSClient:
                 return False
             
             event_data = current_event['Item']
-            print(f"[DEBUG] Event {event_code} found, current structure:")
-            print(f"  Event data: {event_data}")
+            self.log('debug', f"[DEBUG] Event {event_code} found, current structure:")
+            self.log('debug', f"  Event data: {event_data}")
             
             # Check if the nested path exists
             sub_events = event_data.get('subEvents', {})
             if sub_event not in sub_events:
-                print(f"[DEBUG] Sub event '{sub_event}' not found, creating it")
+                self.log('debug', f"[DEBUG] Sub event '{sub_event}' not found, creating it")
                 # Create the sub event structure
                 sub_events[sub_event] = {}
             
             if 'embeddedEmails' not in sub_events[sub_event]:
-                print(f"[DEBUG] embeddedEmails not found in sub event, creating it")
+                self.log('debug', f"[DEBUG] embeddedEmails not found in sub event, creating it")
                 sub_events[sub_event]['embeddedEmails'] = {}
             
             if stage not in sub_events[sub_event]['embeddedEmails']:
-                print(f"[DEBUG] Stage '{stage}' not found in embeddedEmails, creating it")
+                self.log('debug', f"[DEBUG] Stage '{stage}' not found in embeddedEmails, creating it")
                 sub_events[sub_event]['embeddedEmails'][stage] = {}
             
             # Now update the specific language using full language name
             sub_events[sub_event]['embeddedEmails'][stage][full_language_name] = s3_url
             
-            print(f"[DEBUG] Updated sub_events structure:")
-            print(f"  New sub_events: {sub_events}")
+            self.log('debug', f"[DEBUG] Updated sub_events structure:")
+            self.log('debug', f"  New sub_events: {sub_events}")
             
             # Update the entire subEvents field
             result = events_table.update_item(
@@ -651,9 +660,9 @@ class AWSClient:
                 ReturnValues='ALL_NEW'
             )
             
-            print(f"[DEBUG] Update successful, updated item:")
-            print(f"  Updated data: {result.get('Attributes', {})}")
-            print(f"[DEBUG] Updated embeddedEmails for {event_code}/{sub_event}/{stage}/{full_language_name}: {s3_url}")
+            self.log('debug', f"[DEBUG] Update successful, updated item:")
+            self.log('debug', f"  Updated data: {result.get('Attributes', {})}")
+            self.log('debug', f"[DEBUG] Updated embeddedEmails for {event_code}/{sub_event}/{stage}/{full_language_name}: {s3_url}")
             return True
         except ClientError as e:
             print(f"[ERROR] DynamoDB ClientError updating event embeddedEmails:")

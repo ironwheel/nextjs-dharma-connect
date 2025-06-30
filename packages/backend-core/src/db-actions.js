@@ -773,11 +773,12 @@ async function handleCreateWorkOrder(payload) {
  * @function handleGetWorkOrders
  * @param {object} payload - The request payload.
  * @param {string} [payload.status] - Optional status filter.
+ * @param {boolean} [payload.includeArchived=false] - Whether to include archived work orders.
  * @returns {Promise<Array>} Array of work orders.
  * @throws {Error} If DB error occurs.
  */
 async function handleGetWorkOrders(payload) {
-    const { status } = payload;
+    const { status, includeArchived = false } = payload;
     const client = getDocClient();
     const tableName = getTableName('WORK_ORDERS');
 
@@ -795,12 +796,24 @@ async function handleGetWorkOrders(payload) {
             ExpressionAttributeValues: { ':status': status },
             ScanIndexForward: false, // Most recent first
         };
+        
+        // Add filter for archived work orders if not including them
+        if (!includeArchived) {
+            params.FilterExpression = 'attribute_not_exists(archived) OR archived = :archived';
+            params.ExpressionAttributeValues[':archived'] = false;
+        }
     } else {
         // Full scan if no status filter
         params = {
             TableName: tableName,
             ScanIndexForward: false,
         };
+        
+        // Add filter for archived work orders if not including them
+        if (!includeArchived) {
+            params.FilterExpression = 'attribute_not_exists(archived) OR archived = :archived';
+            params.ExpressionAttributeValues = { ':archived': false };
+        }
     }
 
     console.log('[DEBUG] DynamoDB params:', params);
@@ -1381,21 +1394,14 @@ async function handleUnarchiveWorkOrder(payload) {
  * @returns {Promise<object>} List of archived work orders.
  */
 async function handleGetArchivedWorkOrders(payload = {}) {
-    const client = getDocClient();
-
     try {
-        const params = {
-            TableName: getTableName('WORK_ORDERS'),
-            FilterExpression: "archived = :archived",
-            ExpressionAttributeValues: {
-                ":archived": true
-            }
-        };
-
-        const result = await client.send(new ScanCommand(params));
-
+        // Use handleGetWorkOrders with includeArchived=true to get archived work orders
+        const result = await handleGetWorkOrders({ ...payload, includeArchived: true });
+        
+        // Filter to only include archived work orders
+        const archivedWorkOrders = result.workOrders.filter(wo => wo.archived === true);
+        
         // Sort by archivedAt descending (most recently archived first)
-        const archivedWorkOrders = result.Items || [];
         archivedWorkOrders.sort((a, b) => {
             const aDate = a.archivedAt || '1970-01-01';
             const bDate = b.archivedAt || '1970-01-01';

@@ -13,14 +13,23 @@ from .steps.send import SendStep
 from .config import EMAIL_CONTINUOUS_SLEEP_SECS
 
 class StepProcessor:
-    def __init__(self, aws_client: AWSClient, sleep_queue=None):
+    def __init__(self, aws_client: AWSClient, sleep_queue=None, logging_config=None):
         self.aws_client = aws_client
-        self.count_step = CountStep(aws_client)
-        self.prepare_step = PrepareStep(aws_client)
-        self.test_step = TestStep(aws_client)
-        self.dry_run_step = DryRunStep(aws_client)
-        self.send_step = SendStep(aws_client)
+        self.count_step = CountStep(aws_client, logging_config)
+        self.prepare_step = PrepareStep(aws_client, logging_config)
+        self.test_step = TestStep(aws_client, logging_config)
+        self.dry_run_step = DryRunStep(aws_client, logging_config)
+        self.send_step = SendStep(aws_client, logging_config)
         self.sleep_queue = sleep_queue if sleep_queue is not None else []
+        self.logging_config = logging_config
+
+    def log(self, level, message):
+        """Log a message if the level is enabled."""
+        if self.logging_config:
+            self.logging_config.log(level, message)
+        else:
+            # Fallback to always logging if no config provided
+            print(message)
 
     async def process_step(self, work_order: WorkOrder, step: Step) -> bool:
         """Process a single step of a work order."""
@@ -46,7 +55,7 @@ class StepProcessor:
                     return False
                 except Exception as e:
                     error_message = str(e)
-                    print(f"[ERROR] Error in {step.name} step: {error_message}")
+                    self.log('error', f"[ERROR] Error in {step.name} step: {error_message}")
                     await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
                     return False
             elif step.name == "Prepare":
@@ -61,7 +70,7 @@ class StepProcessor:
                     return False
                 except Exception as e:
                     error_message = str(e)
-                    print(f"[ERROR] Error in {step.name} step: {error_message}")
+                    self.log('error', f"[ERROR] Error in {step.name} step: {error_message}")
                     await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
                     return False
             elif step.name == "Dry-Run":
@@ -76,7 +85,7 @@ class StepProcessor:
                     return False
                 except Exception as e:
                     error_message = str(e)
-                    print(f"[ERROR] Error in {step.name} step: {error_message}")
+                    self.log('error', f"[ERROR] Error in {step.name} step: {error_message}")
                     await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
                     return False
             elif step.name == "Test":
@@ -91,7 +100,7 @@ class StepProcessor:
                     return False
                 except Exception as e:
                     error_message = str(e)
-                    print(f"[ERROR] Error in {step.name} step: {error_message}")
+                    self.log('error', f"[ERROR] Error in {step.name} step: {error_message}")
                     await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
                     return False
             elif step.name == "Send":
@@ -128,7 +137,7 @@ class StepProcessor:
                     return False
                 except Exception as e:
                     error_message = str(e)
-                    print(f"[ERROR] Error in {step.name} step: {error_message}")
+                    self.log('error', f"[ERROR] Error in {step.name} step: {error_message}")
                     await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
                     return False
             else:
@@ -148,7 +157,7 @@ class StepProcessor:
 
         except Exception as e:
             error_message = str(e)
-            print(f"[ERROR] Error in {step.name} step: {error_message}")
+            self.log('error', f"[ERROR] Error in {step.name} step: {error_message}")
             await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
             return False
 
@@ -170,7 +179,7 @@ class StepProcessor:
                 break
         
         if step_index == -1:
-            print(f"[ERROR] Step {step.name} not found for status update")
+            self.log('error', f"[ERROR] Step {step.name} not found for status update")
             return
         
         steps[step_index] = Step(
@@ -192,7 +201,7 @@ class StepProcessor:
                 'updates': {'steps': steps_dict}
             })
         except Exception as e:
-            print(f"[ERROR] Error updating step status in DynamoDB: {e}")
+            self.log('error', f"[ERROR] Error updating step status in DynamoDB: {e}")
             raise  # Re-raise the exception to be caught by the caller
 
     def _send_websocket_update(self, work_order: WorkOrder, step: Step, status: StepStatus, message: str):

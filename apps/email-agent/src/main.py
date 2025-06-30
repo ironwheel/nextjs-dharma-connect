@@ -2,9 +2,37 @@ import asyncio
 import signal
 import os
 import boto3
+import argparse
 from .agent import EmailAgent
 from .config import POLL_INTERVAL, STOP_CHECK_INTERVAL, DYNAMODB_TABLE, config
 from .aws_client import AWSClient, SQS_QUEUE_URL
+
+class LoggingConfig:
+    """Configuration class for controlling log levels."""
+    
+    def __init__(self, log_levels=None):
+        # Default to progress level enabled
+        self.progress = True
+        self.steps = False
+        self.workorder = False
+        self.debug = False
+        self.websocket = False
+        self.warning = False  # Warnings are always shown for now
+        
+        # Override defaults with provided log levels
+        if log_levels:
+            for level in log_levels:
+                if hasattr(self, level):
+                    setattr(self, level, True)
+    
+    def should_log(self, level):
+        """Check if a specific log level should be output."""
+        return getattr(self, level, False)
+    
+    def log(self, level, message):
+        """Log a message if the level is enabled."""
+        if self.should_log(level) or level in ['error', 'warning']:
+            print(message)
 
 def force_unlock_all_work_orders():
     """Force-unlocks all work orders that are in a locked state."""
@@ -24,6 +52,30 @@ def force_unlock_all_work_orders():
     print(f"Force-unlocked {len(response.get('Items', []))} work orders.")
 
 async def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Email Agent with configurable logging')
+    parser.add_argument('--log-levels', nargs='*', 
+                       choices=['progress', 'steps', 'workorder', 'debug', 'websocket'],
+                       default=['progress'],
+                       help='Log levels to enable (default: progress). Examples: --log-levels progress debug, --log-levels progress steps websocket')
+    
+    args = parser.parse_args()
+    
+    # Create logging configuration
+    logging_config = LoggingConfig(args.log_levels)
+    
+    # Display enabled log levels
+    print(f"Email Agent starting with log levels: {args.log_levels}")
+    print("Available log levels:")
+    print("  progress   - General progress messages (default)")
+    print("  steps      - Step execution details")
+    print("  workorder  - Work order data and state changes")
+    print("  debug      - Debug information and detailed processing")
+    print("  websocket  - WebSocket connection status")
+    print("  error      - Error messages (always shown)")
+    print("  warning    - Warning messages (always shown)")
+    print()
+    
     # Set up signal handlers
     def signal_handler(sig, frame):
         print("\nShutting down...")
@@ -33,8 +85,8 @@ async def main():
     signal.signal(signal.SIGTERM, signal_handler)
     
     try:
-        # Create and start the agent (EmailAgent constructor handles pipeline purging)
-        agent = EmailAgent()
+        # Create and start the agent with logging configuration
+        agent = EmailAgent(logging_config=logging_config)
         await agent.start()
     except Exception as e:
         print(f"Error in main: {e}")
