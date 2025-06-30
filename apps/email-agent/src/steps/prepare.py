@@ -298,8 +298,11 @@ class PrepareStep:
         if stack:
             raise ValueError("QA Failure: missing '#endif' for one or more '#if'")
         
-        if "||name||" not in html:
-            raise ValueError("QA Failure: missing '||name||' in HTML")
+        # Check for ||name|| only if salutationByName is True (or field doesn't exist for backwards compatibility)
+        salutation_by_name = getattr(work_order, 'salutationByName', True)
+        if salutation_by_name:
+            if "||name||" not in html:
+                raise ValueError("QA Failure: missing '||name||' in HTML")
 
         # Get stage record to check QA fields
         stage_record = self._get_stage_record(work_order.stage)
@@ -317,8 +320,9 @@ class PrepareStep:
                 if not any(work_order.zoomId in link for link in zoom_links):
                     raise ValueError("QA Failure: zoom link with zoom ID not found")
 
-        # Check registration links if qaStepCheckRegLink is enabled
-        if stage_record.get('qaStepCheckRegLink', False):
+        # Check registration links if regLinkPresent is enabled
+        reg_link_present = getattr(work_order, 'regLinkPresent', True)
+        if reg_link_present:
             reg_links = re.findall(r'https://(?:reg|csf)\.slsupport\.link/[^\s"]+', html)
             aid_ok = any(f"&aid={work_order.eventCode}" in link for link in reg_links)
             pid_ok = any("?pid=123456789" in link for link in reg_links)

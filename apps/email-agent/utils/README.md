@@ -25,10 +25,10 @@ python rename_campaign.py --from-campaign "old-campaign" --to-campaign "new-camp
 
 ### Arguments
 
-- `--from-campaign`: The campaign key to rename from (required)
-- `--to-campaign`: The campaign key to rename to (required)
-- `--dryrun`: Show what would be changed without making actual changes
-- `--id`: Process only the student with the specified ID
+- `--from-campaign`: The current campaign name to rename from
+- `--to-campaign`: The new campaign name to rename to
+- `--id`: (Optional) Process only a specific student by ID
+- `--dryrun`: (Optional) Show what would be changed without making changes
 
 ### Examples
 
@@ -89,4 +89,112 @@ SUCCESS: Renamed campaign 'old-campaign' to 'new-campaign' for student f382b7f7-
 --------------------------------------------------
 SUMMARY: Made 2 changes
 Successfully processed 2 student record(s)
-``` 
+```
+
+## missing_campaign.py
+
+A utility script to find students missing a specific campaign in their emails folder.
+
+### Purpose
+
+This script scans the student DynamoDB table and checks if each student has the specified campaign in their `emails` field. If a student is missing the campaign, their ID is printed. This is useful for identifying which students need to receive a particular email campaign.
+
+### Usage
+
+```bash
+# Basic usage - find all students missing a campaign
+python missing_campaign.py --campaign "campaign-name"
+
+# Check only a specific student
+python missing_campaign.py --campaign "campaign-name" --id "student-123"
+
+# Ignore students who have unsubscribed from emails
+python missing_campaign.py --campaign "campaign-name" --ignore-unsubscribed
+
+# Ignore students with blank email fields
+python missing_campaign.py --campaign "campaign-name" --ignore-missing-email
+
+# Use both ignore flags together
+python missing_campaign.py --campaign "campaign-name" --ignore-unsubscribed --ignore-missing-email
+```
+
+### Arguments
+
+- `--campaign`: (Required) The campaign name to check for
+- `--id`: (Optional) Check only the student with the specified ID
+- `--ignore-unsubscribed`: (Optional) Ignore students who have unsubscribed from emails
+- `--ignore-missing-email`: (Optional) Ignore students with blank email fields
+
+### Output
+
+The script outputs:
+1. A list of student IDs missing the specified campaign
+2. A summary showing the total count of students missing the campaign
+3. If `--ignore-unsubscribed` is used, a count of unsubscribed students that were ignored
+4. If `--ignore-missing-email` is used, a count of students with missing email that were ignored
+
+### Examples
+
+```bash
+# Find all students missing the "vt2024-retreat-reminder" campaign
+python missing_campaign.py --campaign "vt2024-retreat-reminder"
+
+# Find students missing a campaign, but exclude unsubscribed students
+python missing_campaign.py --campaign "newsletter-2024" --ignore-unsubscribed
+
+# Find students missing a campaign, but exclude those without email addresses
+python missing_campaign.py --campaign "welcome-email" --ignore-missing-email
+
+# Find students missing a campaign, excluding both unsubscribed and those without emails
+python missing_campaign.py --campaign "important-update" --ignore-unsubscribed --ignore-missing-email
+
+# Check if a specific student has a campaign
+python missing_campaign.py --campaign "welcome-email" --id "5f397b04-b1d4-464d-ab7d-fa7c71054a7a"
+```
+
+### Requirements
+
+- Python 3.6+
+- boto3
+- AWS credentials configured via profile (uses `AWS_PROFILE` from .env)
+- `STUDENT_TABLE` environment variable set in .env
+
+### How it works
+
+1. **Scans the student table**: Either scans all students or gets a specific student by ID
+2. **Checks emails field**: Looks for the specified campaign key in each student's `emails` field
+3. **Identifies missing campaigns**: Students without the campaign key are considered missing
+4. **Reports results**: Prints the IDs of students missing the campaign and provides a summary
+
+### Output
+
+The script provides output showing:
+- Configuration summary
+- Student IDs that are missing the campaign (printed one per line)
+- Final summary with total count of missing students
+
+Example output:
+```
+Student table: foundations.participants
+Campaign to check: test-campaign
+--------------------------------------------------
+Scanning student table...
+Found 1500 student(s) to check
+--------------------------------------------------
+5f397b04-b1d4-464d-ab7d-fa7c71054a7a
+47eb5dbd-87c3-411e-b69d-acf3ab69f738
+54ee374f-5f27-4b25-b71b-fa85fc01941e
+--------------------------------------------------
+SUMMARY: Found 3 student(s) missing campaign 'test-campaign'
+Students missing campaign 'test-campaign':
+  - 5f397b04-b1d4-464d-ab7d-fa7c71054a7a
+  - 47eb5dbd-87c3-411e-b69d-acf3ab69f738
+  - 54ee374f-5f27-4b25-b71b-fa85fc01941e
+```
+
+### Use cases
+
+- **Campaign auditing**: Verify which students received a particular campaign
+- **Targeted campaigns**: Identify students who need to receive a specific campaign
+- **Data validation**: Ensure campaign distribution is complete
+- **Troubleshooting**: Debug issues with campaign delivery 
