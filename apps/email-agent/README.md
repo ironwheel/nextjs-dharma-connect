@@ -65,6 +65,248 @@ pip install -r requirements.txt
 python src/main.py
 ```
 
+## Setting up a New EC2 Instance
+
+This guide provides step-by-step instructions for setting up the email-agent on a fresh Amazon Linux 2023 EC2 instance.
+
+### Prerequisites
+
+- A running Amazon Linux 2023 EC2 instance
+- Appropriate IAM role attached to the instance (recommended) or AWS credentials configured
+- Security groups configured to allow outbound HTTPS traffic
+
+### Step 1: Update the system and install basic tools
+
+```bash
+# Update the system
+sudo dnf update -y
+
+# Install essential development tools
+sudo dnf groupinstall "Development Tools" -y
+
+# Install Python 3.9+ (should already be installed on AL2023)
+sudo dnf install python3 python3-pip python3-devel -y
+
+# Install git
+sudo dnf install git -y
+
+# Install other useful tools
+sudo dnf install wget curl unzip -y
+```
+
+### Step 2: Verify Python version
+
+```bash
+python3 --version
+pip3 --version
+```
+
+You should see Python 3.9 or higher, which supports the latest boto3 versions.
+
+### Step 3: Clone the repository
+
+```bash
+# Clone the repository
+git clone https://github.com/your-username/nextjs-dharma-connect.git
+cd nextjs-dharma-connect/apps/email-agent
+```
+
+### Step 4: Install Python dependencies
+
+```bash
+# Upgrade pip to the latest version
+pip3 install --upgrade pip
+
+# Install the requirements
+pip3 install -r requirements.txt
+```
+
+### Step 5: Set up AWS credentials and configuration
+
+#### Option A: Using IAM Role (Recommended)
+If your EC2 instance has an IAM role attached, no additional configuration is needed. The AWS SDK will automatically use the instance metadata service.
+
+#### Option B: Manual AWS Configuration
+```bash
+# Install AWS CLI
+sudo dnf install aws-cli -y
+
+# Configure AWS credentials
+aws configure
+```
+
+### Step 6: Set up environment variables
+
+```bash
+# Create a .env file
+cp .env.example .env  # if there's an example file
+# or create one manually
+```
+
+Configure the following environment variables in your `.env` file:
+
+```env
+# AWS Configuration
+AWS_REGION=us-east-1  # or your preferred region
+AWS_ACCESS_KEY_ID=your_access_key  # only if not using IAM role
+AWS_SECRET_ACCESS_KEY=your_secret_key  # only if not using IAM role
+
+# DynamoDB Tables
+DYNAMODB_TABLE_WORK_ORDERS=WorkOrders
+DYNAMODB_TABLE_PARTICIPANTS=Participants
+DYNAMODB_TABLE_CONFIG=Config
+
+# SQS Configuration
+SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/your-account-id/email-agent-queue
+
+# WebSocket Configuration
+WEBSOCKET_ENDPOINT=wss://your-websocket-endpoint.amazonaws.com
+
+# Other configurations as needed
+```
+
+### Step 7: Test the installation
+
+```bash
+# Test that the email-agent can be imported
+python3 -c "import src.main; print('Email agent imports successfully')"
+
+# Or run a simple test
+python3 -m src.main --help
+```
+
+### Step 8: Set up as a service (Optional)
+
+To run the email-agent as a system service:
+
+```bash
+# Create a systemd service file
+sudo tee /etc/systemd/system/email-agent.service << EOF
+[Unit]
+Description=Email Agent Service
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/nextjs-dharma-connect/apps/email-agent
+Environment=PATH=/home/ec2-user/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 -m src.main
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable and start the service
+sudo systemctl daemon-reload
+sudo systemctl enable email-agent
+sudo systemctl start email-agent
+
+# Check status
+sudo systemctl status email-agent
+```
+
+### Step 9: Set up logging (Optional)
+
+```bash
+# Create log directory
+sudo mkdir -p /var/log/email-agent
+sudo chown ec2-user:ec2-user /var/log/email-agent
+
+# Update the service file to include logging
+sudo tee /etc/systemd/system/email-agent.service << EOF
+[Unit]
+Description=Email Agent Service
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/nextjs-dharma-connect/apps/email-agent
+Environment=PATH=/home/ec2-user/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 -m src.main
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/email-agent/email-agent.log
+StandardError=append:/var/log/email-agent/email-agent.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Reload and restart
+sudo systemctl daemon-reload
+sudo systemctl restart email-agent
+```
+
+### Step 10: Monitor the service
+
+```bash
+# View logs
+tail -f /var/log/email-agent/email-agent.log
+
+# Check service status
+sudo systemctl status email-agent
+
+# View recent logs
+journalctl -u email-agent -f
+```
+
+### Troubleshooting
+
+If you encounter any issues:
+
+1. **Check Python version**: Make sure you have Python 3.8+
+   ```bash
+   python3 --version
+   ```
+
+2. **Check AWS credentials**: Verify your AWS configuration
+   ```bash
+   aws sts get-caller-identity
+   ```
+
+3. **Check environment variables**: Ensure all required env vars are set
+   ```bash
+   cat .env
+   ```
+
+4. **Check permissions**: Make sure the ec2-user has proper permissions
+   ```bash
+   ls -la /home/ec2-user/nextjs-dharma-connect/apps/email-agent
+   ```
+
+5. **Check network**: Ensure the instance can reach AWS services
+   ```bash
+   curl -I https://sqs.us-east-1.amazonaws.com
+   ```
+
+### Quick verification
+
+```bash
+# Check if everything is working
+python3 -c "
+import boto3
+import pydantic
+import websockets
+import requests
+import os
+print('All dependencies installed successfully')
+print(f'boto3 version: {boto3.__version__}')
+print(f'Python version: {os.sys.version}')
+"
+```
+
+### Security Considerations
+
+- Use IAM roles instead of access keys when possible
+- Ensure the EC2 instance has minimal required permissions
+- Keep the system updated regularly
+- Monitor logs for any suspicious activity
+- Use security groups to restrict network access
+
 ## Required Environment Variables
 
 The following environment variables are required:
