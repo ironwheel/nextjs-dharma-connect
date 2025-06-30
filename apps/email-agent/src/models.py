@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
 import json
+import os
 
 class StepStatus(str, Enum):
     READY = 'ready'
@@ -154,9 +155,12 @@ class WorkOrder:
         self.testers = []  # Add testers field for test step
         self.sendContinuously = False  # Add sendContinuously field
         self.sendUntil = None  # Add sendUntil field
+        self.sendInterval = int(os.getenv('EMAIL_CONTINUOUS_SLEEP_SECS', '600'))  # Add sendInterval field (default from env var)
         self.s3HTMLPaths = {}  # Add s3HTMLPaths field for storing S3 paths
+        self.regLinkPresent = True  # Add regLinkPresent field (default True)
         self.dryRunRecipients = []  # Add dryRunRecipients field for Dry-Run step
         self.sendRecipients = []  # Add sendRecipients field for Send step
+        self.salutationByName = True  # Add salutationByName field for Prepare step
 
     def dict(self) -> Dict:
         """Convert to regular dictionary format"""
@@ -186,9 +190,12 @@ class WorkOrder:
             'testers': self.testers,
             'sendContinuously': self.sendContinuously,
             'sendUntil': self.sendUntil,
+            'sendInterval': self.sendInterval,
             's3HTMLPaths': self.s3HTMLPaths,
+            'regLinkPresent': self.regLinkPresent,
             'dryRunRecipients': self.dryRunRecipients,
-            'sendRecipients': self.sendRecipients
+            'sendRecipients': self.sendRecipients,
+            'salutationByName': self.salutationByName
         }
 
     def to_dict(self) -> Dict:
@@ -219,9 +226,12 @@ class WorkOrder:
             'testers': {'L': [{'S': tester} for tester in self.testers]} if self.testers else {'NULL': True},
             'sendContinuously': {'BOOL': self.sendContinuously},
             'sendUntil': {'NULL': True} if self.sendUntil is None else {'S': self.sendUntil},
+            'sendInterval': {'N': str(self.sendInterval)},
             's3HTMLPaths': {'M': {k: {'S': v} for k, v in self.s3HTMLPaths.items()}} if self.s3HTMLPaths else {'NULL': True},
+            'regLinkPresent': {'BOOL': self.regLinkPresent},
             'dryRunRecipients': {'L': [{'S': recipient} for recipient in self.dryRunRecipients]} if self.dryRunRecipients else {'NULL': True},
-            'sendRecipients': {'L': [{'S': recipient} for recipient in self.sendRecipients]} if self.sendRecipients else {'NULL': True}
+            'sendRecipients': {'L': [{'S': recipient} for recipient in self.sendRecipients]} if self.sendRecipients else {'NULL': True},
+            'salutationByName': {'BOOL': self.salutationByName}
         }
 
     def __str__(self) -> str:
@@ -318,6 +328,10 @@ class WorkOrder:
                         work_order.config = {}
                 else:
                     work_order.config = {}
+                
+                work_order.sendInterval = int(data.get('sendInterval', {}).get('N', os.getenv('EMAIL_CONTINUOUS_SLEEP_SECS', '600')))
+                work_order.regLinkPresent = data.get('regLinkPresent', {}).get('BOOL', True)
+                work_order.salutationByName = data.get('salutationByName', {}).get('BOOL', True)
                     
                 return work_order
             else:
@@ -360,9 +374,12 @@ class WorkOrder:
                         work_order.sendUntil = send_until
                 else:
                     work_order.sendUntil = None
+                work_order.sendInterval = data.get('sendInterval', int(os.getenv('EMAIL_CONTINUOUS_SLEEP_SECS', '600')))
                 work_order.s3HTMLPaths = data.get('s3HTMLPaths', {})
+                work_order.regLinkPresent = data.get('regLinkPresent', True)
                 work_order.dryRunRecipients = data.get('dryRunRecipients', [])
                 work_order.sendRecipients = data.get('sendRecipients', [])
+                work_order.salutationByName = data.get('salutationByName', True)
                 return work_order
         except Exception as e:
             print(f"Error creating WorkOrder: {e}")

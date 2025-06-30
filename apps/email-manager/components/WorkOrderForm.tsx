@@ -29,6 +29,9 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
     const [testers, setTesters] = useState<string[]>([])
     const [sendContinuously, setSendContinuously] = useState(false)
     const [sendUntil, setSendUntil] = useState('')
+    const [sendInterval, setSendInterval] = useState(process.env.EMAIL_CONTINUOUS_SLEEP_SECS || '600')
+    const [salutationByName, setSalutationByName] = useState(true)  // Default to true
+    const [regLinkPresent, setRegLinkPresent] = useState(true)  // Default to true
     const [testParticipantOptions, setTestParticipantOptions] = useState<Array<{ id: string, name: string }>>([])
     const [stages, setStages] = useState<Array<{ stage: string, description: string, order?: number, parentStage?: string }>>([])
     const [selectedStageRecord, setSelectedStageRecord] = useState<any>(null)
@@ -112,6 +115,9 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                     setTesters(response.testers || [])
                     setSendContinuously(response.sendContinuously || false)
                     setSendUntil(response.sendUntil || '')
+                    setSendInterval(response.sendInterval || process.env.EMAIL_CONTINUOUS_SLEEP_SECS || '600')
+                    setSalutationByName(response.salutationByName !== false)  // Default to true if not explicitly false
+                    setRegLinkPresent(response.regLinkPresent !== false)  // Default to true if not explicitly false
                 }
             }).catch(error => {
                 console.error('Error loading work order:', error)
@@ -136,6 +142,9 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
             setTesters(response.testers || [])
             setSendContinuously(response.sendContinuously || false)
             setSendUntil(response.sendUntil || '')
+            setSendInterval(response.sendInterval || process.env.EMAIL_CONTINUOUS_SLEEP_SECS || '600')
+            setSalutationByName(response.salutationByName !== false)  // Default to true if not explicitly false
+            setRegLinkPresent(response.regLinkPresent !== false)  // Default to true if not explicitly false
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [optionsLoaded])
@@ -313,6 +322,9 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                 testers,
                 sendContinuously,
                 sendUntil: sendContinuously ? sendUntil : undefined,
+                sendInterval: sendContinuously ? sendInterval : undefined,
+                salutationByName,
+                regLinkPresent,
                 createdBy: userPid,
                 config: {
                     pool: pool
@@ -573,6 +585,34 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
             <Form.Group className="mb-3">
                 <Form.Check
                     type="checkbox"
+                    id="salutationByName"
+                    label="Salutation By Name"
+                    checked={salutationByName}
+                    onChange={e => setSalutationByName(e.target.checked)}
+                    className="bg-dark text-light border-secondary"
+                />
+                <Form.Text className="text-muted">
+                    When enabled, the Prepare step will check for the ||name|| field in HTML content
+                </Form.Text>
+            </Form.Group>
+
+            <Form.Group className="mb-3">
+                <Form.Check
+                    type="checkbox"
+                    id="regLinkPresent"
+                    label="Registration Link Present"
+                    checked={regLinkPresent}
+                    onChange={e => setRegLinkPresent(e.target.checked)}
+                    className="bg-dark text-light border-secondary"
+                />
+                <Form.Text className="text-muted">
+                    When enabled, the Prepare step will check for registration links with proper parameters
+                </Form.Text>
+            </Form.Group>
+
+            <Form.Group className="mb-3">
+                <Form.Check
+                    type="checkbox"
                     id="sendContinuously"
                     label="Enable Continuous Sending"
                     checked={sendContinuously}
@@ -596,6 +636,24 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                     />
                     <Form.Text className="text-muted">
                         Continuous sending will stop on this date and time
+                    </Form.Text>
+                </Form.Group>
+            )}
+
+            {sendContinuously && (
+                <Form.Group className="mb-3">
+                    <Form.Label>Send Interval</Form.Label>
+                    <Form.Select
+                        value={sendInterval}
+                        onChange={e => setSendInterval(e.target.value)}
+                        className="bg-dark text-light border-secondary"
+                        required={sendContinuously}
+                    >
+                        <option value="3600">1 hour</option>
+                        <option value="600">10 minutes</option>
+                    </Form.Select>
+                    <Form.Text className="text-muted">
+                        Time to wait between sending passes
                     </Form.Text>
                 </Form.Group>
             )}

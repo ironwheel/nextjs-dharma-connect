@@ -99,6 +99,11 @@ def find_eligible_students(student_data, pools_data, work_order, campaign_string
         if student.get('unsubscribe', False):
             continue
         
+        # Skip if email field is empty, null, or contains only whitespace
+        email = student.get('email', '')
+        if not email or email.strip() == '':
+            continue
+        
         # Check if already received the email
         emails = student.get('emails', {})
         has_received = campaign_string in emails

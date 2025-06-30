@@ -118,7 +118,9 @@ class StepProcessor:
                         send_until_dt = datetime.fromisoformat(send_until) if isinstance(send_until, str) else send_until
                         if now < send_until_dt:
                             if len(self.sleep_queue) < 8:
-                                sleep_until = now + timedelta(seconds=EMAIL_CONTINUOUS_SLEEP_SECS)
+                                # Use sendInterval from work order if available, otherwise use EMAIL_CONTINUOUS_SLEEP_SECS
+                                sleep_interval = getattr(work_order, 'sendInterval', EMAIL_CONTINUOUS_SLEEP_SECS)
+                                sleep_until = now + timedelta(seconds=sleep_interval)
                                 # Set work order state to Sleeping, set sleepUntil, set step message
                                 step_message = f"Sleeping until {sleep_until.isoformat()}"
                                 await self._update_step_status(work_order, step, StepStatus.SLEEPING, step_message)

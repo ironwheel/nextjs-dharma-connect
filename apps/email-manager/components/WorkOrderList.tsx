@@ -23,6 +23,9 @@ interface WorkOrder {
     testers?: string[]
     sendContinuously?: boolean
     sendUntil?: string
+    sendInterval?: string
+    salutationByName?: boolean
+    regLinkPresent?: boolean
     steps: Array<{
         name: 'Count' | 'Prepare' | 'Dry-Run' | 'Test' | 'Send-Once' | 'Send-Continuously'
         status: 'ready' | 'working' | 'complete' | 'error' | 'interrupted' | 'exception'
@@ -309,6 +312,9 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                     testers: workOrder.testers || [],
                     sendContinuously: workOrder.sendContinuously,
                     sendUntil: workOrder.sendUntil,
+                    sendInterval: workOrder.sendInterval,
+                    salutationByName: workOrder.salutationByName,
+                    regLinkPresent: workOrder.regLinkPresent,
                     dryRunRecipients: workOrder.dryRunRecipients || [],
                     sendRecipients: workOrder.sendRecipients || [],
                     archived: workOrder.archived,
