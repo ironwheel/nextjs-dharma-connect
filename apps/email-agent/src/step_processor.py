@@ -1,6 +1,7 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
+import os
 
 from .models import Step, StepStatus, WorkOrder
 from .aws_client import AWSClient
@@ -8,18 +9,18 @@ from .steps import PrepareStep
 from .steps.count import CountStep
 from .steps.test import TestStep
 from .steps.dry_run import DryRunStep
-from .steps.send_once import SendOnceStep
-from .steps.send_continuously import SendContinuouslyStep
+from .steps.send import SendStep
+from .config import EMAIL_CONTINUOUS_SLEEP_SECS
 
 class StepProcessor:
-    def __init__(self, aws_client: AWSClient):
+    def __init__(self, aws_client: AWSClient, sleep_queue=None):
         self.aws_client = aws_client
         self.count_step = CountStep(aws_client)
         self.prepare_step = PrepareStep(aws_client)
         self.test_step = TestStep(aws_client)
         self.dry_run_step = DryRunStep(aws_client)
-        self.send_once_step = SendOnceStep(aws_client)
-        self.send_continuously_step = SendContinuouslyStep(aws_client)
+        self.send_step = SendStep(aws_client)
+        self.sleep_queue = sleep_queue if sleep_queue is not None else []
 
     async def process_step(self, work_order: WorkOrder, step: Step) -> bool:
         """Process a single step of a work order."""
@@ -93,28 +94,35 @@ class StepProcessor:
                     print(f"[ERROR] Error in {step.name} step: {error_message}")
                     await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
                     return False
-            elif step.name == "Send-Once":
+            elif step.name == "Send":
                 try:
-                    success = await self.send_once_step.process(work_order, step)
+                    success = await self.send_step.process(work_order, step)
                     if not success:
                         error_message = "Step failed"
                         await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
                         return False
-                except InterruptedError:
-                    await self._update_step_status(work_order, step, StepStatus.INTERRUPTED, "Step interrupted by stop request.")
-                    return False
-                except Exception as e:
-                    error_message = str(e)
-                    print(f"[ERROR] Error in {step.name} step: {error_message}")
-                    await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
-                    return False
-            elif step.name == "Send-Continuously":
-                try:
-                    success = await self.send_continuously_step.process(work_order, step)
-                    if not success:
-                        error_message = "Step failed"
-                        await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
-                        return False
+                    # Sleep queue logic
+                    now = datetime.now(timezone.utc)
+                    send_until = getattr(work_order, 'sendUntil', None)
+                    send_continuously = getattr(work_order, 'sendContinuously', False)
+                    if send_continuously and send_until:
+                        send_until_dt = datetime.fromisoformat(send_until) if isinstance(send_until, str) else send_until
+                        if now < send_until_dt:
+                            if len(self.sleep_queue) < 8:
+                                sleep_until = now + timedelta(seconds=EMAIL_CONTINUOUS_SLEEP_SECS)
+                                # Set work order state to Sleeping, set sleepUntil, set step message
+                                step_message = f"Sleeping until {sleep_until.isoformat()}"
+                                await self._update_step_status(work_order, step, StepStatus.SLEEPING, step_message)
+                                self.aws_client.update_work_order({
+                                    'id': work_order.id,
+                                    'updates': {'state': 'Sleeping', 'sleepUntil': sleep_until.isoformat(), 'locked': True}
+                                })
+                                self.sleep_queue.append({'work_order_id': work_order.id, 'sleep_until': sleep_until})
+                                return True
+                            else:
+                                error_message = "Too many work orders are already sleeping. Try again later."
+                                await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
+                                return False
                 except InterruptedError:
                     await self._update_step_status(work_order, step, StepStatus.INTERRUPTED, "Step interrupted by stop request.")
                     return False
@@ -192,3 +200,5 @@ class StepProcessor:
         # Note: WebSocket updates are automatically sent by aws_client.update_work_order()
         # This method is kept for compatibility but doesn't need to do anything
         pass 
+
+    # Implement sleep queue logic as described in the plan. Use EMAIL_CONTINUOUS_SLEEP_SECS from the .env file for sleep interval. 

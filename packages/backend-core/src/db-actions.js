@@ -756,8 +756,7 @@ async function handleCreateWorkOrder(payload) {
             { name: 'Prepare', status: 'ready', message: '', isActive: false },
             { name: 'Dry-Run', status: 'ready', message: '', isActive: false },
             { name: 'Test', status: 'ready', message: '', isActive: false },
-            { name: 'Send-Once', status: 'ready', message: '', isActive: false },
-            ...(payload.sendContinuously ? [{ name: 'Send-Continuously', status: 'ready', message: '', isActive: false }] : [])
+            { name: 'Send', status: 'ready', message: '', isActive: false }
         ],
         createdAt: now,
         updatedAt: now
@@ -1212,6 +1211,7 @@ async function handleUnlockWorkOrder(payload) {
                 ":lockedBy": null,
                 ":updatedAt": now
             },
+            ConditionExpression: "attribute_exists(id)", // Only update if the work order exists
             ReturnValues: 'ALL_NEW'
         };
 

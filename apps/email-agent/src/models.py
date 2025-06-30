@@ -11,6 +11,7 @@ class StepStatus(str, Enum):
     ERROR = 'error'
     INTERRUPTED = 'interrupted'
     EXCEPTION = 'exception'  # New status for agent crashes
+    SLEEPING = 'sleeping'  # Add sleeping state
 
 class Step:
     """Represents a step in a work order"""
@@ -154,6 +155,8 @@ class WorkOrder:
         self.sendContinuously = False  # Add sendContinuously field
         self.sendUntil = None  # Add sendUntil field
         self.s3HTMLPaths = {}  # Add s3HTMLPaths field for storing S3 paths
+        self.dryRunRecipients = []  # Add dryRunRecipients field for Dry-Run step
+        self.sendRecipients = []  # Add sendRecipients field for Send step
 
     def dict(self) -> Dict:
         """Convert to regular dictionary format"""
@@ -183,7 +186,9 @@ class WorkOrder:
             'testers': self.testers,
             'sendContinuously': self.sendContinuously,
             'sendUntil': self.sendUntil,
-            's3HTMLPaths': self.s3HTMLPaths
+            's3HTMLPaths': self.s3HTMLPaths,
+            'dryRunRecipients': self.dryRunRecipients,
+            'sendRecipients': self.sendRecipients
         }
 
     def to_dict(self) -> Dict:
@@ -214,7 +219,9 @@ class WorkOrder:
             'testers': {'L': [{'S': tester} for tester in self.testers]} if self.testers else {'NULL': True},
             'sendContinuously': {'BOOL': self.sendContinuously},
             'sendUntil': {'NULL': True} if self.sendUntil is None else {'S': self.sendUntil},
-            's3HTMLPaths': {'M': {k: {'S': v} for k, v in self.s3HTMLPaths.items()}} if self.s3HTMLPaths else {'NULL': True}
+            's3HTMLPaths': {'M': {k: {'S': v} for k, v in self.s3HTMLPaths.items()}} if self.s3HTMLPaths else {'NULL': True},
+            'dryRunRecipients': {'L': [{'S': recipient} for recipient in self.dryRunRecipients]} if self.dryRunRecipients else {'NULL': True},
+            'sendRecipients': {'L': [{'S': recipient} for recipient in self.sendRecipients]} if self.sendRecipients else {'NULL': True}
         }
 
     def __str__(self) -> str:
@@ -336,8 +343,26 @@ class WorkOrder:
                 work_order.config = data.get('config', {})
                 work_order.testers = data.get('testers', [])
                 work_order.sendContinuously = data.get('sendContinuously', False)
-                work_order.sendUntil = data.get('sendUntil')
+                send_until = data.get('sendUntil')
+                if isinstance(send_until, str):
+                    try:
+                        dt = datetime.fromisoformat(send_until)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        work_order.sendUntil = dt
+                    except Exception as e:
+                        print(f"[DEBUG] Error parsing sendUntil: {e}, value: {send_until}")
+                        work_order.sendUntil = None
+                elif isinstance(send_until, datetime):
+                    if send_until.tzinfo is None:
+                        work_order.sendUntil = send_until.replace(tzinfo=timezone.utc)
+                    else:
+                        work_order.sendUntil = send_until
+                else:
+                    work_order.sendUntil = None
                 work_order.s3HTMLPaths = data.get('s3HTMLPaths', {})
+                work_order.dryRunRecipients = data.get('dryRunRecipients', [])
+                work_order.sendRecipients = data.get('sendRecipients', [])
                 return work_order
         except Exception as e:
             print(f"Error creating WorkOrder: {e}")

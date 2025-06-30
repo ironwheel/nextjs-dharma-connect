@@ -188,6 +188,8 @@ class AWSClient:
                     return convert_enums(obj.dict())
                 elif hasattr(obj, 'to_dict'):  # Handle objects with to_dict() method
                     return convert_enums(obj.to_dict())
+                elif hasattr(obj, 'isoformat'):  # Handle datetime objects
+                    return obj.isoformat()
                 return obj
 
             # Convert any enum values to strings
@@ -287,7 +289,7 @@ class AWSClient:
             return False
 
     def unlock_all_work_orders(self) -> int:
-        """Unlock all locked work orders. Returns the number of work orders unlocked."""
+        """Unlock all locked work orders except those in the 'Sleeping' state. Returns the number of work orders unlocked."""
         try:
             # Scan for locked work orders
             response = self.dynamodb.Table(DYNAMODB_TABLE).scan(
@@ -296,9 +298,13 @@ class AWSClient:
                 ExpressionAttributeValues={':locked': True}
             )
             
-            # Unlock each work order
+            # Unlock each work order, but skip those in 'Sleeping' state
             unlocked_count = 0
             for item in response.get('Items', []):
+                # Check if the work order is in the 'Sleeping' state
+                state = item.get('state')
+                if state == 'Sleeping':
+                    continue  # Skip unlocking sleeping work orders
                 self.dynamodb.Table(DYNAMODB_TABLE).update_item(
                     Key={'id': item['id']},
                     UpdateExpression='SET #locked = :locked, #lockedBy = :lockedBy',

@@ -6,6 +6,7 @@ Provides shared functionality for scanning students and sending emails.
 import asyncio
 import time
 from typing import Dict, List, Any, Tuple
+from datetime import datetime, timezone
 from ..models import WorkOrder, Step, StepStatus
 from ..aws_client import AWSClient
 from ..email import send_email
@@ -107,6 +108,21 @@ class SendBaseStep:
                     self.aws_client.update_work_order({
                         "id": work_order.id,
                         "updates": {"dryRunRecipients": dry_run_recipients}
+                    })
+                
+                # For Send, store the actual recipients (only for first language)
+                if not self.dryrun and lang == list(work_order.languages.keys())[0]:
+                    send_recipients = [
+                        {
+                            "id": s.get("id"),
+                            "name": f"{s.get('first', '')} {s.get('last', '')}".strip(),
+                            "email": s.get("email")
+                        }
+                        for s in eligible_students
+                    ]
+                    self.aws_client.update_work_order({
+                        "id": work_order.id,
+                        "updates": {"sendRecipients": send_recipients}
                     })
                 
                 # Send emails for this language
@@ -256,9 +272,9 @@ class SendBaseStep:
                 raise Exception(f"send_email() returned False for student {student.get('email')} in language {language}")
             
             if not self.dryrun:
-                # Record the campaign string in the student's emails field
+                # Record the campaign string in the student's emails field with ISO 8601 timestamp
                 emails = student.get('emails', {})
-                emails[campaign_string] = True
+                emails[campaign_string] = datetime.utcnow().isoformat()
                 
                 # Update the student record in DynamoDB
                 self.aws_client.update_student_emails(student['id'], emails)
