@@ -349,6 +349,9 @@ export async function handleCheckAccess(pid, hash, url) {
     const data = await client.send(command);
     if (!data.Item) throw new Error('AUTH_PID_NOT_FOUND');
     const permittedUrls = data.Item['permitted-urls'] || [];
-    if (!permittedUrls.includes(url)) throw new Error('AUTH_URL_NOT_FOUND');
+    const permission = permittedUrls.find(permission => permission.url === url);
+    if (!permission) {
+      throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_URL_NOT_PERMITTED');
+    }
     return {};
 }
