@@ -6,7 +6,7 @@ import { getFingerprint } from 'sharedFrontend';
 export default function Login() {
   const [email, setEmail] = useState('');
   const handleSend = async () => {
-    await api.post('/api/login', { email, fingerprint: getFingerprint() });
+    await api.post('/api/login', '', '', { email, fingerprint: getFingerprint() });
     alert('Check your email for the link.');
   };
   return (
