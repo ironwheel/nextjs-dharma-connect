@@ -1,1 +1,0 @@
-export const CSRF_HEADER_NAME = 'X-CSRF-Token'; 

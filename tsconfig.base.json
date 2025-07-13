@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "noEmit": true,
+    "incremental": true,
+    "module": "esnext",
+    "esModuleInterop": true,
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "strictNullChecks": true,
+    "baseUrl": ".",
+    "paths": {
+      "sharedFrontend/*": ["packages/sharedFrontend/src/*"],
+      "sharedBackend/*": ["packages/sharedBackend/src/*"]
+    }
+  },
+  "exclude": [
+    "node_modules"
+  ]
+} 

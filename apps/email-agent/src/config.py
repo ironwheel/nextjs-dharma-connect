@@ -86,6 +86,9 @@ EMAIL_BURST_SIZE = int(os.getenv('EMAIL_BURST_SIZE', '10'))
 EMAIL_RECOVERY_SLEEP_SECS = int(os.getenv('EMAIL_RECOVERY_SLEEP_SECS', '60'))
 EMAIL_CONTINUOUS_SLEEP_SECS = int(os.getenv('EMAIL_CONTINUOUS_SLEEP_SECS', '600'))
 
+# Cache configuration
+CACHE_REFRESH_INTERVAL_SECS = int(os.getenv('CACHE_REFRESH_INTERVAL_SECS', '600'))  # 10 minutes default
+
 # Email templates configuration
 TEMPLATES_DIR = os.getenv('TEMPLATES_DIR', str(Path(__file__).parent / 'templates'))
 

@@ -54,31 +54,31 @@ class SendBaseStep:
         """
         try:
             # Update initial progress message
-            await self._update_progress(work_order, f"Starting {self.step_name.lower()} process...")
+            await self._update_progress(work_order, f"Starting {self.step_name.lower()} process...", step.name)
             
             # Get stage record for filtering and prefix
             stage_record = self._get_stage_record(work_order.stage)
             
             # Get required data (do this once before language loop)
-            await self._update_progress(work_order, "Loading required data...")
+            await self._update_progress(work_order, "Loading required data...", step.name)
             
             # Scan student table
             student_data = self.aws_client.scan_table(STUDENT_TABLE)
-            await self._update_progress(work_order, f"Loaded {len(student_data)} student records")
+            await self._update_progress(work_order, f"Loaded {len(student_data)} student records", step.name)
             
             # Get pools data
             pools_data = self.aws_client.scan_table(POOLS_TABLE)
-            await self._update_progress(work_order, f"Loaded {len(pools_data)} pool definitions")
+            await self._update_progress(work_order, f"Loaded {len(pools_data)} pool definitions", step.name)
             
             # Get prompts data
             prompts_data = self.aws_client.scan_table(PROMPTS_TABLE)
-            await self._update_progress(work_order, f"Loaded {len(prompts_data)} prompt definitions")
+            await self._update_progress(work_order, f"Loaded {len(prompts_data)} prompt definitions", step.name)
             
             # Get event data
             event_data = self.aws_client.get_event(work_order.eventCode)
             if not event_data:
                 raise Exception(f"Event {work_order.eventCode} not found")
-            await self._update_progress(work_order, f"Loaded event data for {work_order.eventCode}")
+            await self._update_progress(work_order, f"Loaded event data for {work_order.eventCode}", step.name)
             
             # Validate that S3 HTML paths are available
             if not work_order.s3HTMLPaths:
@@ -91,61 +91,33 @@ class SendBaseStep:
                 if not work_order.languages[lang]:
                     continue  # Skip disabled languages
                 
-                await self._update_progress(work_order, f"Processing {lang} language...")
+                await self._update_progress(work_order, f"Processing {lang} language...", step.name)
                 
                 # Get campaign string for this language
                 campaign_string = build_campaign_string(work_order.eventCode, work_order.subEvent, work_order.stage, lang)
-                await self._update_progress(work_order, f"Campaign string for {lang}: {campaign_string}")
+                await self._update_progress(work_order, f"Campaign string for {lang}: {campaign_string}", step.name)
                 
                 # Find eligible students for this language
-                await self._update_progress(work_order, f"Finding eligible students for {lang}...")
+                await self._update_progress(work_order, f"Finding eligible students for {lang}...", step.name)
                 eligible_students = find_eligible_students(
                     student_data, pools_data, work_order, campaign_string, stage_record, lang, self._create_eligible_object
                 )
                 
-                await self._update_progress(work_order, f"Found {len(eligible_students)} eligible students for {lang}")
+                await self._update_progress(work_order, f"Found {len(eligible_students)} eligible students for {lang}", step.name)
                 
-                # For Dry-Run, store the recipient preview in the work order (only for first language)
-                if self.dryrun and lang == list(work_order.languages.keys())[0]:
-                    dry_run_recipients = [
-                        {
-                            "id": s.get("id"),
-                            "name": f"{s.get('first', '')} {s.get('last', '')}".strip(),
-                            "email": s.get("email")
-                        }
-                        for s in eligible_students
-                    ]
-                    self.aws_client.update_work_order({
-                        "id": work_order.id,
-                        "updates": {"dryRunRecipients": dry_run_recipients}
-                    })
-                
-                # For Send, store the actual recipients (only for first language)
-                if not self.dryrun and lang == list(work_order.languages.keys())[0]:
-                    send_recipients = [
-                        {
-                            "id": s.get("id"),
-                            "name": f"{s.get('first', '')} {s.get('last', '')}".strip(),
-                            "email": s.get("email")
-                        }
-                        for s in eligible_students
-                    ]
-                    self.aws_client.update_work_order({
-                        "id": work_order.id,
-                        "updates": {"sendRecipients": send_recipients}
-                    })
-                
+                # Instead, append each recipient to the new tables as they are processed
+
                 # Send emails for this language
                 emails_sent = 0
                 total_emails_for_lang = len(eligible_students)
                 
-                await self._update_progress(work_order, f"Sending {total_emails_for_lang} emails for {lang}...")
+                await self._update_progress(work_order, f"Sending {total_emails_for_lang} emails for {lang}...", step.name)
                 
                 for i, student in enumerate(eligible_students):
                     # Check for stop request before processing each student
                     latest_work_order = self.aws_client.get_work_order(work_order.id)
                     if latest_work_order and getattr(latest_work_order, 'stopRequested', False):
-                        await self._update_progress(work_order, "Step interrupted by stop request.")
+                        await self._update_progress(work_order, "Step interrupted by stop request.", step.name)
                         step.status = StepStatus.INTERRUPTED
                         step.message = "Step interrupted by stop request."
                         return False
@@ -153,7 +125,7 @@ class SendBaseStep:
                     # Also check for new stop messages in SQS (every 5 students)
                     if i % 5 == 0:
                         if self.aws_client.check_for_stop_messages(work_order.id):
-                            await self._update_progress(work_order, "Step interrupted by stop request.")
+                            await self._update_progress(work_order, "Step interrupted by stop request.", step.name)
                             step.status = StepStatus.INTERRUPTED
                             step.message = "Step interrupted by stop request."
                             return False
@@ -165,42 +137,52 @@ class SendBaseStep:
                         if success:
                             emails_sent += 1
                             total_emails_sent += 1
+                            # Append to send_recipients table
+                            entry = {
+                                "name": f"{student.get('first', '')} {student.get('last', '')}".strip(),
+                                "email": student.get("email"),
+                                "sendtime": datetime.now(timezone.utc).isoformat()
+                            }
+                            if self.dryrun:
+                                self.aws_client.append_dryrun_recipient(campaign_string, entry)
+                            else:
+                                self.aws_client.append_send_recipient(campaign_string, entry)
                     except Exception as e:
                         # Email failure is terminal - stop processing and report error
                         error_message = f"Email sending failed for {lang}: {str(e)}"
-                        await self._update_progress(work_order, error_message)
+                        await self._update_progress(work_order, error_message, step.name)
                         raise Exception(error_message)
                     
                     # Progress update
                     if (i + 1) % 10 == 0:
-                        await self._update_progress(work_order, f"Processed {i + 1}/{len(eligible_students)} students for {lang}, sent {emails_sent} emails")
+                        await self._update_progress(work_order, f"Processed {i + 1}/{len(eligible_students)} students for {lang}, sent {emails_sent} emails", step.name)
                     
                     # Burst control (only for Send-Once and Send-Continuously)
                     if not self.dryrun:
                         if (i + 1) % EMAIL_BURST_SIZE == 0 and i + 1 < len(eligible_students):
-                            await self._update_progress(work_order, f"Burst limit reached for {lang}, sleeping for {EMAIL_RECOVERY_SLEEP_SECS} seconds...")
+                            await self._update_progress(work_order, f"Burst limit reached for {lang}, sleeping for {EMAIL_RECOVERY_SLEEP_SECS} seconds...", step.name)
                             try:
                                 await async_interruptible_sleep(EMAIL_RECOVERY_SLEEP_SECS, work_order, self.aws_client)
                             except InterruptedError:
-                                await self._update_progress(work_order, "Step interrupted by stop request.")
+                                await self._update_progress(work_order, "Step interrupted by stop request.", step.name)
                                 step.status = StepStatus.INTERRUPTED
                                 step.message = "Step interrupted by stop request."
                                 return False
                 
-                await self._update_progress(work_order, f"Completed {lang} language, sent {emails_sent} emails")
+                await self._update_progress(work_order, f"Completed {lang} language, sent {emails_sent} emails", step.name)
             
             if self.dryrun:
                 success_message = f"Dry-Run completed successfully. {total_emails_sent} emails would have been sent."
             else:
                 success_message = f"{self.step_name} completed successfully. Sent {total_emails_sent} total emails."
-            await self._update_progress(work_order, success_message)
+            await self._update_progress(work_order, success_message, step.name)
             step.message = success_message
             return True
             
         except Exception as e:
             error_message = str(e)
             self.log('error', f"[ERROR] [{self.step_name}Step] Error in {self.step_name.lower()} process: {error_message}")
-            await self._update_progress(work_order, f"Error: {error_message}")
+            await self._update_progress(work_order, f"Error: {error_message}", step.name)
             raise Exception(error_message)
 
     def _get_stage_record(self, stage: str) -> Dict:
@@ -296,8 +278,11 @@ class SendBaseStep:
             self.log('error', f"[ERROR] {error_msg}")
             raise Exception(error_msg)
 
-    async def _update_progress(self, work_order: WorkOrder, message: str):
+    async def _update_progress(self, work_order: WorkOrder, message: str, step_name: str = None):
         """Update the work order progress message."""
+        # Use the provided step_name or fall back to self.actual_step_name for backward compatibility
+        target_step_name = step_name or self.actual_step_name
+        
         if self.aws_client:
             try:
                 # Get current steps and update the step message
@@ -305,9 +290,9 @@ class SendBaseStep:
                 if current_work_order:
                     steps = current_work_order.steps.copy()
                     for i, s in enumerate(steps):
-                        if s.name == self.actual_step_name:
+                        if s.name == target_step_name:
                             steps[i] = Step(
-                                name=self.actual_step_name,
+                                name=target_step_name,
                                 status=s.status,
                                 message=message,
                                 isActive=s.isActive,
