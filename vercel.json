@@ -1,9 +1,8 @@
 {
-    "buildCommand": "pnpm --filter=email-manager build",
+    "buildCommand": "cd apps/email-manager && pnpm build",
     "outputDirectory": "apps/email-manager/.next",
     "installCommand": "pnpm install",
     "framework": "nextjs",
-    "rootDirectory": "apps/email-manager",
     "functions": {
         "apps/email-manager/pages/api/**/*.ts": {
             "runtime": "nodejs18.x"
