@@ -11,6 +11,13 @@ import { tableGetConfig } from './tableConfig';
 import { listAllFiltered, getOne, putOne, getOneWithSort, deleteOne, deleteOneWithSort } from './dynamoClient';
 import crypto from 'crypto';
 
+// Add this type at the top of the file, after imports
+type PermittedHost = {
+    host: string;
+    actionsProfile?: string;
+    [key: string]: any;
+};
+
 // JWT Configuration (Constants)
 export const JWT_ISSUER = process.env.JWT_ISSUER_NAME;
 export const JWT_TOKEN_TYPE_ACCESS = 'access';
@@ -314,12 +321,12 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
     let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
 
     if (!data) {
-        const data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
 
     // Does this user have access to this HOST?
-    const permittedHosts = data['permitted-hosts'] || [];
+    const permittedHosts: PermittedHost[] = data['permitted-hosts'] || [];
     const permission = permittedHosts.find(permission => permission.host === host);
     if (!permission) throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
 
@@ -470,12 +477,12 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
     let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
 
     if (!data) {
-        const data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
 
     // Does this user have access to this host?
-    const permittedHosts = data['permitted-hosts'] || [];
+    const permittedHosts: PermittedHost[] = data['permitted-hosts'] || [];
     const permission = permittedHosts.find(permission => permission.host === host);
     if (!permission) {
         throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
@@ -500,7 +507,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
 
     // Lookup related actions list, throw config error if not found
     tableCfg = tableGetConfig('actions-profile');
-    const actionsListData = await getOne(tableCfg.tableName, tableCfg.pk, actionsProfile, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    const actionsListData = await getOne(tableCfg.tableName, tableCfg.pk, actionsProfile as string, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
     if (!actionsListData) throw new Error('AUTH_ACTIONS_LIST_NOT_FOUND');
 
     // Ensure actionsList is an array
@@ -666,13 +673,14 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
 
     console.log("checkAccess: getOne(auth)data:", data);
 
+    let permittedHosts: PermittedHost[] = [];
     if (!data) {
-        const data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
+    permittedHosts = data['permitted-hosts'] || [];
 
     // Does this user have access to this host?
-    const permittedHosts = data['permitted-hosts'] || [];
     console.log("checkAccess: permittedHosts:", permittedHosts);
     const permission = permittedHosts.find(permission => permission.host === host);
     console.log("checkAccess: permission:", permission);
@@ -687,7 +695,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
 
     // Lookup related actions list, throw config error if not found
     tableCfg = tableGetConfig('actions-profile');
-    const actionsListData = await getOne(tableCfg.tableName, tableCfg.pk, actionsProfile, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    const actionsListData = await getOne(tableCfg.tableName, tableCfg.pk, actionsProfile as string, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
     if (!actionsListData) throw new Error('AUTH_ACTIONS_LIST_NOT_FOUND');
 
     // Ensure actionsList is an array

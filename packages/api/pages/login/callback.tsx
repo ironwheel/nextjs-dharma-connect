@@ -11,7 +11,7 @@ export default function Callback() {
   useEffect(() => {
     if (!token) return;
     (async () => {
-      await api.post('/api/login/callback', { token, fingerprint: getFingerprint() });
+      await api.post('/api/login/callback', '', '', { token, fingerprint: getFingerprint() });
       router.replace('/');
     })();
   }, [token]);

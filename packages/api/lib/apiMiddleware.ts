@@ -7,10 +7,27 @@ import cors from 'cors';
 import csurf from 'csurf';
 import { checkAccess } from './authUtils';
 
-// Configure CORS origin based on environment
-const corsOrigin = process.env.CORS_ORIGIN ||
-  process.env.NEXT_PUBLIC_FRONTEND_URL ||
-  'http://localhost:3000';
+// Parse allowed origins from environment
+let allowedOrigins: string[] = [];
+try {
+  if (process.env.CORS_ORIGIN_LIST) {
+    allowedOrigins = JSON.parse(process.env.CORS_ORIGIN_LIST);
+  } else {
+    allowedOrigins = ['http://localhost:3000'];
+  }
+} catch (e) {
+  console.warn('Failed to parse CORS_ORIGIN_LIST, falling back to localhost');
+  allowedOrigins = ['http://localhost:3000'];
+}
+
+// CORS origin function to check against allowed origins
+const corsOrigin = (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+  if (!origin || allowedOrigins.includes(origin)) {
+    callback(null, true);
+  } else {
+    callback(new Error('Not allowed by CORS'));
+  }
+};
 
 export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
   .use(cookieParser())
