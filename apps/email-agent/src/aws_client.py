@@ -1,9 +1,10 @@
 import boto3
 from botocore.exceptions import ClientError
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 import os
 import json
+import time
 
 from .config import config
 from .models import WorkOrder, WorkOrderUpdate
@@ -21,11 +22,91 @@ POOLS_TABLE = os.getenv('POOLS_TABLE', 'pools')
 PROMPTS_TABLE = os.getenv('PROMPTS_TABLE', 'prompts')
 STAGES_TABLE = os.getenv('DYNAMODB_TABLE_STAGES', 'stages')
 
+# Cache configuration
+CACHE_REFRESH_INTERVAL_SECS = int(os.getenv('CACHE_REFRESH_INTERVAL_SECS', '600'))  # 10 minutes default
+
+class TableCacheManager:
+    """Manages caching for DynamoDB table scans to reduce redundant full table scans."""
+    
+    def __init__(self, logging_config=None):
+        self.cache = {}  # table_name -> {'data': [...], 'last_refresh': timestamp}
+        self.last_sqs_invalidation = 0
+        self.last_sleeping_refresh = time.time()  # Initialize to now to avoid huge interval on first use
+        self.logging_config = logging_config
+    
+    def log(self, level, message):
+        """Log a message if the level is enabled."""
+        if self.logging_config:
+            self.logging_config.log(level, message)
+        else:
+            # Fallback to always logging if no config provided
+            print(message)
+    
+    def invalidate_all_caches(self, reason: str):
+        """Invalidate all table caches."""
+        self.cache.clear()
+        self.last_sqs_invalidation = time.time()
+        self.log('debug', f"[CACHE] Invalidated all caches: {reason}")
+    
+    def should_refresh_cache(self, table_name: str, has_sleeping_work_orders: bool) -> bool:
+        """
+        Determine if cache should be refreshed based on invalidation rules.
+        
+        Args:
+            table_name: Name of the table being accessed
+            has_sleeping_work_orders: Whether there are currently sleeping work orders
+            
+        Returns:
+            True if cache should be refreshed, False otherwise
+        """
+        current_time = time.time()
+        
+        # If no cache exists for this table, always refresh
+        if table_name not in self.cache:
+            print(f"[CACHE] No cache exists for {table_name}, will refresh (no cache entry)")
+            return True
+        
+        # If there are sleeping work orders, refresh every CACHE_REFRESH_INTERVAL_SECS
+        if has_sleeping_work_orders:
+            time_since_refresh = current_time - self.last_sleeping_refresh
+            if time_since_refresh >= CACHE_REFRESH_INTERVAL_SECS:
+                print(f"[CACHE] Sleeping work orders detected, cache refresh interval reached ({time_since_refresh:.1f}s >= {CACHE_REFRESH_INTERVAL_SECS}s) for {table_name}")
+                self.last_sleeping_refresh = current_time
+                return True
+            else:
+                print(f"[CACHE] Using cached data for {table_name} (sleeping work orders, {time_since_refresh:.1f}s < {CACHE_REFRESH_INTERVAL_SECS}s)")
+                return False
+        
+        # If no sleeping work orders, refresh on every call (immediate invalidation)
+        if not has_sleeping_work_orders:
+            print(f"[CACHE] No sleeping work orders, refreshing cache for {table_name} (immediate invalidation)")
+            return True
+        
+        return False
+    
+    def get_cached_data(self, table_name: str) -> Optional[List[Dict]]:
+        """Get cached data for a table if it exists and is valid."""
+        if table_name in self.cache:
+            print(f"[CACHE] Returning cached data for {table_name} ({len(self.cache[table_name]['data'])} items)")
+            return self.cache[table_name]['data']
+        print(f"[CACHE] No cached data for {table_name}")
+        return None
+    
+    def set_cached_data(self, table_name: str, data: List[Dict]):
+        """Set cached data for a table."""
+        self.cache[table_name] = {
+            'data': data,
+            'last_refresh': time.time()
+        }
+        print(f"[CACHE] Cached {len(data)} items for table {table_name}")
+        self.log('debug', f"[CACHE] Cached {len(data)} items for table {table_name}")
+
 class AWSClient:
     def __init__(self, logging_config=None):
         self.dynamodb = boto3.resource('dynamodb', region_name=config.aws_region)
         self.sqs = boto3.client('sqs', region_name=config.aws_region)
         self.logging_config = logging_config
+        self.cache_manager = TableCacheManager(logging_config)
         
         if not WEBSOCKET_API_URL:
             raise ValueError("WEBSOCKET_API_URL environment variable is not set")
@@ -68,6 +149,27 @@ class AWSClient:
         else:
             # Fallback to always logging if no config provided
             print(message)
+
+    def invalidate_cache_on_sqs_start(self):
+        """Invalidate all caches when an SQS start message is received."""
+        self.cache_manager.invalidate_all_caches("SQS start message received")
+
+    def has_sleeping_work_orders(self) -> bool:
+        """Check if there are any sleeping work orders."""
+        try:
+            response = self.table.scan(
+                FilterExpression='#state = :sleeping',
+                ExpressionAttributeNames={'#state': 'state'},
+                ExpressionAttributeValues={':sleeping': 'Sleeping'},
+            )
+            sleeping_items = response.get('Items', [])
+            sleeping_ids = [item.get('id', 'unknown') for item in sleeping_items]
+            print(f"[CACHE-DEBUG] has_sleeping_work_orders: found {len(sleeping_items)} sleeping work orders: {sleeping_ids}")
+            return len(sleeping_items) > 0
+        except Exception as e:
+            print(f"[CACHE-DEBUG] Error checking for sleeping work orders: {e}")
+            self.log('debug', f"[CACHE] Error checking for sleeping work orders: {e}")
+            return False
 
     def get_work_order(self, id: str) -> Optional[WorkOrder]:
         try:
@@ -199,87 +301,82 @@ class AWSClient:
                     return convert_enums(obj.to_dict())
                 elif hasattr(obj, 'isoformat'):  # Handle datetime objects
                     return obj.isoformat()
-                return obj
+                else:
+                    return obj
 
-            # Convert any enum values to strings
-            serializable_message = convert_enums(message)
+            # Convert the message
+            message = convert_enums(message)
 
             # Send to all connections
-            for item in response.get('Items', []):
+            for item in response['Items']:
+                connection_id = item['connectionId']
                 try:
-                    connection_id = item['connectionId']
                     self.apigateway.post_to_connection(
-                        Data=json.dumps(serializable_message),
+                        Data=json.dumps(message),
                         ConnectionId=connection_id
                     )
                 except Exception as e:
-                    print(f"[ERROR] Error sending to WebSocket connection {item['connectionId']}: {str(e)}")
-                    
-                    # If the connection is gone, remove it from DynamoDB
+                    # If connection is gone, remove it from DynamoDB
                     if isinstance(e, self.apigateway.exceptions.GoneException):
                         try:
                             self.dynamodb.Table(CONNECTIONS_TABLE).delete_item(
-                                Key={'connectionId': item['connectionId']}
+                                Key={'connectionId': connection_id}
                             )
+                            print(f"[WEBSOCKET] Removed stale connection: {connection_id[:8]}...")
                         except Exception as delete_error:
-                            print(f"[ERROR] Error removing stale connection: {str(delete_error)}")
+                            print(f"[WEBSOCKET] Error removing stale connection: {str(delete_error)}")
+                    else:
+                        print(f"[WEBSOCKET] Error sending message to connection {connection_id[:8]}...: {str(e)}")
+
         except Exception as e:
-            print(f"[ERROR] Error in _send_websocket_update: {str(e)}")
+            print(f"[WEBSOCKET] Error in _send_websocket_update: {str(e)}")
 
     def lock_work_order(self, id: str, agent_id: str) -> bool:
+        """Lock a work order for processing by this agent."""
         try:
+            # Try to update the work order with a lock
             self.table.update_item(
                 Key={'id': id},
-                UpdateExpression="SET #locked = :locked, #lockedBy = :lockedBy, #updatedAt = :updatedAt",
-                ExpressionAttributeNames={
-                    "#locked": "locked",
-                    "#lockedBy": "lockedBy",
-                    "#updatedAt": "updatedAt"
-                },
+                UpdateExpression='SET locked = :locked, lockedBy = :lockedBy',
+                ConditionExpression='attribute_not_exists(locked) OR locked = :false',
                 ExpressionAttributeValues={
-                    ":locked": True,
-                    ":lockedBy": agent_id,
-                    ":updatedAt": datetime.utcnow().isoformat(),
-                    ":false": False
-                },
-                ConditionExpression="attribute_exists(id) AND #locked = :false"
+                    ':locked': True,
+                    ':lockedBy': agent_id,
+                    ':false': False
+                }
             )
             return True
         except ClientError as e:
-            print(f"Error locking work order: {e}")
-            return False
+            if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+                # Work order is already locked
+                return False
+            else:
+                print(f"Error locking work order: {e}")
+                return False
 
     def unlock_work_order(self, id: str) -> bool:
-        self.log('debug', f"[DEBUG] Unlocking work order: {id}")
+        """Unlock a work order."""
         try:
-            result = self.table.update_item(
+            self.table.update_item(
                 Key={'id': id},
-                UpdateExpression="SET #locked = :locked, #lockedBy = :lockedBy, #updatedAt = :updatedAt",
-                ExpressionAttributeNames={
-                    "#locked": "locked",
-                    "#lockedBy": "lockedBy",
-                    "#updatedAt": "updatedAt"
-                },
+                UpdateExpression='SET locked = :locked, lockedBy = :empty',
                 ExpressionAttributeValues={
-                    ":locked": False,
-                    ":lockedBy": None,
-                    ":updatedAt": datetime.utcnow().isoformat()
-                },
-                ReturnValues='ALL_NEW'
+                    ':locked': False,
+                    ':empty': ""
+                }
             )
-            self.log('debug', f"[DEBUG] Successfully unlocked work order {id}")
-            #self.log('debug', f"[DEBUG] Updated item: {result.get('Attributes', {})}")
             return True
         except ClientError as e:
             print(f"Error unlocking work order: {e}")
             return False
 
     def receive_sqs_messages(self, max_messages: int = 1) -> List[Dict]:
+        """Receive messages from SQS queue."""
         try:
             response = self.sqs.receive_message(
                 QueueUrl=SQS_QUEUE_URL,
                 MaxNumberOfMessages=max_messages,
-                WaitTimeSeconds=5  # Reduced from 20 to 5 seconds for faster response
+                WaitTimeSeconds=1
             )
             return response.get('Messages', [])
         except ClientError as e:
@@ -287,6 +384,7 @@ class AWSClient:
             return []
 
     def delete_sqs_message(self, receipt_handle: str) -> bool:
+        """Delete a message from SQS queue."""
         try:
             self.sqs.delete_message(
                 QueueUrl=SQS_QUEUE_URL,
@@ -298,79 +396,88 @@ class AWSClient:
             return False
 
     def unlock_all_work_orders(self) -> int:
-        """Unlock all locked work orders except those in the 'Sleeping' state. Returns the number of work orders unlocked."""
+        """Unlock all work orders that are currently locked."""
         try:
             # Scan for locked work orders
-            response = self.dynamodb.Table(DYNAMODB_TABLE).scan(
-                FilterExpression='#locked = :locked',
-                ExpressionAttributeNames={'#locked': 'locked'},
-                ExpressionAttributeValues={':locked': True}
+            response = self.table.scan(
+                FilterExpression='locked = :true',
+                ExpressionAttributeValues={':true': True}
             )
             
-            # Unlock each work order, but skip those in 'Sleeping' state
             unlocked_count = 0
             for item in response.get('Items', []):
-                # Check if the work order is in the 'Sleeping' state
-                state = item.get('state')
-                if state == 'Sleeping':
-                    continue  # Skip unlocking sleeping work orders
-                self.dynamodb.Table(DYNAMODB_TABLE).update_item(
-                    Key={'id': item['id']},
-                    UpdateExpression='SET #locked = :locked, #lockedBy = :lockedBy',
-                    ExpressionAttributeNames={
-                        '#locked': 'locked',
-                        '#lockedBy': 'lockedBy'
-                    },
-                    ExpressionAttributeValues={
-                        ':locked': False,
-                        ':lockedBy': None
-                    }
-                )
-                unlocked_count += 1
+                try:
+                    self.table.update_item(
+                        Key={'id': item['id']},
+                        UpdateExpression='SET locked = :false, lockedBy = :empty',
+                        ExpressionAttributeValues={
+                            ':false': False,
+                            ':empty': ""
+                        }
+                    )
+                    unlocked_count += 1
+                except Exception as e:
+                    print(f"Error unlocking work order {item['id']}: {e}")
             
             return unlocked_count
         except Exception as e:
-            self.log('debug', f"[DEBUG] Error unlocking work orders: {str(e)}")
+            print(f"Error unlocking all work orders: {e}")
             return 0
 
     def scan_table(self, table_name: str) -> List[Dict]:
         """
         Scan an entire DynamoDB table and return all items.
-        
-        Args:
-            table_name: Name of the DynamoDB table to scan
-            
-        Returns:
-            List of all items in the table
-            
-        Raises:
-            Exception: If the scan operation fails
+        Now includes caching to reduce redundant scans, except for the work order table which is never cached.
         """
         try:
-            self.log('debug', f"[DEBUG] Scanning table: {table_name}")
-            table = self.dynamodb.Table(table_name)
-            items = []
-            
-            # Use pagination to get all items
-            last_evaluated_key = None
-            while True:
-                if last_evaluated_key:
-                    response = table.scan(ExclusiveStartKey=last_evaluated_key)
-                else:
-                    response = table.scan()
-                
-                items.extend(response.get('Items', []))
-                
-                # Check if there are more items
-                last_evaluated_key = response.get('LastEvaluatedKey')
-                if not last_evaluated_key:
-                    break
-            
-            self.log('debug', f"[DEBUG] Scanned {len(items)} items from table: {table_name}")
+            print(f"[CACHE-DEBUG] scan_table({table_name}) called")
+            # Never cache the work order table
+            work_order_table_names = {self.table.name, getattr(config, 'work_orders_table', None)}
+            if table_name in work_order_table_names:
+                print(f"[CACHE] Work order table '{table_name}' detected, always performing fresh scan (never cached).")
+                table = self.dynamodb.Table(table_name)
+                items = []
+                last_evaluated_key = None
+                while True:
+                    if last_evaluated_key:
+                        response = table.scan(ExclusiveStartKey=last_evaluated_key)
+                    else:
+                        response = table.scan()
+                    items.extend(response.get('Items', []))
+                    last_evaluated_key = response.get('LastEvaluatedKey')
+                    if not last_evaluated_key:
+                        break
+                print(f"[CACHE] Fresh scan complete for work order table {table_name}, {len(items)} items loaded.")
+                return items
+            # For all other tables, use cache logic
+            has_sleeping_work_orders = self.has_sleeping_work_orders()
+            if self.cache_manager.should_refresh_cache(table_name, has_sleeping_work_orders):
+                print(f"[CACHE] Performing fresh scan of table: {table_name}")
+                table = self.dynamodb.Table(table_name)
+                items = []
+                last_evaluated_key = None
+                while True:
+                    if last_evaluated_key:
+                        response = table.scan(ExclusiveStartKey=last_evaluated_key)
+                    else:
+                        response = table.scan()
+                    items.extend(response.get('Items', []))
+                    last_evaluated_key = response.get('LastEvaluatedKey')
+                    if not last_evaluated_key:
+                        break
+                self.cache_manager.set_cached_data(table_name, items)
+                print(f"[CACHE] Fresh scan complete for {table_name}, {len(items)} items loaded and cached.")
+            else:
+                print(f"[CACHE] scan_table({table_name}) filled from cache, {len(self.cache_manager.get_cached_data(table_name))} items.")
+                items = self.cache_manager.get_cached_data(table_name)
+                if items is None:
+                    print(f"[CACHE] No cached data for {table_name}, falling back to fresh scan.")
+                    return self.scan_table(table_name)
+                print(f"[CACHE] Using cached data for {table_name}: {len(items)} items")
             return items
-            
         except Exception as e:
-            self.log('debug', f"[DEBUG] Error scanning table {table_name}: {str(e)}")
+            print(f"[CACHE-DEBUG] Error in scan_table({table_name}): {e}")
+            self.log('debug', f"[CACHE] Error scanning table {table_name}: {str(e)}")
             raise Exception(f"Failed to scan table {table_name}: {str(e)}")
 
     def get_active_websocket_connections(self) -> List[str]:
@@ -534,230 +641,104 @@ class AWSClient:
             'HE': 'Hebrew',
             'TR': 'Turkish',
             'UK': 'Ukrainian',
-            'BE': 'Belarusian',
-            'KA': 'Georgian',
-            'AM': 'Armenian',
-            'AZ': 'Azerbaijani',
-            'KK': 'Kazakh',
-            'KY': 'Kyrgyz',
-            'UZ': 'Uzbek',
-            'TG': 'Tajik',
-            'TM': 'Turkmen',
-            'MN': 'Mongolian',
-            'MY': 'Burmese',
-            'KM': 'Khmer',
-            'LO': 'Lao',
-            'NE': 'Nepali',
-            'BN': 'Bengali',
-            'SI': 'Sinhala',
-            'ML': 'Malayalam',
-            'TA': 'Tamil',
-            'TE': 'Telugu',
-            'KN': 'Kannada',
-            'GU': 'Gujarati',
-            'PA': 'Punjabi',
-            'OR': 'Odia',
-            'AS': 'Assamese',
-            'MR': 'Marathi',
-            'SA': 'Sanskrit',
-            'SD': 'Sindhi',
-            'UR': 'Urdu',
-            'FA': 'Persian',
-            'PS': 'Pashto',
-            'KU': 'Kurdish',
-            'SO': 'Somali',
-            'SW': 'Swahili',
-            'YO': 'Yoruba',
-            'IG': 'Igbo',
-            'HA': 'Hausa',
-            'ZU': 'Zulu',
-            'XH': 'Xhosa',
-            'AF': 'Afrikaans',
-            'IS': 'Icelandic',
-            'FO': 'Faroese',
-            'GL': 'Galician',
-            'EU': 'Basque',
-            'CA': 'Catalan',
-            'OC': 'Occitan',
-            'CO': 'Corsican',
-            'BR': 'Breton',
-            'CY': 'Welsh',
-            'GA': 'Irish',
-            'GD': 'Scottish Gaelic',
-            'KW': 'Cornish',
-            'GV': 'Manx',
+            'CS': 'Czech',
+            'SV': 'Swedish',
+            'NO': 'Norwegian',
+            'DA': 'Danish',
+            'FI': 'Finnish',
+            'PL': 'Polish',
+            'HU': 'Hungarian',
+            'RO': 'Romanian',
+            'BG': 'Bulgarian',
+            'HR': 'Croatian',
+            'SR': 'Serbian',
+            'SK': 'Slovak',
+            'SL': 'Slovenian',
+            'ET': 'Estonian',
+            'LV': 'Latvian',
+            'LT': 'Lithuanian',
             'MT': 'Maltese',
-            'SQ': 'Albanian',
-            'MK': 'Macedonian',
-            'BS': 'Bosnian',
-            'ME': 'Montenegrin'
+            'EL': 'Greek',
+            'HE': 'Hebrew',
+            'TR': 'Turkish',
+            'UK': 'Ukrainian'
         }
-        
-        full_name = language_mapping.get(language_code.upper())
-        if full_name:
-            return full_name
-        else:
-            print(f"[WARNING] Unknown language code '{language_code}', using code as-is")
-            return language_code
+        return language_mapping.get(language_code.upper(), language_code)
 
     def update_event_embedded_emails(self, event_code: str, sub_event: str, stage: str, language: str, s3_url: str) -> bool:
-        """Update the embeddedEmails field in an event record."""
+        """Update the embeddedEmails field in the events table."""
         try:
-            self.log('debug', f"[DEBUG] update_event_embedded_emails called with:")
-            self.log('debug', f"  Event Code: {event_code}")
-            self.log('debug', f"  Sub Event: {sub_event}")
-            self.log('debug', f"  Stage: {stage}")
-            self.log('debug', f"  Language Code: {language}")
-            self.log('debug', f"  S3 URL: {s3_url}")
-            self.log('debug', f"  Events Table: {EVENTS_TABLE}")
-            
-            # Convert language code to full name
-            full_language_name = self._get_full_language_name(language)
-            self.log('debug', f"  Full Language Name: {full_language_name}")
-            
             events_table = self.dynamodb.Table(EVENTS_TABLE)
             
-            # First, try to get the current event to verify it exists
-            self.log('debug', f"[DEBUG] Checking if event {event_code} exists...")
-            current_event = events_table.get_item(Key={'aid': event_code})
-            if 'Item' not in current_event:
-                print(f"[ERROR] Event {event_code} not found in events table")
-                print(f"[ERROR] Available events table: {EVENTS_TABLE}")
+            # Get the current event record
+            response = events_table.get_item(Key={'aid': event_code})
+            if 'Item' not in response:
+                print(f"Event {event_code} not found")
                 return False
             
-            event_data = current_event['Item']
-            self.log('debug', f"[DEBUG] Event {event_code} found, current structure:")
-            self.log('debug', f"  Event data: {event_data}")
+            event = response['Item']
             
-            # Check if the nested path exists
-            sub_events = event_data.get('subEvents', {})
-            if sub_event not in sub_events:
-                self.log('debug', f"[DEBUG] Sub event '{sub_event}' not found, creating it")
-                # Create the sub event structure
-                sub_events[sub_event] = {}
+            # Initialize embeddedEmails if it doesn't exist
+            if 'embeddedEmails' not in event:
+                event['embeddedEmails'] = {}
             
-            if 'embeddedEmails' not in sub_events[sub_event]:
-                self.log('debug', f"[DEBUG] embeddedEmails not found in sub event, creating it")
-                sub_events[sub_event]['embeddedEmails'] = {}
+            # Initialize sub-event if it doesn't exist
+            if sub_event not in event['embeddedEmails']:
+                event['embeddedEmails'][sub_event] = {}
             
-            if stage not in sub_events[sub_event]['embeddedEmails']:
-                self.log('debug', f"[DEBUG] Stage '{stage}' not found in embeddedEmails, creating it")
-                sub_events[sub_event]['embeddedEmails'][stage] = {}
+            # Initialize stage if it doesn't exist
+            if stage not in event['embeddedEmails'][sub_event]:
+                event['embeddedEmails'][sub_event][stage] = {}
             
-            # Now update the specific language using full language name
-            sub_events[sub_event]['embeddedEmails'][stage][full_language_name] = s3_url
+            # Update the language entry
+            event['embeddedEmails'][sub_event][stage][language] = s3_url
             
-            self.log('debug', f"[DEBUG] Updated sub_events structure:")
-            self.log('debug', f"  New sub_events: {sub_events}")
+            # Update the event record
+            events_table.put_item(Item=event)
             
-            # Update the entire subEvents field
-            result = events_table.update_item(
-                Key={'aid': event_code},
-                UpdateExpression="SET subEvents = :subEvents",
-                ExpressionAttributeValues={
-                    ":subEvents": sub_events
-                },
-                ReturnValues='ALL_NEW'
-            )
-            
-            self.log('debug', f"[DEBUG] Update successful, updated item:")
-            self.log('debug', f"  Updated data: {result.get('Attributes', {})}")
-            self.log('debug', f"[DEBUG] Updated embeddedEmails for {event_code}/{sub_event}/{stage}/{full_language_name}: {s3_url}")
             return True
-        except ClientError as e:
-            print(f"[ERROR] DynamoDB ClientError updating event embeddedEmails:")
-            print(f"  Error Code: {e.response['Error']['Code']}")
-            print(f"  Error Message: {e.response['Error']['Message']}")
-            print(f"  Event Code: {event_code}")
-            print(f"  Sub Event: {sub_event}")
-            print(f"  Stage: {stage}")
-            print(f"  Language Code: {language}")
-            print(f"  Full Language Name: {self._get_full_language_name(language)}")
-            print(f"  S3 URL: {s3_url}")
-            print(f"  Events Table: {EVENTS_TABLE}")
-            return False
         except Exception as e:
-            print(f"[ERROR] Unexpected error updating event embeddedEmails:")
-            print(f"  Error Type: {type(e).__name__}")
-            print(f"  Error Message: {str(e)}")
-            print(f"  Event Code: {event_code}")
-            print(f"  Sub Event: {sub_event}")
-            print(f"  Stage: {stage}")
-            print(f"  Language Code: {language}")
-            print(f"  Full Language Name: {self._get_full_language_name(language)}")
-            print(f"  S3 URL: {s3_url}")
-            print(f"  Events Table: {EVENTS_TABLE}")
+            print(f"Error updating event embedded emails: {e}")
             return False
 
     def check_for_stop_messages(self, work_order_id: str) -> bool:
-        """
-        Check for stop messages for a specific work order without blocking.
-        This is used during long-running operations to check for stop requests.
-        
-        Args:
-            work_order_id: The work order ID to check for stop messages
-            
-        Returns:
-            True if a stop message was found and processed, False otherwise
-        """
+        """Check for stop messages in SQS for a specific work order."""
         try:
-            # Receive messages with a very short timeout
-            messages = self.sqs.receive_message(
+            # Receive messages without deleting them
+            response = self.sqs.receive_message(
                 QueueUrl=SQS_QUEUE_URL,
                 MaxNumberOfMessages=10,
-                WaitTimeSeconds=0,  # Non-blocking
-                AttributeNames=['All'],
-                MessageAttributeNames=['All']
+                WaitTimeSeconds=0  # Non-blocking
             )
             
-            if 'Messages' not in messages:
-                return False
-            
-            for message in messages['Messages']:
+            messages = response.get('Messages', [])
+            for message in messages:
                 try:
                     body = json.loads(message['Body'])
-                    
-                    # Check if this is a stop message for our work order
                     if (body.get('workOrderId') == work_order_id and 
                         body.get('action') == 'stop'):
-                        
-                        print(f"[STOP-CHECK] Found stop message for work order {work_order_id}")
-                        
-                        # Set the stopRequested flag in the work order
-                        self.update_work_order({
-                            'id': work_order_id,
-                            'updates': {'stopRequested': True}
-                        })
-                        
-                        # Delete the message
-                        self.delete_sqs_message(message['ReceiptHandle'])
-                        
                         return True
-                        
-                except Exception as e:
-                    print(f"[STOP-CHECK] Error processing message: {e}")
+                except (json.JSONDecodeError, KeyError):
                     continue
             
             return False
-            
         except Exception as e:
-            print(f"[STOP-CHECK] Error checking for stop messages: {e}")
+            print(f"Error checking for stop messages: {e}")
             return False
 
     def get_table_name(self, table_key: str) -> str:
-        """Get the actual table name for a given key"""
+        """Get the actual table name from the table key."""
         table_mapping = {
             'stages': STAGES_TABLE,
             'students': STUDENT_TABLE,
             'pools': POOLS_TABLE,
             'prompts': PROMPTS_TABLE,
-            'events': EVENTS_TABLE,
-            'work_orders': DYNAMODB_TABLE
+            'events': EVENTS_TABLE
         }
-        return table_mapping.get(table_key)
+        return table_mapping.get(table_key, table_key)
 
     def get_item(self, table_name: str, key: Dict) -> Optional[Dict]:
-        """Get a single item from a DynamoDB table"""
+        """Get a single item from a DynamoDB table."""
         try:
             table = self.dynamodb.Table(table_name)
             response = table.get_item(Key=key)
@@ -766,4 +747,28 @@ class AWSClient:
             return None
         except ClientError as e:
             print(f"Error getting item from {table_name}: {e}")
-            return None 
+            return None
+
+    def append_dryrun_recipient(self, campaign_string: str, entry: dict):
+        """Append a recipient to the dryrun_recipients table."""
+        try:
+            table = self.dynamodb.Table('dryrun_recipients')
+            table.put_item(Item={
+                'campaign': campaign_string,
+                'recipient': entry,
+                'timestamp': datetime.utcnow().isoformat()
+            })
+        except Exception as e:
+            print(f"Error appending dryrun recipient: {e}")
+
+    def append_send_recipient(self, campaign_string: str, entry: dict):
+        """Append a recipient to the send_recipients table."""
+        try:
+            table = self.dynamodb.Table('send_recipients')
+            table.put_item(Item={
+                'campaign': campaign_string,
+                'recipient': entry,
+                'timestamp': datetime.utcnow().isoformat()
+            })
+        except Exception as e:
+            print(f"Error appending send recipient: {e}") 

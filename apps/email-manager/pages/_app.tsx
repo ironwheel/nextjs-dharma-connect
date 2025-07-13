@@ -1,13 +1,21 @@
-import { WebSocketProvider } from '../context/WebSocketProvider';
+import React from 'react'
+import type { AppProps } from 'next/app'
+import { Inter } from 'next/font/google'
+import 'bootstrap/dist/css/bootstrap.min.css'
+import 'react-toastify/dist/ReactToastify.css'
+import { ToastContainer } from 'react-toastify'
+import { WebSocketProvider } from 'sharedFrontend'
+import '../styles/globals.css'
 
-const WEBSOCKET_API_URL = process.env.NEXT_PUBLIC_WEBSOCKET_API_URL || 'wss://3zvne1dk16.execute-api.us-east-1.amazonaws.com/prod';
+const inter = Inter({ subsets: ['latin'] })
 
-function MyApp({ Component, pageProps }) {
+export default function App({ Component, pageProps }: AppProps) {
     return (
-        <WebSocketProvider url={WEBSOCKET_API_URL}>
-            <Component {...pageProps} />
-        </WebSocketProvider>
-    );
-}
-
-export default MyApp; 
+        <div className={inter.className}>
+            <WebSocketProvider resource="work-orders">
+                <Component {...pageProps} />
+                <ToastContainer position="bottom-right" theme="dark" />
+            </WebSocketProvider>
+        </div>
+    )
+} 

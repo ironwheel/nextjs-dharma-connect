@@ -15,7 +15,9 @@ from .step_processor import StepProcessor
 class EmailAgent:
     def __init__(self, poll_interval: int = 2, stop_check_interval: int = 1, logging_config=None):
         self.aws_client = AWSClient(logging_config=logging_config)
-        self.step_processor = StepProcessor(self.aws_client, logging_config=logging_config)
+        self.sleep_queue = []
+        self.sleep_queue_limit = 8
+        self.step_processor = StepProcessor(self.aws_client, sleep_queue=self.sleep_queue, logging_config=logging_config)
         self.poll_interval = poll_interval
         self.stop_check_interval = stop_check_interval
         self.current_work_order: WorkOrder = None
@@ -29,8 +31,6 @@ class EmailAgent:
         self.last_connection_display = time.time()
         self.connection_cleanup_interval = 60  # Clean up connections every 60 seconds
         self.last_connection_cleanup = time.time()
-        self.sleep_queue = []
-        self.sleep_queue_limit = 8
         
         # Logging configuration
         self.logging_config = logging_config
@@ -195,8 +195,32 @@ class EmailAgent:
                         self.log('progress', f"[SLEEP-QUEUE] Waking work order {work_order_id} from sleep queue.")
                         # Unlock the work order before processing so the processing lock can work
                         self.aws_client.unlock_work_order(work_order_id)
-                        await self._handle_start_request(work_order_id, work_order, 'Send')
-                    self.sleep_queue = [e for e in self.sleep_queue if e['work_order_id'] != work_order_id]
+                        success = await self._handle_start_request(work_order_id, work_order, 'Send')
+                        self.log('debug', f"[SLEEP-QUEUE] Work order {work_order_id} processing result: success={success}")
+                        
+                        # After processing, check if the work order is still sleeping in the queue
+                        updated_work_order = self.aws_client.get_work_order(work_order_id)
+                        current_state = getattr(updated_work_order, 'state', None) if updated_work_order else None
+                        self.log('debug', f"[SLEEP-QUEUE] Work order {work_order_id} current state after processing: {current_state}")
+                        
+                        # Check if the work order is still in the sleep queue (meaning it was put back to sleep)
+                        still_in_queue = any(entry['work_order_id'] == work_order_id for entry in self.sleep_queue)
+                        self.log('debug', f"[SLEEP-QUEUE] Work order {work_order_id} still in sleep queue: {still_in_queue}")
+                        self.log('debug', f"[SLEEP-QUEUE] Current sleep queue entries: {[(entry['work_order_id'], entry['sleep_until']) for entry in self.sleep_queue]}")
+                        
+                        # Only remove from sleep queue if the work order is not sleeping AND not in the queue
+                        # But wait a moment to let the step processor update the queue
+                        await asyncio.sleep(0.1)
+                        
+                        # Re-check the sleep queue after the step processor has had time to update it
+                        still_in_queue_after_delay = any(entry['work_order_id'] == work_order_id for entry in self.sleep_queue)
+                        self.log('debug', f"[SLEEP-QUEUE] Work order {work_order_id} still in sleep queue after delay: {still_in_queue_after_delay}")
+                        
+                        if current_state != 'Sleeping' and not still_in_queue_after_delay:
+                            self.sleep_queue[:] = [e for e in self.sleep_queue if e['work_order_id'] != work_order_id]
+                            self.log('debug', f"[SLEEP-QUEUE] Removed work order {work_order_id} from sleep queue (not sleeping)")
+                        else:
+                            self.log('debug', f"[SLEEP-QUEUE] Work order {work_order_id} is still sleeping or in queue, keeping in queue")
 
                 # Remove interrupted work orders from sleep queue
                 interrupted_ids = []
@@ -205,7 +229,7 @@ class EmailAgent:
                     if work_order and getattr(work_order, 'stopRequested', False):
                         self.log('progress', f"[SLEEP-QUEUE] Removing interrupted work order {entry['work_order_id']} from sleep queue.")
                         interrupted_ids.append(entry['work_order_id'])
-                self.sleep_queue = [e for e in self.sleep_queue if e['work_order_id'] not in interrupted_ids]
+                self.sleep_queue[:] = [e for e in self.sleep_queue if e['work_order_id'] not in interrupted_ids]
 
                 # --- SQS polling ---
                 messages = self.aws_client.receive_sqs_messages()
@@ -269,6 +293,9 @@ class EmailAgent:
 
                         # Handle start requests
                         if action == 'start':
+                            # Invalidate all caches when SQS start message is received
+                            self.aws_client.invalidate_cache_on_sqs_start()
+                            
                             # Delete start message immediately after validation but before processing
                             # This prevents receipt handle expiration during long-running email operations
                             try:
@@ -392,7 +419,7 @@ class EmailAgent:
                     self.log('debug', f"[DEBUG] Work order {work_order_id} is sleeping, removing from sleep queue and stopping")
                     
                     # Remove from sleep queue if present
-                    self.sleep_queue = [e for e in self.sleep_queue if e['work_order_id'] != work_order_id]
+                    self.sleep_queue[:] = [e for e in self.sleep_queue if e['work_order_id'] != work_order_id]
                     
                     # Update the step status to interrupted
                     await self._update_step_status(work_order, step_name, StepStatus.INTERRUPTED, f"{step_name} step stopped by user while sleeping")

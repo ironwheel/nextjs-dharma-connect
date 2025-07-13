@@ -22,7 +22,13 @@
         "name": "next"
       }
     ],
-    "strictNullChecks": true
+    "strictNullChecks": true,
+    "baseUrl": ".",
+    "paths": {
+      "sharedFrontend": [
+        "../../packages/sharedFrontend/src"
+      ]
+    }
   },
   "include": [
     "next-env.d.ts",

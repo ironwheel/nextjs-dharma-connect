@@ -130,12 +130,20 @@ class StepProcessor:
                                     'id': work_order.id,
                                     'updates': {'state': 'Sleeping', 'sleepUntil': sleep_until.isoformat(), 'locked': True}
                                 })
+                                print(f"[SLEEP-QUEUE] Work order {work_order.id} put to sleep. New sleepUntil: {sleep_until.isoformat()}")
+                                # Remove any existing entry for this work order
+                                self.sleep_queue[:] = [entry for entry in self.sleep_queue if entry['work_order_id'] != work_order.id]
+                                # Append the new entry with the updated sleep_until
                                 self.sleep_queue.append({'work_order_id': work_order.id, 'sleep_until': sleep_until})
                                 return True
                             else:
                                 error_message = "Too many work orders are already sleeping. Try again later."
                                 await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
                                 return False
+                        else:
+                            pass
+                    else:
+                        pass
                 except InterruptedError:
                     await self._update_step_status(work_order, step, StepStatus.INTERRUPTED, "Step interrupted by stop request.")
                     return False

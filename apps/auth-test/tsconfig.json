@@ -1,0 +1,27 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "preserve",
+    "module": "esnext",
+    "target": "ES2017",
+    "baseUrl": ".",
+    "moduleResolution": "node",
+    "paths": {
+      "sharedFrontend": ["../../packages/sharedFrontend/src"],
+      "sharedFrontend/*": [
+        "../../../packages/shared/src/*"
+      ]
+    },
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": [
+    "pages",
+    "components",
+    "lib",
+    "**/*.ts",
+    "**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

@@ -1,22 +1,145 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react'
-import { Form, Button, Spinner, Card, Badge } from 'react-bootstrap'
+import React, { useState, useEffect, useRef } from 'react'
+import { Form, Button, Spinner, Badge } from 'react-bootstrap'
 import { toast } from 'react-toastify'
-import { callDbApi } from '@dharma/shared/src/clientApi'
+import { getTableItem, putTableItem, deleteTableItem, getAllTableItems, getAllTableItemsFiltered } from 'sharedFrontend'
+
+// Define interfaces for type safety
+interface WorkOrder {
+    id: string;
+    eventCode: string;
+    subEvent: string;
+    stage: string;
+    account?: string;
+    zoomId?: string;
+    inPerson?: boolean;
+    languages?: Record<string, boolean>;
+    subjects?: Record<string, string>;
+    testers?: string[];
+    sendContinuously?: boolean;
+    sendUntil?: string;
+    sendInterval?: string;
+    salutationByName?: boolean;
+    regLinkPresent?: boolean;
+    createdAt?: string;
+    updatedAt?: string;
+    locked?: boolean;
+    lockedBy?: string | null;
+    s3HTMLPaths?: Record<string, string>;
+    steps?: Array<{ name: string; status: string; message: string; isActive: boolean }>;
+    createdBy?: string;
+    config?: { pool?: string };
+}
+
+interface Event {
+    aid: string;
+    name: string;
+    config?: {
+        emailManager?: boolean;
+        pool?: string;
+        inPerson?: boolean;
+    };
+    subEvents?: Record<string, unknown>;
+}
+
+interface Stage {
+    stage: string;
+    description: string;
+    order?: number;
+    parentStage?: string;
+    qaStepCheckZoomId?: boolean;
+}
+
+interface InheritedFields {
+    s3HTMLPaths?: Record<string, string>;
+    languages?: Record<string, boolean>;
+    subjects?: Record<string, string>;
+}
 
 interface WorkOrderFormProps {
     id?: string
-    onSave: () => void
+    onSave: (createdWorkOrder?: WorkOrder) => void
     onCancel: () => void
     userPid: string
+    userHash: string
 }
 
-export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrderFormProps) {
+/**
+ * Find the most recent parent work order for inheritance.
+ * @param eventCode - The event code to match
+ * @param subEvent - The sub event to match
+ * @param parentStage - The parent stage to match
+ * @param pid - User PID
+ * @param hash - User hash
+ * @returns The most recent matching parent work order, or null if not found
+ */
+async function getParentWorkOrder(
+    eventCode: string,
+    subEvent: string,
+    parentStage: string,
+    pid: string,
+    hash: string
+): Promise<WorkOrder | null> {
+    // Get all work orders with matching eventCode
+    const items = await getAllTableItemsFiltered('work-orders', 'eventCode', eventCode, pid, hash);
+    if (!Array.isArray(items) || items.length === 0) return null;
+    // Further filter by subEvent and stage == parentStage, allowing archived items
+    const filtered = items.filter(item =>
+        item.subEvent === subEvent &&
+        item.stage === parentStage
+    );
+    if (filtered.length === 0) return null;
+    // Sort by createdAt descending (most recent first)
+    filtered.sort((a, b) => {
+        const aTime = new Date(a.createdAt || '1970-01-01').getTime();
+        const bTime = new Date(b.createdAt || '1970-01-01').getTime();
+        return bTime - aTime;
+    });
+    return filtered[0];
+}
+
+/**
+ * Get existing work orders for the same event code and sub event to prevent duplicate stage selection.
+ * @param eventCode - The event code to match
+ * @param subEvent - The sub event to match
+ * @param pid - User PID
+ * @param hash - User hash
+ * @param excludeId - Optional work order ID to exclude from results (for editing)
+ * @returns Array of existing work orders with the same eventCode and subEvent
+ */
+async function getExistingWorkOrders(
+    eventCode: string,
+    subEvent: string,
+    pid: string,
+    hash: string,
+    excludeId?: string
+): Promise<WorkOrder[]> {
+    if (!eventCode || !subEvent) return [];
+
+    try {
+        // Get all work orders with matching eventCode
+        const items = await getAllTableItemsFiltered('work-orders', 'eventCode', eventCode, pid, hash);
+        if (!Array.isArray(items) || items.length === 0) return [];
+
+        // Filter by subEvent and include both active and archived work orders
+        // Also exclude the current work order if editing
+        const filtered = items.filter(item =>
+            item.subEvent === subEvent &&
+            (!excludeId || item.id !== excludeId)
+        );
+
+        return filtered;
+    } catch (error) {
+        console.error('Error getting existing work orders:', error);
+        return [];
+    }
+}
+
+export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash }: WorkOrderFormProps) {
     const [loading, setLoading] = useState(false)
-    const [events, setEvents] = useState<any[]>([])
+    const [events, setEvents] = useState<Event[]>([])
     const [eventCode, setEventCode] = useState('')
     const [subEvents, setSubEvents] = useState<string[]>([])
     const [subEvent, setSubEvent] = useState('')
-    const [stageList, setStageList] = useState<string[]>([])
     const [stage, setStage] = useState('')
     const [languageList, setLanguageList] = useState<string[]>([])
     const [languages, setLanguages] = useState<{ [key: string]: boolean }>({})
@@ -33,75 +156,86 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
     const [salutationByName, setSalutationByName] = useState(true)  // Default to true
     const [regLinkPresent, setRegLinkPresent] = useState(true)  // Default to true
     const [testParticipantOptions, setTestParticipantOptions] = useState<Array<{ id: string, name: string }>>([])
-    const [stages, setStages] = useState<Array<{ stage: string, description: string, order?: number, parentStage?: string }>>([])
-    const [selectedStageRecord, setSelectedStageRecord] = useState<any>(null)
-    const [inheritedFields, setInheritedFields] = useState<{ s3HTMLPaths?: any, languages?: any, subjects?: any }>({})
+    const [stages, setStages] = useState<Stage[]>([])
+    const [selectedStageRecord, setSelectedStageRecord] = useState<Stage | null>(null)
+    const [inheritedFields, setInheritedFields] = useState<InheritedFields>({})
     const [stageValidating, setStageValidating] = useState(false)
+    const [existingWorkOrders, setExistingWorkOrders] = useState<WorkOrder[]>([])
+    const [loadingExistingWorkOrders, setLoadingExistingWorkOrders] = useState(false)
     const loadedSubEventRef = useRef<string | null>(null)
-    const loadedWorkOrderRef = useRef<any>(null)
+    const loadedWorkOrderRef = useRef<WorkOrder | null>(null)
     const lastValidationRef = useRef<{ eventCode: string, subEvent: string, stage: string } | null>(null)
     const attemptedStageRef = useRef<string>('')
 
     // Fetch events and config on mount
     useEffect(() => {
         setLoading(true)
-        Promise.all([
-            callDbApi('getEvents', {}),
-            callDbApi('getConfig', { key: 'emailAccountList' }),
-            callDbApi('getStages', {}),
-            callDbApi('getConfig', { key: 'emailLanguageList' }),
-            callDbApi('getConfig', { key: 'emailTestIDs' })
-        ]).then(([eventsResp, accountResp, stagesResp, langResp, testIDsResp]) => {
-            // Only show events with config.emailManager === true
-            const filteredEvents = (eventsResp || []).filter((ev: any) => ev.config && ev.config.emailManager)
-            setEvents(filteredEvents)
-            setAccountList(accountResp?.value || [])
-            setStages(stagesResp?.stages || [])
-            setLanguageList(langResp?.value || [])
+        const loadOptions = async () => {
+            try {
+                // Load all options in parallel
+                const [eventsResp, accountResp, stagesResp, langResp, testIDsResp] = await Promise.all([
+                    getAllTableItems('events', userPid, userHash),
+                    getTableItem('config', 'emailAccountList', userPid, userHash),
+                    getAllTableItems('stages', userPid, userHash),
+                    getTableItem('config', 'emailLanguageList', userPid, userHash),
+                    getTableItem('config', 'emailTestIDs', userPid, userHash)
+                ])
 
-            // Load test participant names
-            const testIDs = testIDsResp?.value || []
-            const loadTestParticipantNames = async () => {
-                const options: Array<{ id: string, name: string }> = []
-                for (const testID of testIDs) {
-                    try {
-                        const participant = await callDbApi('handleFindParticipant', { id: testID })
-                        if (participant && (participant.first || participant.last)) {
-                            options.push({
-                                id: testID,
-                                name: `${participant.first || ''} ${participant.last || ''}`.trim()
-                            })
-                        } else {
+                // Only show events with config.emailManager === true
+                const filteredEvents = Array.isArray(eventsResp) ? eventsResp.filter((ev: Event) => ev.config && ev.config.emailManager) : []
+                setEvents(filteredEvents)
+                setAccountList(accountResp?.value || [])
+                setStages(Array.isArray(stagesResp) ? stagesResp : [])
+                setLanguageList(langResp?.value || [])
+
+                // Load test participant names
+                const testIDs = testIDsResp?.value || []
+                const loadTestParticipantNames = async () => {
+                    const options: Array<{ id: string, name: string }> = []
+                    for (const testID of testIDs) {
+                        try {
+                            const participant = await getTableItem('students', testID, userPid, userHash)
+                            if (participant && (participant.first || participant.last)) {
+                                options.push({
+                                    id: testID,
+                                    name: `${participant.first || ''} ${participant.last || ''}`.trim()
+                                })
+                            } else {
+                                options.push({ id: testID, name: testID })
+                            }
+                        } catch {
                             options.push({ id: testID, name: testID })
                         }
-                    } catch (err) {
-                        options.push({ id: testID, name: testID })
                     }
+                    setTestParticipantOptions(options)
                 }
-                setTestParticipantOptions(options)
-            }
-            loadTestParticipantNames()
+                loadTestParticipantNames()
 
-            if (!id) {
-                setEventCode('') // No event selected by default
-                setSubEvents([])
-                setSubEvent('')
-                setAccount('')
-                setStage('')
-                setLanguages({})
-                setSubjects({})
+                if (!id) {
+                    setEventCode('') // No event selected by default
+                    setSubEvents([])
+                    setSubEvent('')
+                    setAccount('')
+                    setStage('')
+                    setLanguages({})
+                    setSubjects({})
+                }
+                setOptionsLoaded(true)
+            } catch {
+                toast.error('Failed to load form options')
+                setOptionsLoaded(true)
+            } finally {
+                setLoading(false)
             }
-            setOptionsLoaded(true)
-        }).catch((err) => {
-            toast.error('Failed to load form options')
-            setOptionsLoaded(true)
-        }).finally(() => setLoading(false))
+        }
+
+        loadOptions()
     }, [])
 
     // Load work order if editing, but only after options are loaded
     useEffect(() => {
         if (id) {
-            callDbApi('handleGetWorkOrder', { id }).then(response => {
+            getTableItem('work-orders', id, userPid, userHash).then(response => {
                 loadedWorkOrderRef.current = response
                 if (optionsLoaded) {
                     setEventCode(response.eventCode)
@@ -115,7 +249,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                     setTesters(response.testers || [])
                     setSendContinuously(response.sendContinuously || false)
                     setSendUntil(response.sendUntil || '')
-                    setSendInterval(response.sendInterval || process.env.EMAIL_CONTINUOUS_SLEEP_SECS || '600')
+                    setSendInterval(String(response.sendInterval || process.env.EMAIL_CONTINUOUS_SLEEP_SECS || '600'))
                     setSalutationByName(response.salutationByName !== false)  // Default to true if not explicitly false
                     setRegLinkPresent(response.regLinkPresent !== false)  // Default to true if not explicitly false
                 }
@@ -133,16 +267,16 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
             const response = loadedWorkOrderRef.current
             setEventCode(response.eventCode)
             loadedSubEventRef.current = response.subEvent
-            setStage(response.stage)
+            setStage(response.stage || '')
             setSubjects(response.subjects || {})
-            setAccount(response.account)
+            setAccount(response.account || '')
             setLanguages(response.languages || {})
             setZoomId(response.zoomId || '')
             setInPerson(response.inPerson || false)
             setTesters(response.testers || [])
             setSendContinuously(response.sendContinuously || false)
             setSendUntil(response.sendUntil || '')
-            setSendInterval(response.sendInterval || process.env.EMAIL_CONTINUOUS_SLEEP_SECS || '600')
+            setSendInterval(String(response.sendInterval || process.env.EMAIL_CONTINUOUS_SLEEP_SECS || '600'))
             setSalutationByName(response.salutationByName !== false)  // Default to true if not explicitly false
             setRegLinkPresent(response.regLinkPresent !== false)  // Default to true if not explicitly false
         }
@@ -157,7 +291,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
             setSubEvents(subEvNames)
 
             // Check if this event is in-person
-            const isInPersonEvent = selectedEvent.config && selectedEvent.config.inPerson === true
+            const isInPersonEvent = Boolean(selectedEvent.config?.inPerson)
             setInPerson(isInPersonEvent)
 
             // Only set subEvent if loading from edit and the value is present in the new options
@@ -177,6 +311,27 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
             setInPerson(false)
         }
     }, [eventCode, events])
+
+    // Load existing work orders when eventCode or subEvent changes
+    useEffect(() => {
+        if (eventCode && subEvent) {
+            setLoadingExistingWorkOrders(true)
+            // Pass the current work order ID to exclude it from the results when editing
+            getExistingWorkOrders(eventCode, subEvent, userPid, userHash, id)
+                .then(workOrders => {
+                    setExistingWorkOrders(workOrders)
+                })
+                .catch(error => {
+                    console.error('Error loading existing work orders:', error)
+                    setExistingWorkOrders([])
+                })
+                .finally(() => {
+                    setLoadingExistingWorkOrders(false)
+                })
+        } else {
+            setExistingWorkOrders([])
+        }
+    }, [eventCode, subEvent, userPid, userHash, id])
 
     // Re-validate parent stage when eventCode or subEvent changes
     useEffect(() => {
@@ -206,50 +361,41 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
             return
         }
 
+        // Check if the selected stage is already used in existing work orders
+        const isStageUsed = existingWorkOrders.some(wo => wo.stage === newStage)
+        if (isStageUsed) {
+            toast.error(`Stage '${newStage}' is already used in an existing work order for this event/sub-event combination`)
+            return
+        }
+
         const stageRecord = stages.find(s => s.stage === newStage)
 
         // If stage has parentStage, validate immediately before setting
         if (stageRecord?.parentStage && eventCode && subEvent) {
             setStageValidating(true)
             try {
-                const parentWorkOrder = await callDbApi('handleFindParentWorkOrder', {
-                    eventCode,
-                    subEvent,
-                    parentStage: stageRecord.parentStage
-                })
-
-                if (parentWorkOrder) {
-                    // Parent work order found, proceed with stage selection
-                    setStage(newStage)
-                    setSelectedStageRecord(stageRecord)
-                    setInheritedFields({
-                        s3HTMLPaths: parentWorkOrder.s3HTMLPaths,
-                        languages: parentWorkOrder.languages,
-                        subjects: parentWorkOrder.subjects
-                    })
-
-                    // Update last validation ref
-                    lastValidationRef.current = { eventCode, subEvent, stage: newStage }
-
-                    // Auto-populate inherited fields if not already set
-                    if (!Object.keys(languages).length && parentWorkOrder.languages) {
-                        setLanguages(parentWorkOrder.languages)
-                    }
-                    if (!Object.keys(subjects).length && parentWorkOrder.subjects) {
-                        setSubjects(parentWorkOrder.subjects)
-                    }
-                } else {
-                    // Parent work order not found, show error and don't set stage
-                    toast.error(`Parent work order not found for stage '${stageRecord.parentStage}'. Cannot use stage '${newStage}'.`)
+                // Implement parent work order validation using getParentWorkOrder
+                const parentWorkOrder = await getParentWorkOrder(eventCode, subEvent, stageRecord.parentStage, userPid, userHash);
+                if (!parentWorkOrder) {
+                    toast.error(`No parent work order found for stage '${stageRecord.parentStage}'`);
                     // Don't set the stage - keep current selection
-                    // Reset the attempted stage ref since validation failed
                     attemptedStageRef.current = stage;
+                    return;
                 }
+                // Inherit fields from parent work order
+                setStage(newStage)
+                setSelectedStageRecord(stageRecord)
+                setInheritedFields({
+                    s3HTMLPaths: parentWorkOrder.s3HTMLPaths,
+                    languages: parentWorkOrder.languages,
+                    subjects: parentWorkOrder.subjects
+                })
+                // Update last validation ref
+                lastValidationRef.current = { eventCode, subEvent, stage: newStage }
             } catch (error) {
                 console.error('Error finding parent work order:', error)
                 toast.error(`Error finding parent work order for stage '${stageRecord.parentStage}'`)
                 // Don't set the stage - keep current selection
-                // Reset the attempted stage ref since validation failed
                 attemptedStageRef.current = stage;
             } finally {
                 setStageValidating(false)
@@ -257,18 +403,62 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
         } else {
             // No parent stage, proceed normally
             setStage(newStage)
-            setSelectedStageRecord(stageRecord)
+            setSelectedStageRecord(stageRecord || null)
             setInheritedFields({})
         }
     }
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-
-        // Validate zoomId is present if qaStepCheckZoomId is enabled (only if not in-person)
-        if (selectedStageRecord?.qaStepCheckZoomId && !inPerson && !zoomId) {
-            toast.error('Zoom ID is required for this stage')
+        if (!eventCode || !subEvent || !stage) {
+            toast.error('Please fill in all required fields')
             return
+        }
+
+        // Final check to ensure the selected stage is not already used
+        const isStageUsed = existingWorkOrders.some(wo => wo.stage === stage)
+        if (isStageUsed) {
+            toast.error(`Cannot create work order: Stage '${stage}' is already used in an existing work order`)
+            return
+        }
+
+        // Determine if we need to reset steps and show warning
+        let shouldResetSteps = false
+        let existingSteps: Array<{ name: string, status: string, message: string, isActive: boolean }> = []
+        let structuralFieldsChanged = false
+
+        if (id) {
+            // When editing, check if structural fields changed
+            const existingWorkOrder = loadedWorkOrderRef.current
+            if (existingWorkOrder) {
+                structuralFieldsChanged =
+                    existingWorkOrder.eventCode !== eventCode ||
+                    existingWorkOrder.subEvent !== subEvent ||
+                    existingWorkOrder.stage !== stage
+
+                shouldResetSteps = structuralFieldsChanged
+                existingSteps = existingWorkOrder.steps || []
+
+                // Show warning if structural changes will reset progress
+                if (structuralFieldsChanged) {
+                    const hasProgress = existingSteps.some(step =>
+                        step.status !== 'ready' && step.status !== 'complete'
+                    )
+
+                    if (hasProgress) {
+                        const confirmed = window.confirm(
+                            'Warning: Changing the Event Code, Sub Event, or Stage will reset all workflow progress. ' +
+                            'This action cannot be undone. Do you want to continue?'
+                        )
+                        if (!confirmed) {
+                            return
+                        }
+                    }
+                }
+            }
+        } else {
+            // New work order always needs steps initialization
+            shouldResetSteps = true
         }
 
         setLoading(true)
@@ -277,7 +467,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
             const selectedEvent = events.find(ev => ev.aid === eventCode)
             const pool = selectedEvent?.config?.pool || ''
 
-            const steps = [
+            // Initialize or preserve steps
+            const steps = shouldResetSteps ? [
                 {
                     name: 'Count',
                     status: 'ready',
@@ -308,46 +499,56 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                     message: '',
                     isActive: false
                 }
-            ];
+            ] : existingSteps
 
-            const workOrder = {
+            let workOrderId = id;
+            if (!workOrderId) {
+                workOrderId = `wo-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            }
+
+            const workOrder: WorkOrder = {
+                id: workOrderId,
                 eventCode,
                 subEvent,
                 stage,
                 languages,
                 subjects,
                 account,
-                zoomId: selectedStageRecord?.qaStepCheckZoomId && !inPerson ? zoomId : undefined,
-                inPerson: inPerson ? true : false,
+                createdBy: userPid,
+                zoomId,
+                inPerson,
                 testers,
                 sendContinuously,
-                sendUntil: sendContinuously ? sendUntil : undefined,
-                sendInterval: sendContinuously ? sendInterval : undefined,
+                sendUntil,
+                sendInterval,
                 salutationByName,
                 regLinkPresent,
-                createdBy: userPid,
                 config: {
                     pool: pool
                 },
-                // Inherit s3HTMLPaths from parent if available
                 s3HTMLPaths: inheritedFields.s3HTMLPaths,
-                steps: steps
-            }
+                steps: steps,
+                locked: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            };
 
             if (id) {
-                await callDbApi('handleUpdateWorkOrder', {
-                    id,
-                    userPid,
-                    updates: workOrder
-                })
-                toast.success('Work order updated')
+                // Add updatedAt for existing work orders
+                workOrder.updatedAt = new Date().toISOString()
+                await putTableItem('work-orders', workOrderId, workOrder, userPid, userHash)
+                if (structuralFieldsChanged) {
+                    toast.success('Work order updated - workflow progress has been reset due to structural changes')
+                } else {
+                    toast.success('Work order updated - workflow progress preserved')
+                }
+                onSave()
             } else {
-                await callDbApi('handleCreateWorkOrder', workOrder)
+                await putTableItem('work-orders', workOrderId, workOrder, userPid, userHash)
                 toast.success('Work order created')
+                onSave(workOrder) // Pass the created work order back
             }
-
-            onSave()
-        } catch (err) {
+        } catch {
             toast.error('Failed to save work order')
         } finally {
             setLoading(false)
@@ -364,10 +565,10 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                             if (window.confirm('Are you sure you want to delete this work order?')) {
                                 setLoading(true)
                                 try {
-                                    await callDbApi('handleDeleteWorkOrder', { id })
+                                    await deleteTableItem('work-orders', id, userPid, userHash)
                                     toast.success('Work order deleted')
                                     onSave()
-                                } catch (err) {
+                                } catch {
                                     toast.error('Failed to delete work order')
                                 } finally {
                                     setLoading(false)
@@ -441,15 +642,27 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                     value={stageValidating ? attemptedStageRef.current : stage}
                     onChange={e => handleStageChange(e.target.value)}
                     required
-                    disabled={stageValidating}
+                    disabled={stageValidating || loadingExistingWorkOrders}
                     className="bg-dark text-light border-secondary"
                 >
                     <option value="">Select Stage</option>
-                    {stages.map(st => (
-                        <option key={st.stage} value={st.stage}>
-                            {st.order ? `[${st.order}] ` : ''}{st.stage} - {st.description}
-                        </option>
-                    ))}
+                    {stages
+                        .slice() // copy array to avoid mutating state
+                        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+                        .map(st => {
+                            // Check if this stage is already used in existing work orders
+                            const isStageUsed = existingWorkOrders.some(wo => wo.stage === st.stage)
+                            return (
+                                <option
+                                    key={st.stage}
+                                    value={st.stage}
+                                    disabled={isStageUsed}
+                                >
+                                    {st.order ? `[${st.order}] ` : ''}{st.stage} - {st.description}
+                                    {isStageUsed ? ' (Already used)' : ''}
+                                </option>
+                            )
+                        })}
                 </Form.Select>
                 {stageValidating && (
                     <Form.Text className="text-info">
@@ -462,6 +675,29 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                             className="me-2"
                         />
                         Validating parent stage...
+                    </Form.Text>
+                )}
+                {loadingExistingWorkOrders && (
+                    <Form.Text className="text-info">
+                        <Spinner
+                            as="span"
+                            animation="border"
+                            size="sm"
+                            role="status"
+                            aria-hidden="true"
+                            className="me-2"
+                        />
+                        Checking for existing work orders...
+                    </Form.Text>
+                )}
+                {existingWorkOrders.length > 0 && (
+                    <Form.Text className="text-warning">
+                        Found {existingWorkOrders.length} existing work order(s) for this event/sub-event combination.
+                        Used stages are disabled to prevent duplicates.
+                        {(() => {
+                            const usedStages = [...new Set(existingWorkOrders.map(wo => wo.stage))]
+                            return usedStages.length > 0 ? ` Used stages: ${usedStages.join(', ')}` : ''
+                        })()}
                     </Form.Text>
                 )}
                 {selectedStageRecord?.parentStage && (
@@ -480,9 +716,9 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                             type="checkbox"
                             id={`lang-${lang}`}
                             label={lang}
-                            checked={!!languages[lang]}
+                            checked={Boolean(languages[lang])}
                             onChange={e => setLanguages(langs => ({ ...langs, [lang]: e.target.checked }))}
-                            disabled={selectedStageRecord?.parentStage}
+                            disabled={Boolean(selectedStageRecord?.parentStage)}
                             className="bg-dark text-light border-secondary"
                         />
                     ))}
@@ -504,7 +740,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid }: WorkOrd
                             value={subjects[lang] || ''}
                             onChange={e => setSubjects(s => ({ ...s, [lang]: e.target.value }))}
                             placeholder={`Subject for ${lang.toUpperCase()}`}
-                            disabled={selectedStageRecord?.parentStage}
+                            disabled={Boolean(selectedStageRecord?.parentStage)}
                             className="bg-dark text-light border-secondary mb-2"
                         />
                     </div>

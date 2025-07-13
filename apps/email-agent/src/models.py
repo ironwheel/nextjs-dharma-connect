@@ -158,8 +158,6 @@ class WorkOrder:
         self.sendInterval = int(os.getenv('EMAIL_CONTINUOUS_SLEEP_SECS', '600'))  # Add sendInterval field (default from env var)
         self.s3HTMLPaths = {}  # Add s3HTMLPaths field for storing S3 paths
         self.regLinkPresent = True  # Add regLinkPresent field (default True)
-        self.dryRunRecipients = []  # Add dryRunRecipients field for Dry-Run step
-        self.sendRecipients = []  # Add sendRecipients field for Send step
         self.salutationByName = True  # Add salutationByName field for Prepare step
 
     def dict(self) -> Dict:
@@ -193,8 +191,6 @@ class WorkOrder:
             'sendInterval': self.sendInterval,
             's3HTMLPaths': self.s3HTMLPaths,
             'regLinkPresent': self.regLinkPresent,
-            'dryRunRecipients': self.dryRunRecipients,
-            'sendRecipients': self.sendRecipients,
             'salutationByName': self.salutationByName
         }
 
@@ -229,8 +225,6 @@ class WorkOrder:
             'sendInterval': {'N': str(self.sendInterval)},
             's3HTMLPaths': {'M': {k: {'S': v} for k, v in self.s3HTMLPaths.items()}} if self.s3HTMLPaths else {'NULL': True},
             'regLinkPresent': {'BOOL': self.regLinkPresent},
-            'dryRunRecipients': {'L': [{'S': recipient} for recipient in self.dryRunRecipients]} if self.dryRunRecipients else {'NULL': True},
-            'sendRecipients': {'L': [{'S': recipient} for recipient in self.sendRecipients]} if self.sendRecipients else {'NULL': True},
             'salutationByName': {'BOOL': self.salutationByName}
         }
 
@@ -357,7 +351,7 @@ class WorkOrder:
                 work_order.config = data.get('config', {})
                 work_order.testers = data.get('testers', [])
                 work_order.sendContinuously = data.get('sendContinuously', False)
-                send_until = data.get('sendUntil')
+                send_until = data.get('sendUntil',None)
                 if isinstance(send_until, str):
                     try:
                         dt = datetime.fromisoformat(send_until)
@@ -377,8 +371,6 @@ class WorkOrder:
                 work_order.sendInterval = data.get('sendInterval', int(os.getenv('EMAIL_CONTINUOUS_SLEEP_SECS', '600')))
                 work_order.s3HTMLPaths = data.get('s3HTMLPaths', {})
                 work_order.regLinkPresent = data.get('regLinkPresent', True)
-                work_order.dryRunRecipients = data.get('dryRunRecipients', [])
-                work_order.sendRecipients = data.get('sendRecipients', [])
                 work_order.salutationByName = data.get('salutationByName', True)
                 return work_order
         except Exception as e:

@@ -1,11 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react'
-import { Table, Button, Badge, Modal } from 'react-bootstrap'
+import { Table, Button, Badge, Modal, Spinner } from 'react-bootstrap'
 import { toast } from 'react-toastify'
-import { callDbApi } from '@dharma/shared/src/clientApi'
-import { useWebSocketContext } from '../context/WebSocketProvider'
+import { getAllTableItems, useWebSocket, getTableItem, getTableItemOrNull, updateTableItem, getAllTableItemsFiltered, sendSQSMessage } from 'sharedFrontend'
 import { unmarshall } from '@aws-sdk/util-dynamodb'
-import OverlayTrigger from 'react-bootstrap/OverlayTrigger'
-import Popover from 'react-bootstrap/Popover'
 
 interface WorkOrder {
     id: string
@@ -19,7 +16,7 @@ interface WorkOrder {
     createdBy: string
     zoomId?: string
     inPerson?: boolean
-    config?: { [key: string]: any }
+    config?: { [key: string]: unknown }
     testers?: string[]
     sendContinuously?: boolean
     sendUntil?: string
@@ -41,6 +38,13 @@ interface WorkOrder {
     archived?: boolean
     archivedAt?: string
     archivedBy?: string
+    sleepUntil?: string
+}
+
+interface RecipientEntry {
+    name: string;
+    email: string;
+    sendtime?: string;
 }
 
 interface WorkOrderListProps {
@@ -48,23 +52,29 @@ interface WorkOrderListProps {
     onNew: () => void
     refreshTrigger?: number
     userPid: string
+    userHash: string
+    newlyCreatedWorkOrder?: WorkOrder
 }
 
-export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userPid }: WorkOrderListProps) {
+export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userPid, userHash, newlyCreatedWorkOrder }: WorkOrderListProps) {
     const [workOrders, setWorkOrders] = useState<WorkOrder[]>([])
     const [loading, setLoading] = useState(true)
-    const [activeSteps, setActiveSteps] = useState<Record<string, boolean>>({})
     const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
     const [hoveredRow, setHoveredRow] = useState<string | null>(null)
     const [showRecipientsModal, setShowRecipientsModal] = useState(false)
-    const [currentRecipients, setCurrentRecipients] = useState<{ id: string; name: string; email: string }[]>([])
+    const [currentRecipients, setCurrentRecipients] = useState<RecipientEntry[]>([]);
     const [recipientsType, setRecipientsType] = useState<'dry-run' | 'send'>('dry-run')
     const [showArchiveModal, setShowArchiveModal] = useState(false)
     const [archivedWorkOrders, setArchivedWorkOrders] = useState<WorkOrder[]>([])
     const [loadingArchived, setLoadingArchived] = useState(false)
     const [currentWorkOrderIndex, setCurrentWorkOrderIndex] = useState(0)
-    const { lastMessage, status, connectionId } = useWebSocketContext()
+    const { lastMessage, status, connectionId } = useWebSocket()
     const prevWorkOrdersRef = useRef<WorkOrder[]>([])
+    // Add state to cache campaign existence for each work order and language
+    const [campaignExistence, setCampaignExistence] = useState<Record<string, Record<string, { dryrun: boolean; send: boolean; dryrunCount?: number; sendCount?: number }>>>({});
+    const [campaignExistenceLoading, setCampaignExistenceLoading] = useState<Record<string, boolean>>({});
+    const [recipientSearch, setRecipientSearch] = useState('');
+    const [currentCampaignString, setCurrentCampaignString] = useState<string>('');
 
     // Navigation functions
     const goToNextWorkOrder = () => {
@@ -123,10 +133,10 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
         return () => window.removeEventListener('keydown', handleKeyDown)
     }, [currentWorkOrderIndex, workOrders.length])
 
-    const downloadRecipientsCSV = (recipients: { id: string; name: string; email: string }[]) => {
+    const downloadRecipientsCSV = (recipients: RecipientEntry[]) => {
         const csvContent = [
-            'Name,Email,ID',
-            ...recipients.map(r => `"${r.name}","${r.email}","${r.id}"`)
+            'Name,Email,Send Time',
+            ...recipients.map(r => `"${r.name}","${r.email}","${r.sendtime || ''}"`)
         ].join('\n')
 
         const blob = new Blob([csvContent], { type: 'text/csv' })
@@ -140,18 +150,19 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
         window.URL.revokeObjectURL(url)
     }
 
-    const openRecipientsModal = (recipients: { id: string; name: string; email: string }[], type: 'dry-run' | 'send' = 'dry-run') => {
+    const openRecipientsModal = (recipients: RecipientEntry[], type: 'dry-run' | 'send' = 'dry-run', campaignString: string = '') => {
         setCurrentRecipients(Array.isArray(recipients) ? recipients : []);
         setRecipientsType(type);
+        setCurrentCampaignString(campaignString);
         setShowRecipientsModal(true);
     }
 
     const loadArchivedWorkOrders = async () => {
         setLoadingArchived(true)
         try {
-            const result = await callDbApi('getArchivedWorkOrders', {})
-            if (result && result.workOrders) {
-                setArchivedWorkOrders(result.workOrders)
+            const result = await getAllTableItemsFiltered('work-orders', 'archived', true, userPid, userHash)
+            if (result && Array.isArray(result)) {
+                setArchivedWorkOrders(result)
             }
         } catch (error) {
             console.error('Failed to load archived work orders:', error)
@@ -168,7 +179,9 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
 
     const archiveWorkOrder = async (workOrderId: string) => {
         try {
-            await callDbApi('archiveWorkOrder', { workOrderId, archivedBy: userPid })
+            await updateTableItem('work-orders', workOrderId, 'archived', true, userPid, userHash)
+            await updateTableItem('work-orders', workOrderId, 'archivedAt', new Date().toISOString(), userPid, userHash)
+            await updateTableItem('work-orders', workOrderId, 'archivedBy', userPid, userPid, userHash)
             toast.success('Work order archived successfully')
             loadWorkOrders() // Refresh the main list
         } catch (error) {
@@ -179,7 +192,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
 
     const unarchiveWorkOrder = async (workOrderId: string) => {
         try {
-            await callDbApi('unarchiveWorkOrder', { workOrderId })
+            await updateTableItem('work-orders', workOrderId, 'archived', false, userPid, userHash)
             toast.success('Work order restored successfully')
             loadArchivedWorkOrders() // Refresh the archive list
             loadWorkOrders() // Refresh the main list
@@ -201,13 +214,13 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
     const loadParticipantName = async (pid: string) => {
         if (!pid || participantNames[pid]) return
         try {
-            const result = await callDbApi('handleFindParticipant', { id: pid })
+            const result = await getTableItem('students', pid, userPid, userHash)
             if (result && (result.first || result.last)) {
                 setParticipantNames(prev => ({ ...prev, [pid]: `${result.first || ''} ${result.last || ''}`.trim() }))
             } else {
                 setParticipantNames(prev => ({ ...prev, [pid]: pid }))
             }
-        } catch (err) {
+        } catch {
             setParticipantNames(prev => ({ ...prev, [pid]: pid }))
         }
     }
@@ -215,14 +228,22 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
     const loadWorkOrders = async () => {
         setLoading(true)
         try {
-            const result = await callDbApi('getWorkOrders', {})
-            if (result && result.workOrders) {
-                // Backend now filters out archived work orders by default
-                setWorkOrders(result.workOrders)
+            const result = await getAllTableItems('work-orders', userPid, userHash)
+
+            if (result && Array.isArray(result)) {
+                // Filter out archived work orders by default
+                const activeWorkOrders = result.filter(wo => !wo.archived)
+                // Sort by createdAt (newest first), with fallback for missing createdAt
+                activeWorkOrders.sort((a, b) => {
+                    const aTime = new Date(a.createdAt || '1970-01-01').getTime();
+                    const bTime = new Date(b.createdAt || '1970-01-01').getTime();
+                    return bTime - aTime;
+                });
+                setWorkOrders(activeWorkOrders)
 
                 // Load participant names for all work orders
                 const uniquePids = new Set<string>()
-                result.workOrders.forEach(wo => {
+                activeWorkOrders.forEach(wo => {
                     if (wo.createdBy) uniquePids.add(wo.createdBy)
                 })
 
@@ -244,23 +265,14 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
         loadWorkOrders()
     }, [refreshTrigger])
 
-    // Debug effect to log when workOrders state changes
-    useEffect(() => {
-        console.log('[DEBUG] workOrders state changed:', workOrders.length, workOrders);
-    }, [workOrders]);
+
 
     useEffect(() => {
         if (lastMessage && lastMessage.type === 'workOrderUpdate') {
-            console.log('Received WebSocket work order update:', lastMessage)
-            console.log('[DEBUG] Full WebSocket message structure:', JSON.stringify(lastMessage, null, 2))
-
             // Handle DynamoDB Stream messages (from DynamoDB Streams)
             const newImage = lastMessage.newImage
             if (newImage) {
                 const updatedWorkOrder = unmarshall(newImage) as WorkOrder
-                console.log('Unmarshalled work order update:', updatedWorkOrder)
-                console.log('[DEBUG] Work order lock status after update:', updatedWorkOrder.locked, 'LockedBy:', updatedWorkOrder.lockedBy);
-                console.log('[DEBUG] Steps data from DynamoDB Stream:', updatedWorkOrder.steps);
 
                 if (updatedWorkOrder) {
                     setWorkOrders(prevOrders => {
@@ -269,7 +281,11 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                         if (index === -1) {
                             // If it's a new work order, add it to the list and sort
                             const newOrders = [updatedWorkOrder, ...prevOrders]
-                            newOrders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                            newOrders.sort((a, b) => {
+                                const aTime = new Date(a.createdAt || '1970-01-01').getTime();
+                                const bTime = new Date(b.createdAt || '1970-01-01').getTime();
+                                return bTime - aTime;
+                            })
                             return newOrders
                         }
 
@@ -277,7 +293,6 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                         const newOrders = [...prevOrders]
                         newOrders[index] = updatedWorkOrder;
 
-                        console.log('Updated work order in list:', newOrders[index])
                         return newOrders
                     })
                 }
@@ -286,10 +301,6 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
             // Handle direct WebSocket messages (from email-agent)
             const workOrder = lastMessage.workOrder
             if (workOrder) {
-                console.log('Received direct work order update:', workOrder)
-                console.log('[DEBUG] Direct work order lock status:', workOrder.locked, 'LockedBy:', workOrder.lockedBy);
-                console.log('[DEBUG] Steps data from direct message:', workOrder.steps);
-                console.log('[DEBUG] Full work order data:', JSON.stringify(workOrder, null, 2));
 
                 // Convert the work order data to the expected format
                 const updatedWorkOrder: WorkOrder = {
@@ -320,11 +331,8 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                     archived: workOrder.archived,
                     archivedAt: workOrder.archivedAt,
                     archivedBy: workOrder.archivedBy,
+                    sleepUntil: workOrder.sleepUntil,
                 }
-
-                console.log('[DEBUG] Converted work order for state update:', updatedWorkOrder);
-                console.log('[DEBUG] Steps after conversion:', updatedWorkOrder.steps);
-                console.log('[DEBUG] Locked status after conversion:', updatedWorkOrder.locked, 'lockedBy:', updatedWorkOrder.lockedBy);
 
                 setWorkOrders(prevOrders => {
                     const index = prevOrders.findIndex(wo => wo.id === updatedWorkOrder.id)
@@ -332,7 +340,11 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                     if (index === -1) {
                         // If it's a new work order, add it to the list and sort
                         const newOrders = [updatedWorkOrder, ...prevOrders]
-                        newOrders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                        newOrders.sort((a, b) => {
+                            const aTime = new Date(a.createdAt || '1970-01-01').getTime();
+                            const bTime = new Date(b.createdAt || '1970-01-01').getTime();
+                            return bTime - aTime;
+                        })
                         return newOrders
                     }
 
@@ -340,7 +352,6 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                     const newOrders = [...prevOrders]
                     newOrders[index] = updatedWorkOrder;
 
-                    console.log('Updated work order in list:', newOrders[index])
                     return newOrders
                 })
             }
@@ -352,9 +363,9 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
         if (workOrders.length > prevWorkOrdersRef.current.length) {
             // Find the newest work order by createdAt
             let newestIndex = 0;
-            let newestDate = new Date(workOrders[0]?.createdAt || 0).getTime();
+            let newestDate = new Date(workOrders[0]?.createdAt || '1970-01-01').getTime();
             for (let i = 1; i < workOrders.length; i++) {
-                const d = new Date(workOrders[i].createdAt || 0).getTime();
+                const d = new Date(workOrders[i].createdAt || '1970-01-01').getTime();
                 if (d > newestDate) {
                     newestDate = d;
                     newestIndex = i;
@@ -365,113 +376,120 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
         prevWorkOrdersRef.current = workOrders;
     }, [workOrders]);
 
-    const handleRowClick = async (workOrder: WorkOrder) => {
-        console.log('[DEBUG] Row clicked for work order:', workOrder.id, 'Locked:', workOrder.locked, 'LockedBy:', workOrder.lockedBy);
+    // Handle newly created work order
+    useEffect(() => {
+        if (newlyCreatedWorkOrder) {
+            // Add the newly created work order to the list
+            setWorkOrders(prevOrders => {
+                // Check if it's already in the list (from WebSocket or reload)
+                const exists = prevOrders.some(wo => wo.id === newlyCreatedWorkOrder.id);
+                if (!exists) {
+                    const newOrders = [newlyCreatedWorkOrder, ...prevOrders];
+                    // Sort by createdAt (newest first)
+                    newOrders.sort((a, b) => {
+                        const aTime = new Date(a.createdAt || '1970-01-01').getTime();
+                        const bTime = new Date(b.createdAt || '1970-01-01').getTime();
+                        return bTime - aTime;
+                    });
+                    return newOrders;
+                }
+                return prevOrders;
+            });
 
+            // Select the newly created work order
+            setCurrentWorkOrderIndex(0);
+
+            // Clear the newly created work order after handling it
+            // This will be done by the parent component
+        }
+    }, [newlyCreatedWorkOrder]);
+
+    // Helper to prefetch campaign existence for all enabled languages for a work order
+    const prefetchCampaignExistence = async (workOrder: WorkOrder) => {
+        if (!workOrder) return;
+        const langs = Object.keys(workOrder.languages ?? {}).filter(lang => !!workOrder.languages?.[lang]);
+        if (langs.length === 0) return;
+        const eventCode = workOrder.eventCode;
+        const subEvent = workOrder.subEvent;
+        const stage = workOrder.stage;
+        const workOrderId = workOrder.id;
+        setCampaignExistenceLoading(prev => ({ ...prev, [workOrderId]: true }));
+        const newExistence: Record<string, { dryrun: boolean; send: boolean; dryrunCount?: number; sendCount?: number }> = {};
+        await Promise.all(langs.map(async (lang) => {
+            const campaignString = `${eventCode}_${subEvent}_${stage}_${lang}`;
+            let dryrun = false;
+            let send = false;
+            let dryrunCount = undefined;
+            let sendCount = undefined;
+            try {
+                const dryrunResult = await getTableItemOrNull('dryrun-recipients', campaignString, userPid, userHash);
+                dryrun = !!(dryrunResult && dryrunResult.entries && Array.isArray(dryrunResult.entries) && dryrunResult.entries.length > 0);
+                dryrunCount = dryrunResult && dryrunResult.entries && Array.isArray(dryrunResult.entries) ? dryrunResult.entries.length : undefined;
+            } catch {
+                dryrun = false;
+                dryrunCount = undefined;
+            }
+            try {
+                const sendResult = await getTableItemOrNull('send-recipients', campaignString, userPid, userHash);
+                send = !!(sendResult && sendResult.entries && Array.isArray(sendResult.entries) && sendResult.entries.length > 0);
+                sendCount = sendResult && sendResult.entries && Array.isArray(sendResult.entries) ? sendResult.entries.length : undefined;
+            } catch {
+                send = false;
+                sendCount = undefined;
+            }
+            newExistence[lang] = { dryrun, send, dryrunCount, sendCount };
+        }));
+        setCampaignExistence(prev => ({ ...prev, [workOrderId]: newExistence }));
+        setCampaignExistenceLoading(prev => ({ ...prev, [workOrderId]: false }));
+    };
+
+    // Prefetch campaign existence when workOrders or currentWorkOrderIndex changes
+    useEffect(() => {
+        if (workOrders.length > 0) {
+            const workOrder = workOrders[currentWorkOrderIndex];
+            if (workOrder && !campaignExistence[workOrder.id]) {
+                prefetchCampaignExistence(workOrder);
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [workOrders, currentWorkOrderIndex]);
+
+    const handleRowClick = async (workOrder: WorkOrder) => {
         if (workOrder.locked) {
             // Don't allow editing if locked
-            console.log('Work order is locked, cannot edit:', workOrder.id)
             return
         }
 
-        console.log('Attempting to lock work order:', workOrder.id, 'for user:', userPid)
-
         // Try to lock the work order before opening for edit
         try {
-            const lockResult = await callDbApi('handleLockWorkOrder', {
-                id: workOrder.id,
-                userPid
+            // Lock the work order using the new API
+            await updateTableItem('work-orders', workOrder.id, 'locked', true, userPid, userHash)
+            await updateTableItem('work-orders', workOrder.id, 'lockedBy', userPid, userPid, userHash)
+
+            // Update state immediately to reflect the lock
+            setWorkOrders(prevOrders => {
+                const index = prevOrders.findIndex(wo => wo.id === workOrder.id)
+                if (index === -1) return prevOrders
+                const newOrders = [...prevOrders]
+                newOrders[index] = { ...workOrder, locked: true, lockedBy: userPid }
+                return newOrders
             })
 
-            console.log('Lock result:', lockResult)
-
-            if (lockResult.success && lockResult.workOrder) {
-                // Update state immediately with the returned work order
-                setWorkOrders(prevOrders => {
-                    const index = prevOrders.findIndex(wo => wo.id === (lockResult.workOrder as WorkOrder).id)
-                    if (index === -1) return prevOrders // Should not happen
-                    const newOrders = [...prevOrders]
-                    newOrders[index] = lockResult.workOrder as WorkOrder
-                    console.log('[DEBUG] Updated work order in state after lock:', newOrders[index])
-                    return newOrders
-                })
-
-                // Successfully locked, proceed with edit
-                console.log('Successfully locked work order, opening edit dialog')
-                onEdit(workOrder.id)
-            } else {
-                // Failed to lock (probably locked by another user)
-                console.log('Failed to lock work order:', lockResult.error)
-                toast.error(lockResult.error || 'Work order is locked by another user')
-                // Optional: Force a refresh in case our state is stale
-                loadWorkOrders()
-            }
+            // Successfully locked, proceed with edit
+            onEdit(workOrder.id)
         } catch (error) {
             console.error('Error locking work order:', error)
             toast.error('Failed to lock work order')
         }
     }
 
-    const getStatusBadgeClass = (status: string | { value: string } | undefined, isActive: boolean) => {
-        // Handle undefined or null status
-        if (!status) {
-            console.warn('Status is undefined or null, defaulting to secondary')
-            return 'bg-secondary'
-        }
-
-        // Handle both string and enum values
-        const statusStr = typeof status === 'string' ? status : status.value
-
-        if (!statusStr) {
-            console.warn('Status string is empty, defaulting to secondary')
-            return 'bg-secondary'
-        }
-
-        if ((!isActive && statusStr.toLowerCase() === 'ready') || statusStr.toLowerCase() === 'ready') {
-            return 'bg-secondary text-dark' // light gray for pending and ready
-        }
-
-        switch (statusStr.toLowerCase()) {
-            case 'working':
-                return 'bg-info'
-            case 'complete':
-                return 'bg-success'
-            case 'error':
-                return 'bg-danger'
-            case 'interrupted':
-                return 'bg-warning'
-            case 'exception':
-                return 'bg-purple' // Purple for exception status
-            default:
-                console.warn('Unknown status:', statusStr)
-                return 'bg-secondary'
-        }
-    }
-
     const handleStepAction = async (
         id: string,
-        stepName: 'Count' | 'Prepare' | 'Dry-Run' | 'Test' | 'Send' ,
+        stepName: 'Count' | 'Prepare' | 'Dry-Run' | 'Test' | 'Send',
         isStarting: boolean
     ) => {
-        console.log(`[STEP-ACTION] Starting step action for work order ${id}, step ${stepName}, isStarting: ${isStarting}`);
-        console.log(`[STEP-ACTION] Timestamp: ${new Date().toISOString()}`);
 
         try {
-            // Find the current step to check if it's a restart of a failed step
-            const workOrder = workOrders.find(wo => wo.id === id);
-            const step = workOrder?.steps.find(s => {
-                const stepNameStr = typeof s.name === 'string' ? s.name :
-                    (s.name && typeof s.name === 'object' && 'S' in s.name) ? (s.name as { S: string }).S : '';
-                return stepNameStr === stepName;
-            });
-
-            const stepStatus = typeof step?.status === 'string' ? step.status :
-                (step?.status && typeof step?.status === 'object' && 'S' in step?.status) ?
-                    (step?.status as { S: string }).S : '';
-
-            console.log(`[STEP-ACTION] Current step status: ${stepStatus}`);
-            console.log(`[STEP-ACTION] Step data:`, step);
-
             // If starting a step, implement optimistic UI update
             if (isStarting) {
                 // Immediately update the UI to show "working" status
@@ -499,22 +517,17 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                         return wo;
                     });
                 });
-
-                console.log(`[STEP-ACTION] Applied optimistic update for ${id}-${stepName}`);
             }
 
             // Determine the action to send to the email-agent
             const action = isStarting ? 'start' : 'stop';
-            console.log(`[STEP-ACTION] Sending ${action} action to email-agent for work order ${id}, step ${stepName}`);
 
-            // Send SQS message to email-agent - let the agent handle all step state updates
-            await callDbApi('sendWorkOrderMessage', {
+            // Send SQS message to email-agent using the new API
+            await sendSQSMessage({
                 workOrderId: id,
                 stepName: stepName,
                 action: action
-            });
-
-            console.log(`[STEP-ACTION] SUCCESS: Sent ${action} message to email-agent for work order ${id}, step ${stepName}`);
+            }, userPid, userHash);
 
         } catch (error) {
             console.error(`[STEP-ACTION] ERROR: Failed to send ${isStarting ? 'start' : 'stop'} message to email-agent:`, error);
@@ -524,7 +537,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
         }
     }
 
-    const getDisplayStepName = (stepName: string, workOrder: any) => {
+    const getDisplayStepName = (stepName: string, workOrder: WorkOrder) => {
         if (stepName === 'Send') {
             return workOrder.sendContinuously ? 'Send-Continuously' : 'Send-Once';
         }
@@ -541,10 +554,10 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                     <div className="d-flex align-items-center" style={{ gap: 6, margin: 0, padding: 0 }}>
                         <div className="ms-1" style={{ margin: 0, padding: 0 }}>
                             <Badge bg={status === 'open' ? 'success' : status === 'connecting' ? 'warning' : 'danger'}>
-                                WebSocket: {status}
+                                Agent Connection: {status}
                             </Badge>
                             {connectionId && (
-                                <Badge bg="info" className="ms-1">
+                                <Badge bg="secondary" className="ms-2">
                                     ID: {connectionId}
                                 </Badge>
                             )}
@@ -573,11 +586,16 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                 <div className="d-flex align-items-center" style={{ gap: 6, margin: 0, padding: 0 }}>
                     <div className="ms-1" style={{ margin: 0, padding: 0 }}>
                         <Badge bg={status === 'open' ? 'success' : status === 'connecting' ? 'warning' : 'danger'}>
-                            WebSocket: {status}
+                            Agent Connection: {status}
                         </Badge>
                         {connectionId && (
-                            <Badge bg="info" className="ms-1">
+                            <Badge bg="secondary" className="ms-2">
                                 ID: {connectionId}
+                            </Badge>
+                        )}
+                        {!connectionId && status === 'open' && (
+                            <Badge bg="warning" className="ms-2">
+                                Waiting for ID...
                             </Badge>
                         )}
                     </div>
@@ -608,8 +626,8 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                 title="Previous work order"
                             >
                                 <svg width="22" height="22" viewBox="0 0 22 22" style={{ display: 'block', margin: 'auto' }}>
-                                    <line x1="15" y1="4" x2="7" y2="11" stroke="#fff" strokeWidth="3.5" strokeLinecap="round"/>
-                                    <line x1="7" y1="11" x2="15" y2="18" stroke="#fff" strokeWidth="3.5" strokeLinecap="round"/>
+                                    <line x1="15" y1="4" x2="7" y2="11" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" />
+                                    <line x1="7" y1="11" x2="15" y2="18" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" />
                                 </svg>
                             </Button>
                             <Button
@@ -630,8 +648,8 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                 title="Create new work order"
                             >
                                 <svg width="22" height="22" viewBox="0 0 22 22" style={{ display: 'block', margin: 'auto' }}>
-                                    <line x1="11" y1="5" x2="11" y2="17" stroke="#fff" strokeWidth="3.5" strokeLinecap="round"/>
-                                    <line x1="5" y1="11" x2="17" y2="11" stroke="#fff" strokeWidth="3.5" strokeLinecap="round"/>
+                                    <line x1="11" y1="5" x2="11" y2="17" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" />
+                                    <line x1="5" y1="11" x2="17" y2="11" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" />
                                 </svg>
                             </Button>
                             <Button
@@ -654,8 +672,8 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                 title="Next work order"
                             >
                                 <svg width="22" height="22" viewBox="0 0 22 22" style={{ display: 'block', margin: 'auto' }}>
-                                    <line x1="7" y1="4" x2="15" y2="11" stroke="#fff" strokeWidth="3.5" strokeLinecap="round"/>
-                                    <line x1="15" y1="11" x2="7" y2="18" stroke="#fff" strokeWidth="3.5" strokeLinecap="round"/>
+                                    <line x1="7" y1="4" x2="15" y2="11" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" />
+                                    <line x1="15" y1="11" x2="7" y2="18" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" />
                                 </svg>
                             </Button>
                         </div>
@@ -676,7 +694,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                     </Button>
                 </div>
             </div>
-            
+
             {workOrders.length > 0 ? (
                 <div>
                     <Table borderless hover variant="dark" className="mb-0">
@@ -741,7 +759,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                             <td colSpan={8} style={{ padding: 0, background: 'transparent', border: 'none' }}>
                                                 {(workOrder.steps || []).map((step, index) => {
                                                     // Helper function to extract string values from DynamoDB format or plain strings
-                                                    const extractString = (value: any): string => {
+                                                    const extractString = (value: unknown): string => {
                                                         if (typeof value === 'string') return value;
                                                         if (value && typeof value === 'object' && 'S' in value) return (value as { S: string }).S;
                                                         if (value && typeof value === 'object' && 'value' in value) return (value as { value: string }).value;
@@ -757,7 +775,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                             (step.isActive as { BOOL: boolean }).BOOL : false;
 
                                                     // Debug logging for step data
-                                                    if (stepStatus === 'error' || stepMessage) {
+                                                    if (stepStatus === 'error') {
                                                         console.log('[DEBUG] Step data for', workOrder.id, stepName, ':', {
                                                             step,
                                                             stepName,
@@ -774,7 +792,6 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                     const isComplete = stepStatus === 'complete';
                                                     const isError = stepStatus === 'error' || stepStatus === 'exception';
                                                     const isInterrupted = stepStatus === 'interrupted';
-                                                    const isPending = stepStatus === 'ready';
 
                                                     const messageColor = isError ? '#ff6b6b' :
                                                         isComplete ? '#51cf66' :
@@ -788,15 +805,14 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                     let buttonLabel = 'Start';
                                                     if (stepStatus === 'working') buttonLabel = 'Stop';
                                                     else if (stepStatus === 'complete' || stepStatus === 'error') buttonLabel = 'Restart';
+                                                    else if (stepStatus === 'sleeping') buttonLabel = 'Stop';
 
                                                     // Badge color logic
-                                                    let badgeStyle = {};
-                                                    let badgeBg = getStatusBadgeClass(stepStatus, stepIsActive);
-                                                    if (stepStatus === 'error') {
-                                                        badgeStyle = { backgroundColor: '#dc3545', color: '#fff' };
-                                                    } else if (stepStatus === 'complete') {
-                                                        badgeStyle = { backgroundColor: '#51cfef', color: '#222' };
-                                                    }
+
+                                                    // Determine button variant based on label
+                                                    let buttonVariant = 'success';
+                                                    if (buttonLabel === 'Stop') buttonVariant = 'danger';
+                                                    else if (stepStatus === 'working') buttonVariant = 'warning';
 
                                                     return (
                                                         <div key={index} style={{
@@ -812,12 +828,12 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                                             fontWeight: 'bold',
                                                                             color:
                                                                                 !stepIsActive ? '#adb5bd' :
-                                                                                (stepIsActive && stepStatus === 'ready') ? '#fff' :
-                                                                                stepStatus === 'error' ? '#dc3545' :
-                                                                                stepStatus === 'complete' ? '#51cfef' :
-                                                                                stepStatus === 'working' ? '#fff' :
-                                                                                stepStatus === 'sleeping' ? '#51cfef' :
-                                                                                '#adb5bd',
+                                                                                    (stepIsActive && stepStatus === 'ready') ? '#fff' :
+                                                                                        stepStatus === 'error' ? '#dc3545' :
+                                                                                            stepStatus === 'complete' ? '#51cfef' :
+                                                                                                stepStatus === 'working' ? '#fff' :
+                                                                                                    stepStatus === 'sleeping' ? '#51cfef' :
+                                                                                                        '#adb5bd',
                                                                         }}>
                                                                             {getDisplayStepName(stepName, workOrder)}
                                                                         </span>
@@ -829,10 +845,10 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                                                     marginLeft: 8,
                                                                                     color:
                                                                                         stepStatus === 'error' ? '#dc3545' :
-                                                                                        stepStatus === 'complete' ? '#51cfef' :
-                                                                                        stepStatus === 'working' ? '#fff' :
-                                                                                        stepStatus === 'sleeping' ? '#51cfef' :
-                                                                                        '#adb5bd',
+                                                                                            stepStatus === 'complete' ? '#51cfef' :
+                                                                                                stepStatus === 'working' ? '#fff' :
+                                                                                                    stepStatus === 'sleeping' ? '#51cfef' :
+                                                                                                        '#adb5bd',
                                                                                     letterSpacing: 0.5,
                                                                                 }}
                                                                             >
@@ -845,7 +861,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                                             </div>
                                                                         )}
                                                                     </div>
-                                                                    <div style={{ flex: 4, color: isInterrupted ? '#fff' : messageColor }}>
+                                                                    <div style={{ flex: 4, color: isInterrupted ? '#fff' : (stepStatus === 'sleeping' && workOrder.sleepUntil && new Date(workOrder.sleepUntil) < new Date() ? 'red' : messageColor) }}>
                                                                         <span>{stepMessage}</span>
                                                                     </div>
                                                                 </div>
@@ -884,31 +900,43 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                                     {stepName === 'Dry-Run' && (() => {
                                                                         const prepareStep = workOrder.steps?.find(s => extractString(s.name) === 'Prepare')
                                                                         const enabled = prepareStep && extractString(prepareStep.status) === 'complete'
+                                                                        const langs = Object.keys(workOrder.languages ?? {}).filter(lang => !!workOrder.languages?.[lang]);
+                                                                        const existence = campaignExistence[workOrder.id] || {};
                                                                         return enabled ? (
                                                                             <>
-                                                                                {(workOrder.dryRunRecipients || []).length > 0 && (
-                                                                                    <Button
-                                                                                        size="sm"
-                                                                                        variant="outline-info"
-                                                                                        onClick={() => {
-                                                                                            const recipients = [...(workOrder.dryRunRecipients || [])].sort((a, b) => a.name.localeCompare(b.name));
-                                                                                            openRecipientsModal(recipients, 'dry-run');
-                                                                                        }}
-                                                                                        style={{ marginRight: 6 }}
-                                                                                    >
-                                                                                        {(() => {
-                                                                                            let lang = workOrder.language;
-                                                                                            if (!lang && workOrder.languages && Object.keys(workOrder.languages).length > 0) {
-                                                                                                lang = Object.keys(workOrder.languages)[0];
-                                                                                            }
-                                                                                            const count = (workOrder.dryRunRecipients || []).length;
-                                                                                            return `View Results${lang ? ` [${lang}]` : ''} (${count})`;
-                                                                                        })()}
-                                                                                    </Button>
-                                                                                )}
+                                                                                {/* Show View Results buttons for each language */}
+                                                                                {campaignExistenceLoading[workOrder.id] && <Spinner animation="border" size="sm" className="me-2" />}
+                                                                                {langs.map(lang => {
+                                                                                    const exists = existence[lang]?.dryrun;
+                                                                                    const count = existence[lang]?.dryrunCount ?? 0;
+                                                                                    return (
+                                                                                        <Button
+                                                                                            key={lang}
+                                                                                            size="sm"
+                                                                                            variant="outline-info"
+                                                                                            onClick={async () => {
+                                                                                                if (!exists) return;
+                                                                                                const campaignString = `${workOrder.eventCode}_${workOrder.subEvent}_${workOrder.stage}_${lang}`;
+                                                                                                try {
+                                                                                                    const result = await getTableItem('dryrun-recipients', campaignString, userPid, userHash);
+                                                                                                    const entries = (result && result.entries && Array.isArray(result.entries)) ? [...result.entries] : [];
+                                                                                                    entries.sort((a, b) => (b.sendtime || '').localeCompare(a.sendtime || ''));
+                                                                                                    openRecipientsModal(entries, 'dry-run', campaignString);
+                                                                                                } catch {
+                                                                                                    toast.error('Failed to load dry-run recipients');
+                                                                                                }
+                                                                                            }}
+                                                                                            style={{ marginRight: 6 }}
+                                                                                            disabled={!exists}
+                                                                                        >
+                                                                                            {`${lang} (${count})`}
+                                                                                        </Button>
+                                                                                    );
+                                                                                })}
+                                                                                {/* Always show the action button to the right */}
                                                                                 <Button
                                                                                     size="sm"
-                                                                                    variant={stepStatus === 'working' ? 'warning' : 'success'}
+                                                                                    variant={buttonVariant}
                                                                                     onClick={(e) => {
                                                                                         e.stopPropagation()
                                                                                         handleStepAction(workOrder.id, 'Dry-Run', stepStatus !== 'working')
@@ -937,72 +965,46 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                                             </Button>
                                                                         ) : null
                                                                     })()}
-                                                                    {stepName === 'Send' && (stepStatus !== 'sleeping' ? true : true) && (() => {
-                                                                        const testStep = workOrder.steps?.find(s => extractString(s.name) === 'Test')
-                                                                        const enabled = testStep && extractString(testStep.status) === 'complete'
-                                                                        // Show Stop button for both working and sleeping
-                                                                        if (stepStatus === 'working' || stepStatus === 'sleeping') {
-                                                                            return (
-                                                                                <>
-                                                                                    {(workOrder.sendRecipients || []).length > 0 && (
-                                                                                        <Button
-                                                                                            size="sm"
-                                                                                            variant="outline-info"
-                                                                                            onClick={() => {
-                                                                                                const recipients = [...(workOrder.sendRecipients || [])].sort((a, b) => a.name.localeCompare(b.name));
-                                                                                                openRecipientsModal(recipients, 'send');
-                                                                                            }}
-                                                                                            style={{ marginRight: 6 }}
-                                                                                        >
-                                                                                            {(() => {
-                                                                                                let lang = workOrder.language;
-                                                                                                if (!lang && workOrder.languages && Object.keys(workOrder.languages).length > 0) {
-                                                                                                    lang = Object.keys(workOrder.languages)[0];
-                                                                                                }
-                                                                                                const count = (workOrder.sendRecipients || []).length;
-                                                                                                return `View Results${lang ? ` [${lang}]` : ''} (${count})`;
-                                                                                            })()}
-                                                                                        </Button>
-                                                                                    )}
-                                                                                    <Button
-                                                                                        size="sm"
-                                                                                        variant="danger"
-                                                                                        onClick={(e) => {
-                                                                                            e.stopPropagation()
-                                                                                            handleStepAction(workOrder.id, 'Send', false)
-                                                                                        }}
-                                                                                        disabled={false}
-                                                                                    >
-                                                                                        Stop
-                                                                                    </Button>
-                                                                                </>
-                                                                            )
-                                                                        }
+                                                                    {stepName === 'Send' && (() => {
+                                                                        const dryRunStep = workOrder.steps?.find(s => extractString(s.name) === 'Dry-Run')
+                                                                        const enabled = dryRunStep && extractString(dryRunStep.status) === 'complete'
+                                                                        const langs = Object.keys(workOrder.languages ?? {}).filter(lang => !!workOrder.languages?.[lang]);
+                                                                        const existence = campaignExistence[workOrder.id] || {};
                                                                         return enabled ? (
                                                                             <>
-                                                                                {(workOrder.sendRecipients || []).length > 0 && (
-                                                                                    <Button
-                                                                                        size="sm"
-                                                                                        variant="outline-info"
-                                                                                        onClick={() => {
-                                                                                            const recipients = [...(workOrder.sendRecipients || [])].sort((a, b) => a.name.localeCompare(b.name));
-                                                                                            openRecipientsModal(recipients, 'send');
-                                                                                        }}
-                                                                                        style={{ marginRight: 6 }}
-                                                                                    >
-                                                                                        {(() => {
-                                                                                            let lang = workOrder.language;
-                                                                                            if (!lang && workOrder.languages && Object.keys(workOrder.languages).length > 0) {
-                                                                                                lang = Object.keys(workOrder.languages)[0];
-                                                                                            }
-                                                                                            const count = (workOrder.sendRecipients || []).length;
-                                                                                            return `View Results${lang ? ` [${lang}]` : ''} (${count})`;
-                                                                                        })()}
-                                                                                    </Button>
-                                                                                )}
+                                                                                {/* Show View Results buttons for each language */}
+                                                                                {campaignExistenceLoading[workOrder.id] && <Spinner animation="border" size="sm" className="me-2" />}
+                                                                                {langs.map(lang => {
+                                                                                    const exists = existence[lang]?.send;
+                                                                                    const count = existence[lang]?.sendCount ?? 0;
+                                                                                    return (
+                                                                                        <Button
+                                                                                            key={lang}
+                                                                                            size="sm"
+                                                                                            variant="outline-primary"
+                                                                                            onClick={async () => {
+                                                                                                if (!exists) return;
+                                                                                                const campaignString = `${workOrder.eventCode}_${workOrder.subEvent}_${workOrder.stage}_${lang}`;
+                                                                                                try {
+                                                                                                    const result = await getTableItem('send-recipients', campaignString, userPid, userHash);
+                                                                                                    const entries = (result && result.entries && Array.isArray(result.entries)) ? [...result.entries] : [];
+                                                                                                    entries.sort((a, b) => (b.sendtime || '').localeCompare(a.sendtime || ''));
+                                                                                                    openRecipientsModal(entries, 'send', campaignString);
+                                                                                                } catch {
+                                                                                                    toast.error('Failed to load send recipients');
+                                                                                                }
+                                                                                            }}
+                                                                                            style={{ marginRight: 6 }}
+                                                                                            disabled={!exists}
+                                                                                        >
+                                                                                            {`${lang} (${count})`}
+                                                                                        </Button>
+                                                                                    );
+                                                                                })}
+                                                                                {/* Always show the action button to the right */}
                                                                                 <Button
                                                                                     size="sm"
-                                                                                    variant={stepStatus === 'working' ? 'warning' : 'success'}
+                                                                                    variant={buttonVariant}
                                                                                     onClick={(e) => {
                                                                                         e.stopPropagation()
                                                                                         handleStepAction(workOrder.id, 'Send', stepStatus !== 'working')
@@ -1041,10 +1043,12 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                 dialogClassName="modal-xl"
             >
                 <Modal.Header closeButton>
-                    <Modal.Title>{recipientsType === 'dry-run' ? 'Dry-Run' : 'Send'} Recipients ({currentRecipients.length})</Modal.Title>
+                    <Modal.Title>
+                        {recipientsType === 'dry-run' ? 'Dry-Run' : 'Send'} Recipients ({currentRecipients.length}){currentCampaignString ? ` ${currentCampaignString}` : ''}
+                    </Modal.Title>
                 </Modal.Header>
                 <Modal.Body style={{ maxHeight: '70vh', overflow: 'hidden' }}>
-                    <div style={{ marginBottom: 16 }}>
+                    <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
                         <Button
                             variant="outline-success"
                             size="sm"
@@ -1052,6 +1056,13 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                         >
                             📥 Download CSV
                         </Button>
+                        <input
+                            type="text"
+                            placeholder="Search by name..."
+                            value={recipientSearch}
+                            onChange={e => setRecipientSearch(e.target.value)}
+                            style={{ flex: 1, minWidth: 180, maxWidth: 300, padding: '4px 8px', borderRadius: 4, border: '1px solid #ccc' }}
+                        />
                     </div>
                     <div style={{
                         maxHeight: '60vh',
@@ -1066,19 +1077,25 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                     <th>#</th>
                                     <th>Name</th>
                                     <th>Email</th>
-                                    <th>ID</th>
+                                    <th>Send Time</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {currentRecipients
+                                    .filter(r => recipientSearch.trim() === '' || (r.name && r.name.toLowerCase().includes(recipientSearch.trim().toLowerCase())))
                                     .slice() // copy
-                                    .sort((a, b) => a.name.localeCompare(b.name))
+                                    .sort((a, b) => {
+                                        // Sort by sendtime descending (most recent first)
+                                        const at = a.sendtime ? new Date(a.sendtime).getTime() : 0;
+                                        const bt = b.sendtime ? new Date(b.sendtime).getTime() : 0;
+                                        return bt - at;
+                                    })
                                     .map((recipient, index) => (
-                                        <tr key={recipient.id}>
+                                        <tr key={recipient.sendtime || index}>
                                             <td>{index + 1}</td>
                                             <td><strong>{recipient.name}</strong></td>
                                             <td>{recipient.email}</td>
-                                            <td style={{ fontSize: '0.85em', color: '#666' }}>{recipient.id}</td>
+                                            <td style={{ fontSize: '0.95em', color: '#666' }}>{recipient.sendtime ? new Date(recipient.sendtime).toLocaleString() : ''}</td>
                                         </tr>
                                     ))}
                             </tbody>
