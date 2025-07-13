@@ -9,8 +9,6 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@dharma/backend-core": "workspace:*",
-    "@dharma/shared": "workspace:*",
     "@fingerprintjs/fingerprintjs": "^4.6.1",
     "@react-pdf-viewer/core": "^3.12.0",
     "@react-pdf-viewer/default-layout": "^3.12.0",
