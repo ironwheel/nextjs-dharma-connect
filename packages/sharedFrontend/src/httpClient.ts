@@ -7,6 +7,7 @@ if (!process.env.NEXT_PUBLIC_API_URL) {
   throw new Error('NEXT_PUBLIC_API_URL environment variable is not defined. Please set this environment variable to the base URL of your API.');
 }
 
+// needs to be set to the root of the internal hosting domain for production
 const API_BASE = process.env.NEXT_PUBLIC_API_URL;
 
 // at module scope
