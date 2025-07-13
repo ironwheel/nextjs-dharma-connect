@@ -1,6 +1,6 @@
 {
     "buildCommand": "pnpm --filter=email-manager build",
-    "outputDirectory": "apps/email-manager/.next",
+    "outputDirectory": "apps/email-manager",
     "installCommand": "pnpm install",
     "framework": "nextjs",
     "functions": {
