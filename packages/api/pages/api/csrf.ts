@@ -7,7 +7,7 @@ import csurf from 'csurf';
 
 // Parse allowed origins from environment
 let allowedOrigins: string[] = [];
-console.log('CSRF CORS_ORIGIN_LIST:', process.env.CORS_ORIGIN_LIST);
+// console.log('CSRF CORS_ORIGIN_LIST:', process.env.CORS_ORIGIN_LIST);
 try {
     if (process.env.CORS_ORIGIN_LIST) {
         allowedOrigins = JSON.parse(process.env.CORS_ORIGIN_LIST);
@@ -18,13 +18,13 @@ try {
     console.warn('Failed to parse CORS_ORIGIN_LIST, falling back to localhost');
     allowedOrigins = ['http://localhost:3000'];
 }
-console.log('CSRF allowedOrigins:', allowedOrigins);
+// console.log('CSRF allowedOrigins:', allowedOrigins);
 
 // CORS origin function to check against allowed origins
 const corsOrigin = (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-    console.log('CSRF CORS check:', { origin, allowedOrigins });
+    // console.log('CSRF CORS check:', { origin, allowedOrigins });
     if (!origin || allowedOrigins.includes(origin)) {
-        console.log('CSRF CORS: ALLOWED');
+        // console.log('CSRF CORS: ALLOWED');
         callback(null, true);
     } else {
         console.log('CSRF CORS: DENIED');

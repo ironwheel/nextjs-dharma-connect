@@ -875,7 +875,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                                                 e.stopPropagation()
                                                                                 handleStepAction(workOrder.id, 'Count', stepStatus !== 'working')
                                                                             }}
-                                                                            disabled={false}
+                                                                            disabled={status === 'closed'}
                                                                         >
                                                                             {buttonLabel}
                                                                         </Button>
@@ -891,7 +891,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                                                     e.stopPropagation()
                                                                                     handleStepAction(workOrder.id, 'Prepare', stepStatus !== 'working')
                                                                                 }}
-                                                                                disabled={false}
+                                                                                disabled={status === 'closed'}
                                                                             >
                                                                                 {buttonLabel}
                                                                             </Button>
@@ -941,7 +941,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                                                         e.stopPropagation()
                                                                                         handleStepAction(workOrder.id, 'Dry-Run', stepStatus !== 'working')
                                                                                     }}
-                                                                                    disabled={false}
+                                                                                    disabled={status === 'closed'}
                                                                                 >
                                                                                     {buttonLabel}
                                                                                 </Button>
@@ -959,7 +959,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                                                     e.stopPropagation()
                                                                                     handleStepAction(workOrder.id, 'Test', stepStatus !== 'working')
                                                                                 }}
-                                                                                disabled={false}
+                                                                                disabled={status === 'closed'}
                                                                             >
                                                                                 {buttonLabel}
                                                                             </Button>
@@ -1009,7 +1009,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                                                         e.stopPropagation()
                                                                                         handleStepAction(workOrder.id, 'Send', stepStatus !== 'working')
                                                                                     }}
-                                                                                    disabled={false}
+                                                                                    disabled={status === 'closed'}
                                                                                 >
                                                                                     {buttonLabel}
                                                                                 </Button>
