@@ -57,7 +57,8 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'none',
-            domain: req.headers['x-host'] as string,
+            // domain: req.headers['x-host'] as string,
+            domain: '.slsupport.link',
             path: '/',
             maxAge: 15 * 60, // 15 minutes
           });
