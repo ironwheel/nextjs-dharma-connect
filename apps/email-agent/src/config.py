@@ -59,6 +59,8 @@ STUDENT_TABLE = os.getenv('STUDENT_TABLE', 'students')
 POOLS_TABLE = os.getenv('POOLS_TABLE', 'pools')
 PROMPTS_TABLE = os.getenv('PROMPTS_TABLE', 'prompts')
 EMAIL_ACCOUNT_CREDENTIALS_TABLE = os.getenv('EMAIL_ACCOUNT_CREDENTIALS_TABLE', 'email-account-credentials')
+DRYRUN_RECIPIENTS_TABLE = os.getenv('DRYRUN_RECIPIENTS_TABLE')
+SEND_RECIPIENTS_TABLE = os.getenv('SEND_RECIPIENTS_TABLE')
 
 # SQS configuration
 SQS_QUEUE_URL = os.getenv('SQS_QUEUE_URL')
@@ -109,7 +111,9 @@ REQUIRED_ENV_VARS = [
     'DEFAULT_PREVIEW',
     'DEFAULT_FROM_NAME',
     'EMAIL_ACCOUNT_CREDENTIALS_TABLE',
-    'PROMPTS_TABLE'
+    'PROMPTS_TABLE',
+    'DRYRUN_RECIPIENTS_TABLE',
+    'SEND_RECIPIENTS_TABLE'
 ]
 
 def validate_config():
@@ -150,7 +154,9 @@ required_vars = [
     'MAILCHIMP_API_KEY',
     'MAILCHIMP_AUDIENCE',
     'MAILCHIMP_REPLY_TO',
-    'MAILCHIMP_SERVER_PREFIX'
+    'MAILCHIMP_SERVER_PREFIX',
+    'DRYRUN_RECIPIENTS_TABLE',
+    'SEND_RECIPIENTS_TABLE'
 ]
 
 missing_vars = [var for var in required_vars if not os.getenv(var)]
