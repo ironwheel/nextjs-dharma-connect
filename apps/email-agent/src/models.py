@@ -359,7 +359,6 @@ class WorkOrder:
                             dt = dt.replace(tzinfo=timezone.utc)
                         work_order.sendUntil = dt
                     except Exception as e:
-                        print(f"[DEBUG] Error parsing sendUntil: {e}, value: {send_until}")
                         work_order.sendUntil = None
                 elif isinstance(send_until, datetime):
                     if send_until.tzinfo is None:

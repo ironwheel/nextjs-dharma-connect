@@ -6,7 +6,11 @@ import os
 import json
 import time
 
-from .config import config
+from .config import (
+    STUDENT_TABLE, POOLS_TABLE, PROMPTS_TABLE, EVENTS_TABLE, 
+    EMAIL_BURST_SIZE, EMAIL_RECOVERY_SLEEP_SECS, DRYRUN_RECIPIENTS_TABLE, SEND_RECIPIENTS_TABLE,
+    config
+)
 from .models import WorkOrder, WorkOrderUpdate
 
 # Use settings from the centralized config object
@@ -17,9 +21,6 @@ CONNECTIONS_TABLE = config.connections_table
 EVENTS_TABLE = config.events_table
 
 # Import table names from config
-STUDENT_TABLE = os.getenv('STUDENT_TABLE', 'students')
-POOLS_TABLE = os.getenv('POOLS_TABLE', 'pools')
-PROMPTS_TABLE = os.getenv('PROMPTS_TABLE', 'prompts')
 STAGES_TABLE = os.getenv('DYNAMODB_TABLE_STAGES', 'stages')
 
 # Cache configuration
@@ -752,23 +753,27 @@ class AWSClient:
     def append_dryrun_recipient(self, campaign_string: str, entry: dict):
         """Append a recipient to the dryrun_recipients table."""
         try:
-            table = self.dynamodb.Table('dryrun_recipients')
+            print(f"[DEBUG] Attempting to append dryrun recipient: {campaign_string}, {entry}")
+            table = self.dynamodb.Table(DRYRUN_RECIPIENTS_TABLE)
             table.put_item(Item={
                 'campaign': campaign_string,
                 'recipient': entry,
                 'timestamp': datetime.utcnow().isoformat()
             })
+            print(f"[DEBUG] Successfully appended dryrun recipient to table: {DRYRUN_RECIPIENTS_TABLE}")
         except Exception as e:
             print(f"Error appending dryrun recipient: {e}")
 
     def append_send_recipient(self, campaign_string: str, entry: dict):
         """Append a recipient to the send_recipients table."""
         try:
-            table = self.dynamodb.Table('send_recipients')
+            print(f"[DEBUG] Attempting to append send recipient: {campaign_string}, {entry}")
+            table = self.dynamodb.Table(SEND_RECIPIENTS_TABLE)
             table.put_item(Item={
                 'campaign': campaign_string,
                 'recipient': entry,
                 'timestamp': datetime.utcnow().isoformat()
             })
+            print(f"[DEBUG] Successfully appended send recipient to table: {SEND_RECIPIENTS_TABLE}")
         except Exception as e:
             print(f"Error appending send recipient: {e}") 
