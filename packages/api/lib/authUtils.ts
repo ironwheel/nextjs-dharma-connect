@@ -387,9 +387,9 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
     }
 
     let verificationCallbackUrl = `${hostNameWithProtocol}/login/callback/?pid=${pid}&hash=${hash}&tokenid=${verificationTokenId}`;
-    console.log("verificationEmailSend: hostNameWithProtocol:", hostNameWithProtocol);
-    console.log("verificationEmailSend: verificationTokenId:", verificationTokenId);
-    console.log("verificationEmailSend: verificationCallbackUrl:", verificationCallbackUrl);
+    // console.log("verificationEmailSend: hostNameWithProtocol:", hostNameWithProtocol);
+    // console.log("verificationEmailSend: verificationTokenId:", verificationTokenId);
+    // console.log("verificationEmailSend: verificationCallbackUrl:", verificationCallbackUrl);
 
     let emailBody = getConfirmPrompt('email', language)
         .replace(/\|\|name\|\|/g, `${participantData.first} ${participantData.last}`)
@@ -646,9 +646,9 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
 
     let tokenExistsAndVerified = false;
     if (token) {
-        console.log("checkAccess: verifyToken(token, pid, deviceFingerprint, operation):", token, pid, deviceFingerprint, operation);
+        // console.log("checkAccess: verifyToken(token, pid, deviceFingerprint, operation):", token, pid, deviceFingerprint, operation);
         tokenExistsAndVerified = verifyToken(token, pid, deviceFingerprint, operation);
-        console.log("checkAccess: verifyToken(token, pid, deviceFingerprint, operation) result:", tokenExistsAndVerified);
+        // console.log("checkAccess: verifyToken(token, pid, deviceFingerprint, operation) result:", tokenExistsAndVerified);
     } else {
         console.log("checkAccess: no token provided");
     }
@@ -657,7 +657,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     // the the pre-check of the hash means we're good to go
     // We don't need to return the token because the client already has it
     if (tokenExistsAndVerified) {
-        console.log("checkAccess: tokenExistsAndVerified");
+        // console.log("checkAccess: tokenExistsAndVerified");
         return {
             status: 'authenticated'
         };
@@ -665,13 +665,13 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
 
     // We either don't have a token or the token is not verified
     // Attempt to refresh the token
-    console.log("checkAccess: don't have a token or the token is not verified");
+    // console.log("checkAccess: don't have a token or the token is not verified");
 
     // Does this user have access?
     let tableCfg = tableGetConfig('auth');
     let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
 
-    console.log("checkAccess: getOne(auth)data:", data);
+    // console.log("checkAccess: getOne(auth)data:", data);
 
     let permittedHosts: PermittedHost[] = [];
     if (!data) {
@@ -681,9 +681,9 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     permittedHosts = data['permitted-hosts'] || [];
 
     // Does this user have access to this host?
-    console.log("checkAccess: permittedHosts:", permittedHosts);
+    // console.log("checkAccess: permittedHosts:", permittedHosts);
     const permission = permittedHosts.find(permission => permission.host === host);
-    console.log("checkAccess: permission:", permission);
+    // console.log("checkAccess: permission:", permission);
     if (!permission) {
         throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
     }
@@ -727,16 +727,16 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     // and has a TTL of AUTH_SESSION_TTL_SECONDS
     // Sessions records use a primary key of pid-deviceFingerprint
     tableCfg = tableGetConfig('sessions');
-    console.log("checkAccess: getOneWithSort(sessions) pid:", pid, "deviceFingerprint:", deviceFingerprint);
+    // console.log("checkAccess: getOneWithSort(sessions) pid:", pid, "deviceFingerprint:", deviceFingerprint);
     const session = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
-    console.log("checkAccess: getOneWithSort(sessions) session:", session);
+    // console.log("checkAccess: getOneWithSort(sessions) session:", session);
     // If session found, generate fresh access token if the session isn't expired
     if (session) {
         if (session.ttl <= Date.now()) {
             // Session is expired, delete it and fall through to the verification process
-            console.log("checkAccess: session is expired, deleting it");
+            // console.log("checkAccess: session is expired, deleting it");
             await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, session.id, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
-            console.log("checkAccess: session deleted");
+            // console.log("checkAccess: session deleted");
         } else {
             // Session is valid, generate fresh access token
             return {
@@ -760,7 +760,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     const currentVerificationTokens = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
     for (const token of currentVerificationTokens) {
         await deleteOne(tableCfg.tableName, tableCfg.pk, token.verificationTokenId, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
-        console.log("checkAccess: deleted verification token:", token.verificationTokenId);
+        // console.log("checkAccess: deleted verification token:", token.verificationTokenId);
     }
 
     const verificationActionList = [

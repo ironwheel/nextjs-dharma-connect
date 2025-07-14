@@ -9,7 +9,7 @@ import { checkAccess } from './authUtils';
 
 // Parse allowed origins from environment
 let allowedOrigins: string[] = [];
-console.log('API CORS_ORIGIN_LIST:', process.env.CORS_ORIGIN_LIST);
+// console.log('API CORS_ORIGIN_LIST:', process.env.CORS_ORIGIN_LIST);
 try {
   if (process.env.CORS_ORIGIN_LIST) {
     allowedOrigins = JSON.parse(process.env.CORS_ORIGIN_LIST);
@@ -20,13 +20,13 @@ try {
   console.warn('Failed to parse CORS_ORIGIN_LIST, falling back to localhost');
   allowedOrigins = ['http://localhost:3000'];
 }
-console.log('API allowedOrigins:', allowedOrigins);
+// console.log('API allowedOrigins:', allowedOrigins);
 
 // CORS origin function to check against allowed origins
 const corsOrigin = (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-  console.log('API CORS check:', { origin, allowedOrigins });
+  // console.log('API CORS check:', { origin, allowedOrigins });
   if (!origin || allowedOrigins.includes(origin)) {
-    console.log('API CORS: ALLOWED');
+    // console.log('API CORS: ALLOWED');
     callback(null, true);
   } else {
     console.log('API CORS: DENIED');
@@ -48,9 +48,9 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
       // CORS middleware will automatically respond to OPTIONS preflight.
       if (req.method !== 'OPTIONS') {
         // Each operation is made up of an HTTP method, a susbsystem, and a resource/action
-        console.log("API MIDDLEWARE: COOKIES:", req.cookies);
+        // console.log("API MIDDLEWARE: COOKIES:", req.cookies);
         const checkResult = await checkAccess(req.headers['x-user-id'] as string, req.headers['x-verification-hash'] as string, req.headers['x-host'] as string, req.headers['x-device-fingerprint'] as string, operation, req.cookies['token']);
-        console.log("checkResult:", checkResult.status);
+        // console.log("checkResult:", checkResult.status);
         if ((checkResult.status === 'authenticated' || checkResult.status === 'needs-verification') && checkResult.accessToken) {
           // We have a new access token to set in cookie
           const cookieStr = serialize('token', checkResult.accessToken, {
@@ -61,10 +61,10 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
             path: '/',
             maxAge: 15 * 60, // 15 minutes
           });
-          console.log("SETTING COOKIE:", cookieStr);
+          // console.log("SETTING COOKIE:", cookieStr);
           res.setHeader('Set-Cookie', cookieStr);
-          res.setHeader('Access-Control-Allow-Credentials', 'true');
-          res.setHeader('Access-Control-Allow-Origin', 'https://email-manager.slsupport.link');
+          // res.setHeader('Access-Control-Allow-Credentials', 'true');
+          // res.setHeader('Access-Control-Allow-Origin', 'https://email-manager.slsupport.link');
           // res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
           // res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
         }
@@ -78,6 +78,6 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
       res.status(500).json({ error: err.message || 'Internal Server Error' });
       return;
     }
-    console.log("API MIDDLEWARE: next():", operation);
+    // console.log("API MIDDLEWARE: next():", operation);
     next();
   });
