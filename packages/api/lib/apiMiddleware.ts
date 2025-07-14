@@ -9,6 +9,7 @@ import { checkAccess } from './authUtils';
 
 // Parse allowed origins from environment
 let allowedOrigins: string[] = [];
+console.log('API CORS_ORIGIN_LIST:', process.env.CORS_ORIGIN_LIST);
 try {
   if (process.env.CORS_ORIGIN_LIST) {
     allowedOrigins = JSON.parse(process.env.CORS_ORIGIN_LIST);
@@ -19,12 +20,16 @@ try {
   console.warn('Failed to parse CORS_ORIGIN_LIST, falling back to localhost');
   allowedOrigins = ['http://localhost:3000'];
 }
+console.log('API allowedOrigins:', allowedOrigins);
 
 // CORS origin function to check against allowed origins
 const corsOrigin = (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+  console.log('API CORS check:', { origin, allowedOrigins });
   if (!origin || allowedOrigins.includes(origin)) {
+    console.log('API CORS: ALLOWED');
     callback(null, true);
   } else {
+    console.log('API CORS: DENIED');
     callback(new Error('Not allowed by CORS'));
   }
 };
