@@ -93,17 +93,6 @@ const EMAIL_REPLY_TO = process.env.AUTH_EMAIL_REPLY_TO;
 const TELIZE_RAPIDAPI_KEY = process.env.TELIZE_RAPIDAPI_KEY;
 const TELIZE_API_HOST = process.env.TELIZE_API_HOST;
 
-// Helper function to strip quotes from environment variables
-function stripQuotes(value: string | undefined): string | undefined {
-    if (!value) return value;
-    return value.replace(/^["']|["']$/g, '');
-}
-
-// Application Domain (Logic based on environment)
-const APP_DOMAIN = stripQuotes(process.env.NEXT_PUBLIC_VERCEL_ENV === 'production'
-    ? process.env.NEXT_PUBLIC_APP_DOMAIN_PROD
-    : process.env.APP_DOMAIN_DEV);
-
 // RSA Keys (Read directly, check for existence in functions that use them)
 const RSA_PRIVATE_KEY_B64 = process.env.API_RSA_PRIVATE;
 const RSA_PUBLIC_KEY_B64 = process.env.API_RSA_PUBLIC;
@@ -332,11 +321,17 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
 
     // User has access to this HOST - send the verification email   
 
+    let hostNameWithProtocol = '';
+    if (host.includes('localhost')) {
+        hostNameWithProtocol = 'http://localhost:3000';
+    } else {
+        hostNameWithProtocol = 'https://' + host;
+    }
+
     // Check necessary configs at the start
     if (!SMTP_USERNAME || !SMTP_PASSWORD) throw new Error("SMTP credentials not configured for email sending.");
     if (!TELIZE_RAPIDAPI_KEY || !TELIZE_API_HOST) throw new Error("Geolocation API Key or Host not configured for email sending.");
     if (!EMAIL_FROM || !EMAIL_REPLY_TO) throw new Error("Sender email addresses not configured for email sending.");
-    if (!APP_DOMAIN) throw new Error("Application domain not configured for the current environment (for email sending).");
 
     // Find participant data internally
     const participantData = await findParticipantForAuth(pid);
@@ -391,8 +386,8 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
         throw new Error('AUTH_VERIFICATION_TOKEN_CREATION_FAILED');
     }
 
-    let verificationCallbackUrl = `${APP_DOMAIN}/login/callback/?pid=${pid}&hash=${hash}&tokenid=${verificationTokenId}`;
-    console.log("verificationEmailSend: APP_DOMAIN:", APP_DOMAIN);
+    let verificationCallbackUrl = `${hostNameWithProtocol}/login/callback/?pid=${pid}&hash=${hash}&tokenid=${verificationTokenId}`;
+    console.log("verificationEmailSend: hostNameWithProtocol:", hostNameWithProtocol);
     console.log("verificationEmailSend: verificationTokenId:", verificationTokenId);
     console.log("verificationEmailSend: verificationCallbackUrl:", verificationCallbackUrl);
 
