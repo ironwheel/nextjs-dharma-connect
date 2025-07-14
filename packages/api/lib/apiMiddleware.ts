@@ -48,7 +48,7 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
       // CORS middleware will automatically respond to OPTIONS preflight.
       if (req.method !== 'OPTIONS') {
         // Each operation is made up of an HTTP method, a susbsystem, and a resource/action
-        // console.log("API MIDDLEWARE: COOKIES:", req.cookies);
+        console.log("API MIDDLEWARE: COOKIES:", req.cookies);
         const checkResult = await checkAccess(req.headers['x-user-id'] as string, req.headers['x-verification-hash'] as string, req.headers['x-host'] as string, req.headers['x-device-fingerprint'] as string, operation, req.cookies['token']);
         console.log("checkResult:", checkResult.status);
         if ((checkResult.status === 'authenticated' || checkResult.status === 'needs-verification') && checkResult.accessToken) {
