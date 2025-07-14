@@ -62,17 +62,41 @@ def add_recipient_entry(dynamodb, table_name: str, campaign: str, student: Dict[
     if dryrun:
         print(f"[DRYRUN] Would add recipient to {table_name} for campaign '{campaign}': {entry}")
         return
+    
     table = dynamodb.Table(table_name)
     try:
-        table.update_item(
-            Key={'campaignString': campaign},
-            UpdateExpression='SET entries = list_append(if_not_exists(entries, :empty_list), :entry)',
-            ExpressionAttributeValues={
-                ':entry': [entry],
-                ':empty_list': []
-            }
-        )
-        print(f"Added recipient to {table_name}: {entry['email']}")
+        # First, check if the campaign record exists and get current entries
+        response = table.get_item(Key={'campaignString': campaign})
+        existing_entries = []
+        if 'Item' in response:
+            existing_entries = response['Item'].get('entries', [])
+        
+        # Check if this email already exists in the entries
+        email = entry['email']
+        email_exists = any(existing_entry.get('email') == email for existing_entry in existing_entries)
+        
+        if email_exists:
+            print(f"Skipped duplicate recipient in {table_name}: {email}")
+            return
+        
+        # Add the new entry
+        if existing_entries:
+            # Update existing record by appending to entries
+            table.update_item(
+                Key={'campaignString': campaign},
+                UpdateExpression='SET entries = list_append(entries, :entry)',
+                ExpressionAttributeValues={
+                    ':entry': [entry]
+                }
+            )
+        else:
+            # Create new record with entries array
+            table.put_item(Item={
+                'campaignString': campaign,
+                'entries': [entry]
+            })
+        
+        print(f"Added recipient to {table_name}: {email}")
     except Exception as e:
         print(f"Error adding recipient to {table_name}: {e}")
 

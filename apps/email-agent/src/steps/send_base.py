@@ -160,9 +160,11 @@ class SendBaseStep:
                     # Burst control (only for Send-Once and Send-Continuously)
                     if not self.dryrun:
                         if (i + 1) % EMAIL_BURST_SIZE == 0 and i + 1 < len(eligible_students):
+                            self.log('progress', f"[BURST] Starting burst control sleep for {EMAIL_RECOVERY_SLEEP_SECS} seconds...")
                             await self._update_progress(work_order, f"Burst limit reached for {lang}, sleeping for {EMAIL_RECOVERY_SLEEP_SECS} seconds...", step.name)
                             try:
                                 await async_interruptible_sleep(EMAIL_RECOVERY_SLEEP_SECS, work_order, self.aws_client)
+                                self.log('progress', f"[BURST] Burst control sleep completed, resuming email sending...")
                             except InterruptedError:
                                 await self._update_progress(work_order, "Step interrupted by stop request.", step.name)
                                 step.status = StepStatus.INTERRUPTED
