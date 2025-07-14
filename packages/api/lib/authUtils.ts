@@ -581,6 +581,8 @@ export function getPermissionsLogic(pid: string): any {
  * @param {string} secretKeyHex - 64-character hexadecimal secret key
  * @returns {string} HMAC-SHA256 hash as a hex string
  * 
+ * The command to generate a new secret is:
+ * openssl rand -hex 32
  * The command line tool to generate the hash is:
  * echo -n "<student id" | openssl dgst -sha256 -mac HMAC -macopt hexkey:<secret> -hex
 */
@@ -649,8 +651,11 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
 
     let tokenExistsAndVerified = false;
     if (token) {
-        // console.log("checkAccess: token:", token);
+        console.log("checkAccess: verifyToken(token, pid, deviceFingerprint, operation):", token, pid, deviceFingerprint, operation);
         tokenExistsAndVerified = verifyToken(token, pid, deviceFingerprint, operation);
+        console.log("checkAccess: verifyToken(token, pid, deviceFingerprint, operation) result:", tokenExistsAndVerified);
+    } else {
+        console.log("checkAccess: no token provided");
     }
 
     // The verify token function which includes operation permission along with
