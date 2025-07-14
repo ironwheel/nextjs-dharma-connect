@@ -753,7 +753,6 @@ class AWSClient:
     def append_dryrun_recipient(self, campaign_string: str, entry: dict):
         """Append a recipient to the dryrun_recipients table."""
         try:
-            print(f"[DEBUG] Attempting to append dryrun recipient: {campaign_string}, {entry}")
             table = self.dynamodb.Table(DRYRUN_RECIPIENTS_TABLE)
             
             # Try to get existing record
@@ -769,14 +768,12 @@ class AWSClient:
                         UpdateExpression='SET entries = :entries',
                         ExpressionAttributeValues={':entries': entries}
                     )
-                    print(f"[DEBUG] Successfully appended dryrun recipient to existing campaign in table: {DRYRUN_RECIPIENTS_TABLE}")
                 else:
                     # Record doesn't exist, create new record with entries array
                     table.put_item(Item={
                         'campaignString': campaign_string,
                         'entries': [entry]
                     })
-                    print(f"[DEBUG] Successfully created new dryrun campaign record in table: {DRYRUN_RECIPIENTS_TABLE}")
             except ClientError as e:
                 if e.response['Error']['Code'] == 'ValidationException':
                     # Table might not exist or have different schema, fall back to old format
@@ -785,7 +782,6 @@ class AWSClient:
                         'recipient': entry,
                         'timestamp': datetime.utcnow().isoformat()
                     })
-                    print(f"[DEBUG] Fallback: appended dryrun recipient using old format")
                 else:
                     raise
         except Exception as e:
@@ -794,7 +790,6 @@ class AWSClient:
     def append_send_recipient(self, campaign_string: str, entry: dict):
         """Append a recipient to the send_recipients table."""
         try:
-            print(f"[DEBUG] Attempting to append send recipient: {campaign_string}, {entry}")
             table = self.dynamodb.Table(SEND_RECIPIENTS_TABLE)
             
             # Try to get existing record
@@ -810,14 +805,12 @@ class AWSClient:
                         UpdateExpression='SET entries = :entries',
                         ExpressionAttributeValues={':entries': entries}
                     )
-                    print(f"[DEBUG] Successfully appended send recipient to existing campaign in table: {SEND_RECIPIENTS_TABLE}")
                 else:
                     # Record doesn't exist, create new record with entries array
                     table.put_item(Item={
                         'campaignString': campaign_string,
                         'entries': [entry]
                     })
-                    print(f"[DEBUG] Successfully created new send campaign record in table: {SEND_RECIPIENTS_TABLE}")
             except ClientError as e:
                 if e.response['Error']['Code'] == 'ValidationException':
                     # Table might not exist or have different schema, fall back to old format
@@ -826,7 +819,6 @@ class AWSClient:
                         'recipient': entry,
                         'timestamp': datetime.utcnow().isoformat()
                     })
-                    print(f"[DEBUG] Fallback: appended send recipient using old format")
                 else:
                     raise
         except Exception as e:
