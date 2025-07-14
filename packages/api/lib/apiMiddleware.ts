@@ -61,7 +61,7 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
             path: '/',
             maxAge: 15 * 60, // 15 minutes
           });
-          // console.log("SETTING COOKIE:", cookieStr);
+          console.log("SETTING COOKIE:", cookieStr);
           res.setHeader('Set-Cookie', cookieStr);
         }
         if (checkResult.status !== 'authenticated') {
