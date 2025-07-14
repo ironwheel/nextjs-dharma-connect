@@ -756,7 +756,7 @@ class AWSClient:
             print(f"[DEBUG] Attempting to append dryrun recipient: {campaign_string}, {entry}")
             table = self.dynamodb.Table(DRYRUN_RECIPIENTS_TABLE)
             table.put_item(Item={
-                'campaign': campaign_string,
+                'campaignString': campaign_string,
                 'recipient': entry,
                 'timestamp': datetime.utcnow().isoformat()
             })
@@ -770,7 +770,7 @@ class AWSClient:
             print(f"[DEBUG] Attempting to append send recipient: {campaign_string}, {entry}")
             table = self.dynamodb.Table(SEND_RECIPIENTS_TABLE)
             table.put_item(Item={
-                'campaign': campaign_string,
+                'campaignString': campaign_string,
                 'recipient': entry,
                 'timestamp': datetime.utcnow().isoformat()
             })
