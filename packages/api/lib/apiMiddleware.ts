@@ -56,7 +56,7 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
           const cookieStr = serialize('token', checkResult.accessToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
+            sameSite: 'none',
             domain: req.headers['x-host'] as string,
             path: '/',
             maxAge: 15 * 60, // 15 minutes
