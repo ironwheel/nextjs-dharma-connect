@@ -899,7 +899,10 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                                     })()}
                                                                     {stepName === 'Dry-Run' && (() => {
                                                                         const prepareStep = workOrder.steps?.find(s => extractString(s.name) === 'Prepare')
-                                                                        const enabled = prepareStep && extractString(prepareStep.status) === 'complete'
+                                                                        const dryRunStep = workOrder.steps?.find(s => extractString(s.name) === 'Dry-Run')
+                                                                        // Show buttons if Prepare is complete OR if Dry-Run itself is complete (meaning it was already executed)
+                                                                        const enabled = (prepareStep && extractString(prepareStep.status) === 'complete') ||
+                                                                            (dryRunStep && extractString(dryRunStep.status) === 'complete')
                                                                         const langs = Object.keys(workOrder.languages ?? {}).filter(lang => !!workOrder.languages?.[lang]);
                                                                         const existence = campaignExistence[workOrder.id] || {};
                                                                         return enabled ? (

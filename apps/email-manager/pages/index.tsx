@@ -47,6 +47,15 @@ export default function Home() {
     const [editingWorkOrderId, setEditingWorkOrderId] = useState<string | undefined>()
     const [refreshCounter, setRefreshCounter] = useState(0)
     const [newlyCreatedWorkOrder, setNewlyCreatedWorkOrder] = useState<WorkOrder | undefined>(undefined)
+    const [isClient, setIsClient] = useState(false)
+
+    // Set isClient to true after component mounts
+    React.useEffect(() => {
+        const timer = setTimeout(() => {
+            setIsClient(true)
+        }, 100) // Small delay to ensure proper rendering
+        return () => clearTimeout(timer)
+    }, [])
 
     const handleNewWorkOrder = () => {
         setEditingWorkOrderId(undefined)
@@ -94,7 +103,17 @@ export default function Home() {
 
     return (
         <Container className="py-4 bg-dark text-light min-vh-100">
-            <h1 className="mb-2 text-light fw-bold fs-2">Email Work Orders</h1>
+            <h1 className="mb-2 text-light fw-bold fs-2">
+                Email Work Orders
+                {isClient && (
+                    <span className="ms-2 text-info fs-6 fw-normal">
+                        {window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+                            ? 'localhost'
+                            : (process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || 'dev').substring(0, 7)
+                        }
+                    </span>
+                )}
+            </h1>
             <WorkOrderList
                 onEdit={handleEditWorkOrder}
                 onNew={handleNewWorkOrder}
