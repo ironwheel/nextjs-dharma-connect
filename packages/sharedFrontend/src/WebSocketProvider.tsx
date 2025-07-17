@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useRef, useState, useCallback, useEffect, ReactNode } from 'react';
+import { useRouter } from 'next/router';
 import { getWebSocketConnection } from './apiActions';
 
 interface WebSocketContextType {
@@ -17,7 +18,26 @@ interface WebSocketProviderProps {
     resource?: string; // NEW: resource prop
 }
 
+/**
+ * Checks if the current route is an authentication-related route where WebSocket connections
+ * should be skipped to avoid interfering with the auth flow.
+ */
+function isAuthRoute(pathname: string): boolean {
+    // Define patterns for auth-related routes
+    const authRoutePatterns = [
+        /^\/login(\/.*)?$/,           // /login, /login/callback, etc.
+        /^\/auth(\/.*)?$/,            // /auth, /auth/callback, etc.
+        /^\/signin(\/.*)?$/,          // /signin, /signin/callback, etc.
+        /^\/signup(\/.*)?$/,          // /signup, /signup/callback, etc.
+        /^\/verify(\/.*)?$/,          // /verify, /verify/email, etc.
+        /^\/confirm(\/.*)?$/,         // /confirm, /confirm/email, etc.
+    ];
+
+    return authRoutePatterns.some(pattern => pattern.test(pathname));
+}
+
 export function WebSocketProvider({ children, resource = 'work-orders' }: WebSocketProviderProps) {
+    const router = useRouter();
     const [status, setStatus] = useState<'connecting' | 'open' | 'closed'>('closed');
     const [lastMessage, setLastMessage] = useState<any>(null);
     const [connectionId, setConnectionId] = useState<string | null>(null);
@@ -117,13 +137,22 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
         }
     }, [isReady]);
 
-    // Auto-connect on mount if pid/hash are present in URL
+    // Auto-connect on mount if pid/hash are present in URL and not on auth route
     useEffect(() => {
         if (typeof window === 'undefined') return;
+        
         const urlParams = new URLSearchParams(window.location.search);
         const pid = urlParams.get('pid');
         const hash = urlParams.get('hash');
+        
         if (pid && hash) {
+            // Check if we're on an auth route
+            if (isAuthRoute(router.pathname)) {
+                console.log('[WebSocket] Skipping auto-connect on auth route:', router.pathname);
+                return;
+            }
+            
+            console.log('[WebSocket] Attempting auto-connect on route:', router.pathname);
             getWebSocketConnection(resource, pid, hash)
                 .then((details) => {
                     if ('websocketUrl' in details && details.websocketUrl) {
@@ -140,7 +169,7 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
         }
         // Only run once on mount
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [resource]);
+    }, [resource, router.pathname]);
 
     // Listen for manual ping requests
     useEffect(() => {

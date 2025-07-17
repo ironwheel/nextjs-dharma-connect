@@ -48,25 +48,24 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
       // CORS middleware will automatically respond to OPTIONS preflight.
       if (req.method !== 'OPTIONS') {
         // Each operation is made up of an HTTP method, a susbsystem, and a resource/action
-        // console.log("API MIDDLEWARE: COOKIES:", req.cookies);
+        console.log("API MIDDLEWARE: COOKIES:", req.cookies);
         const checkResult = await checkAccess(req.headers['x-user-id'] as string, req.headers['x-verification-hash'] as string, req.headers['x-host'] as string, req.headers['x-device-fingerprint'] as string, operation, req.cookies['token']);
-        // console.log("checkResult:", checkResult.status);
+        console.log("checkResult:", checkResult.status);
         if ((checkResult.status === 'authenticated' || checkResult.status === 'needs-verification') && checkResult.accessToken) {
           // We have a new access token to set in cookie
+          // Browser cookie rules require secure if sameSite is none
+          // So for local development we use strict
+          // For production, because the backend is hosted on a different domain, we use none
           const cookieStr = serialize('token', checkResult.accessToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
-            sameSite: 'none',
+            sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
             domain: process.env.NODE_ENV === 'production' ? process.env.MONOREPO_PARENT_DOMAIN : req.headers['x-host'] as string,
             path: '/',
             maxAge: 15 * 60, // 15 minutes
           });
-          // console.log("SETTING COOKIE:", cookieStr);
+          console.log("SETTING COOKIE:", cookieStr);
           res.setHeader('Set-Cookie', cookieStr);
-          // res.setHeader('Access-Control-Allow-Credentials', 'true');
-          // res.setHeader('Access-Control-Allow-Origin', 'https://email-manager.slsupport.link');
-          // res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-          // res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
         }
         if (checkResult.status !== 'authenticated') {
           res.status(401).json({ error: 'Unauthorized' });
