@@ -561,17 +561,33 @@ class EmailAgent:
             steps = current_work_order.steps.copy()
             next_step = steps[next_step_index]
             next_step_name = self.extract_s(next_step.name)
+            current_status = self.extract_s(next_step.status)
             
-            self.log('debug', f"[DEBUG] Enabling step {next_step_name} at index {next_step_index}")
+            self.log('debug', f"[DEBUG] Enabling step {next_step_name} at index {next_step_index}, current status: {current_status}")
             
-            steps[next_step_index] = Step(
-                name=next_step_name,
-                status=StepStatus.READY,
-                message="",
-                isActive=True,
-                startTime=None,
-                endTime=None
-            )
+            # Only update the step if it's in READY state, otherwise just set isActive to true
+            if current_status == StepStatus.READY:
+                # Reset to READY state with empty message (original behavior)
+                steps[next_step_index] = Step(
+                    name=next_step_name,
+                    status=StepStatus.READY,
+                    message="",
+                    isActive=True,
+                    startTime=None,
+                    endTime=None
+                )
+                self.log('debug', f"[DEBUG] Reset step {next_step_name} to READY state")
+            else:
+                # Preserve current status and message, only set isActive to true
+                steps[next_step_index] = Step(
+                    name=next_step_name,
+                    status=current_status,
+                    message=self.extract_s(next_step.message),
+                    isActive=True,
+                    startTime=self.extract_s(next_step.startTime),
+                    endTime=self.extract_s(next_step.endTime)
+                )
+                self.log('debug', f"[DEBUG] Preserved step {next_step_name} status ({current_status}) and message, set isActive=True")
             
             # Convert all steps to plain dicts before updating DynamoDB
             plain_steps = [self.step_to_plain_dict(s) for s in steps]
