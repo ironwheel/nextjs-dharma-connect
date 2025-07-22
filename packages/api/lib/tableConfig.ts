@@ -4,7 +4,7 @@ export interface TableConfig {
   envVar: string;
   pk: string;
   sk: string;
-  ops: Array<'get' | 'list' | 'delete' | 'put'>;
+  ops: Array<'get' | 'list' | 'delete' | 'put' | 'count'>;
 }
 
 export const tables: TableConfig[] = [
@@ -12,15 +12,18 @@ export const tables: TableConfig[] = [
   { resource: 'send-recipients', envVar: 'DYNAMODB_TABLE_SEND_RECIPIENTS', pk: 'campaignString', sk: '', ops: ['get', 'list'] },
   { resource: 'work-orders', envVar: 'DYNAMODB_TABLE_WORK_ORDERS', pk: 'id', sk: '', ops: ['get', 'list', 'put', 'delete'] },
   { resource: 'work-order-audit-logs', envVar: 'DYNAMODB_TABLE_WORK_ORDER_AUDIT_LOGS', pk: 'workOrderId', sk: 'timestamp', ops: ['get', 'list', 'put'] },
-  { resource: 'students', envVar: 'DYNAMODB_TABLE_PARTICIPANTS', pk: 'id', sk: '', ops: ['get', 'list'] },
+  { resource: 'students', envVar: 'DYNAMODB_TABLE_PARTICIPANTS', pk: 'id', sk: '', ops: ['get', 'list', 'count'] },
   { resource: 'prompts', envVar: 'DYNAMODB_TABLE_PROMPTS', pk: 'prompt', sk: '', ops: ['get', 'list'] },
-  { resource: 'events', envVar: 'DYNAMODB_TABLE_EVENTS', pk: 'aid', sk: '', ops: ['get', 'list'] },
+  { resource: 'events', envVar: 'DYNAMODB_TABLE_EVENTS', pk: 'aid', sk: '', ops: ['get', 'list', 'count'] },
   { resource: 'stages', envVar: 'DYNAMODB_TABLE_STAGES', pk: 'stage', sk: '', ops: ['get', 'list'] },
   { resource: 'config', envVar: 'DYNAMODB_TABLE_CONFIG', pk: 'key', sk: '', ops: ['get', 'list'] },
   { resource: 'auth', envVar: 'DYNAMODB_TABLE_AUTH', pk: 'id', sk: '', ops: ['get'] },
-  { resource: 'actions-profile', envVar: 'DYNAMODB_TABLE_ACTIONS_PROFILE', pk: 'profile', sk: '', ops: ['get'] },
+  { resource: 'actions-profile', envVar: 'DYNAMODB_TABLE_ACTIONS_PROFILES', pk: 'profile', sk: '', ops: ['get'] },
   { resource: 'sessions', envVar: 'DYNAMODB_TABLE_SESSIONS', pk: 'id', sk: 'fingerprint', ops: ['get', 'put'] },
   { resource: 'verification-tokens', envVar: 'DYNAMODB_TABLE_VERIFICATION_TOKENS', pk: 'verificationTokenId', sk: '', ops: ['get', 'put'] },
+  { resource: 'pools', envVar: 'DYNAMODB_TABLE_POOLS', pk: 'name', sk: '', ops: ['get', 'list', 'count'] },
+  { resource: 'views', envVar: 'DYNAMODB_TABLE_VIEWS', pk: 'name', sk: '', ops: ['get', 'list', 'count'] },
+  { resource: 'views-profiles', envVar: 'DYNAMODB_TABLE_VIEWS_PROFILES', pk: 'profile', sk: '', ops: ['get'] },
 ];
 
 /**

@@ -16,7 +16,6 @@ let cachedCsrfToken: string | null = null;
 // Ensure we have a valid CSRF token
 async function ensureCsrfToken(): Promise<string> {
   if (cachedCsrfToken) {
-    console.log("ensureCsrfToken CACHED: token", cachedCsrfToken);
     return cachedCsrfToken
   }
   const resp = await fetch(`${API_BASE}/api/csrf`, {
@@ -25,7 +24,6 @@ async function ensureCsrfToken(): Promise<string> {
   const body = await resp.json();
   let token = body.csrfToken;
   cachedCsrfToken = token;
-  console.log("ensureCsrfToken NEW: token", token);
   return token!;
 }
 

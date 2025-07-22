@@ -7,7 +7,10 @@
         "test": "echo \"Error: no test specified\" && exit 1"
     },
     "dependencies": {
-        "aws-sdk": "^2.1531.0",
+        "@aws-sdk/client-dynamodb": "^3.540.0",
+        "@aws-sdk/lib-dynamodb": "^3.540.0",
+        "@aws-sdk/client-sqs": "^3.540.0",
+        "@aws-sdk/client-apigatewaymanagementapi": "^3.540.0",
         "jsonwebtoken": "^9.0.2"
     },
     "keywords": [

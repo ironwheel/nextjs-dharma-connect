@@ -7,11 +7,11 @@ export interface WebSocketConfig {
 export const websockets: WebSocketConfig[] = [
     {
         resource: 'work-orders',
-        envVar: 'AWS_WEBSOCKET_WORKORDERS_API_URL'
+        envVar: 'AWS_WEBSOCKET_API_URL'
     },
     {
         resource: 'students',
-        envVar: 'AWS_WEBSOCKET_STUDENTS_API_URL'
+        envVar: 'AWS_WEBSOCKET_API_URL'
     },
 ];
 

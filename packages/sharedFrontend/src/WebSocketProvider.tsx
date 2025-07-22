@@ -43,6 +43,7 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
     const [connectionId, setConnectionId] = useState<string | null>(null);
     const ws = useRef<WebSocket | null>(null);
     const [isReady, setIsReady] = useState(false);
+    const hasConnected = useRef(false); // Guard against duplicate connections in Strict Mode
 
     const connect = useCallback((url: string) => {
         if (ws.current?.readyState === WebSocket.OPEN) {
@@ -140,19 +141,27 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
     // Auto-connect on mount if pid/hash are present in URL and not on auth route
     useEffect(() => {
         if (typeof window === 'undefined') return;
-        
+
+        // Guard against duplicate connections in React Strict Mode
+        if (hasConnected.current) {
+            console.log('[WebSocket] Already attempted connection, skipping duplicate');
+            return;
+        }
+
         const urlParams = new URLSearchParams(window.location.search);
         const pid = urlParams.get('pid');
         const hash = urlParams.get('hash');
-        
+
         if (pid && hash) {
             // Check if we're on an auth route
             if (isAuthRoute(router.pathname)) {
                 console.log('[WebSocket] Skipping auto-connect on auth route:', router.pathname);
                 return;
             }
-            
+
             console.log('[WebSocket] Attempting auto-connect on route:', router.pathname);
+            hasConnected.current = true; // Mark that we've attempted connection
+
             getWebSocketConnection(resource, pid, hash)
                 .then((details) => {
                     if ('websocketUrl' in details && details.websocketUrl) {
@@ -163,6 +172,7 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
                 })
                 .catch((err) => {
                     console.error('[WebSocket] Failed to get connection:', err);
+                    hasConnected.current = false; // Reset on error to allow retry
                 });
         } else {
             console.warn('[WebSocket] No pid/hash found in URL, skipping auto-connect');

@@ -1,0 +1,9 @@
+   {
+     "requestContext": {
+       "routeKey": "$connect",
+       "connectionId": "test-connection"
+     },
+     "queryStringParameters": {
+       "token": "dummy"
+     }
+   }

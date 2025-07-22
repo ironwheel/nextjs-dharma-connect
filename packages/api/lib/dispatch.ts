@@ -2,8 +2,8 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import { tables, TableConfig } from './tableConfig';
 import { websockets, WebSocketConfig, websocketGetConfig } from './websocketConfig';
-import { listAll, listAllChunked, getOne, deleteOne, updateItem, updateItemWithCondition, listAllFiltered, putOne } from './dynamoClient';
-import { verificationEmailSend, verificationEmailCallback, createToken } from './authUtils';
+import { listAll, listAllChunked, getOne, deleteOne, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll } from './dynamoClient';
+import { verificationEmailSend, verificationEmailCallback, createToken, getViews, getViewsWritePermission, getViewsExportCSV } from './authUtils';
 import { serialize } from 'cookie';
 import { v4 as uuidv4 } from 'uuid';
 import { sendWorkOrderMessage } from './sqsClient';
@@ -47,6 +47,12 @@ async function dispatchTable(
     const { filterFieldName, filterFieldValue } = req.body;
     const items = await listAllFiltered(tableName, filterFieldName, filterFieldValue);
     return res.status(200).json({ items });
+  }
+
+  // COUNT (POST method for counting items)
+  if (req.method === 'POST' && id === 'count' && cfg.ops.includes('count')) {
+    const count = await countAll(tableName);
+    return res.status(200).json({ count });
   }
 
   // GET ONE
@@ -101,7 +107,8 @@ async function dispatchTable(
   if (cfg.ops.includes('list')) allowed.push('GET');
   if (cfg.ops.includes('get')) allowed.push('GET');
   if (cfg.ops.includes('delete')) allowed.push('DELETE');
-  if (cfg.ops.includes('get')) allowed.push('PUT');
+  if (cfg.ops.includes('put')) allowed.push('PUT');
+  if (cfg.ops.includes('count')) allowed.push('POST'); // Allow POST for count operations
   allowed.push('POST'); // Allow POST for updates and filtered queries
   res.setHeader('Allow', allowed);
   return res.status(405).end(`Method ${req.method} Not Allowed`);
@@ -136,6 +143,16 @@ async function dispatchAuth(
         }
         const callbackResult = await verificationEmailCallback(pid, hash, host, deviceFingerprint, id);
         return res.status(200).json(callbackResult);
+      case 'getViews':
+        const viewsListData = await getViews(pid, host);
+        console.log('dispatchAuth getViews: returning views data:', { views: viewsListData });
+        return res.status(200).json({ views: viewsListData });
+      case 'viewsWritePermission':
+        const viewsWritePermission = await getViewsWritePermission(pid, host);
+        return res.status(200).json({ viewsWritePermission });
+      case 'viewsExportCSV':
+        const exportCSV = await getViewsExportCSV(pid, host);
+        return res.status(200).json({ exportCSV });
       default:
         return res.status(404).json({ error: `Unknown auth action: ${action}` });
     }
@@ -173,11 +190,16 @@ async function dispatchWebSocket(
         const websocketActions = ['websocket:connect'];
         const token = createToken(pid, deviceFingerprint, websocketActions);
 
-        console.log("DISPATCH: websocket url: ", `${wsConfig.websocketUrl}?token=${token}`);
-
-        // Return the WebSocket URL with token
+        let url = `${wsConfig.websocketUrl}?token=${token}`;
+        if (resource === 'students') {
+          url += '&tableType=students';
+        } else if (resource === 'work-orders') {
+          url += '&tableType=work-orders';
+        }
+        console.log("DISPATCH: websocket url: ", url);
+        // Return the WebSocket URL with token and tableType if needed
         return res.status(200).json({
-          websocketUrl: `${wsConfig.websocketUrl}?token=${token}`,
+          websocketUrl: url,
           token: token
         });
       case 'connectnotoken':

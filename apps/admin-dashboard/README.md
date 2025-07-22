@@ -1,39 +1,126 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Admin Dashboard
+
+This is a [Next.js](https://nextjs.org/) TypeScript application for managing student data and events in the Dharma Connect system.
+
+## Features
+
+- **Student Management**: View and manage student records with real-time updates.
+- **Event Management**: Switch between different events and view student participation.
+- **Configurable Views**: User-specific, event-translated table views with dynamic columns and conditions.
+- **Eligibility Filtering**: Only students eligible for the selected event are shown, with eligibility recalculated on event change or data update.
+- **View Conditions**: Each view can define conditions that further filter eligible students.
+- **Real-time Updates**: WebSocket integration for live updates to student data.
+- **Search Functionality**: Incremental search filters displayed students.
+- **Responsive Design**: Works on desktop and mobile devices.
+
+## Core Design
+
+### View System
+
+- The list of available views is user-specific and fetched via `authGetViews()`.
+- The default view is "Joined". Users can select other views from a dropdown.
+- **View Translation:**  
+  Before looking up a view, the code checks the current event’s `config.dashboardViews` map. If a translation exists for the selected view, it is used; otherwise, a user-facing error is displayed.
+- **No Fallbacks:**  
+  If a view (or its translation) is missing, an error message is shown and no table is displayed. There are no default or fallback columns.
+- **View Definitions:**  
+  Views are defined in the backend "views table" and include both column definitions and view conditions.
+
+### Eligibility and Data Flow
+
+- On startup, the entire student table is loaded into an in-memory shadow table.
+- The eligible students list is created by calling `addEligible()` for each student, based on the current event.
+- The eligible list is rebuilt when:
+  - A new event is selected.
+  - A websocket update occurs.
+- **View conditions** are always applied to the eligible list before display.
+- **Incremental search** further filters the displayed students.
+
+### WebSocket Integration
+
+- The dashboard listens for real-time updates via WebSocket.
+- On receiving a message of type `studentUpdate`:
+  - The in-memory student table is updated.
+  - Eligibility is re-checked for the affected student.
+  - View conditions and search are re-applied.
+- **WebSocket message format:**
+  ```json
+  {
+    "type": "studentUpdate",
+    "id": "<studentId>",
+    "eventName": "<INSERT|MODIFY|REMOVE>",
+    "newImage": { ... } // DynamoDB NewImage format
+  }
+  ```
+
+### Error Handling
+
+- If a view or its translation is missing, the message `View '<name>' not found` is displayed and no table is shown.
+- No fallback columns or default views are used.
+
+## Technology Stack
+
+- **Frontend:** Next.js (TypeScript)
+- **UI Framework:** React Bootstrap
+- **State Management:** React Hooks
+- **API:** RESTful API via sharedFrontend package
+- **Real-time:** WebSocket integration
+- **Styling:** Bootstrap CSS with custom components
 
 ## Getting Started
 
-First, install the dependencies:
+### Prerequisites
 
-```bash
-npm install
-# or
-yarn install
-# or
-pnpm install
-Next, set up your local environment variables.Environment Variables (Local Development)This project requires several environment variables for connecting to AWS services, authentication, email sending, and external APIs. These should not be committed to Git.Create a file named .env.local in the root directory of the project.Add the following content to .env.local, replacing the placeholder values (your-...) with your actual credentials and configuration:# AWS Configuration
-AWS_REGION=us-east-1 # Or your preferred AWS region
-AWS_COGNITO_IDENTITY_POOL_ID=us-east-1:your-actual-pool-id
+- Node.js 18+
+- pnpm (recommended) or npm
 
-# --- Authentication and API Keys (auth.js) ---
+### Installation
 
-# RSA Keys for JWT (Ensure correct formatting for newlines if using PEM strings)
-API_RSA_PRIVATE="-----BEGIN RSA PRIVATE KEY-----\nYOUR_PRIVATE_KEY_CONTENT_HERE_WITH_NEWLINES_AS_\\n\n-----END RSA PRIVATE KEY-----"
-API_RSA_PUBLIC="-----BEGIN PUBLIC KEY-----\nYOUR_PUBLIC_KEY_CONTENT_HERE_WITH_NEWLINES_AS_\\n\n-----END PUBLIC KEY-----"
+1. Install dependencies:
+   ```bash
+   pnpm install
+   ```
 
-# SMTP Credentials for Nodemailer (auth.js)
-SMTP_USERNAME="your_actual_smtp_email_address"
-SMTP_PASSWORD="your_actual_smtp_password"
+2. Set up environment variables in `.env.local`:
+   ```
+   NEXT_PUBLIC_API_URL=http://localhost:3001
+   NEXT_PUBLIC_STUDENT_HISTORY_URL=http://localhost:3002
+   ```
 
-# Telize RapidAPI Key for geolocation (auth.js)
-TELIZE_RAPIDAPI_KEY="your_actual_telize_rapidapi_key"
+3. Run the development server:
+   ```bash
+   pnpm dev
+   ```
 
-# --- Application Domain Configuration (auth.js) ---
-# Used for constructing confirmation URLs.
-APP_DOMAIN_DEV="http://localhost:3000/"
-NEXT_PUBLIC_APP_DOMAIN_PROD="[http://your.domain.com/](http://your.domain.com/)" # Your actual production domain
-Important: Make sure .env.local is listed in your .gitignore file to prevent accidentally committing your secrets.Running the Development ServerOnce the environment variables are set up, run the development server:npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-Open http://localhost:3000 with your browser to see the result. (Note: You will likely need a valid pid query parameter, e.g., http://localhost:3000/?pid=your-test-pid, to access the main dashboard).You can start editing the page by modifying pages/index.js. The page auto-updates as you edit the file.API routes are handled in the pages/api directory.This project uses next/font to automatically optimize and load Inter, a custom Google Font.Learn MoreTo learn more about Next.js, take a look at the following resources:Next.js Documentation - learn about Next.js features and API.Learn Next.js - an interactive Next.js tutorial.You can check out the Next.js GitHub repository - your feedback and contributions are welcome!Deploy on VercelThe easiest way to deploy your Next.js app is to use the Vercel Platform from the creators of Next.js.Vercel Environment Variables SetupBefore deploying, you must configure the same environment variables listed in the .env.local section within your Vercel project settings.Go to your project dashboard on Vercel.Navigate to the "Settings" tab.Click on "Environment Variables" in the left sidebar.For each variable listed in the .env.local example (e.g., AWS_REGION, AWS_COGNITO_IDENTITY_POOL_ID, API_RSA_PRIVATE, SMTP_PASSWORD, etc.), add it here:Enter the variable Name (e.g., AWS_COGNITO_IDENTITY_POOL_ID).Enter the Value (your actual secret credential or configuration value).Important: For sensitive values like API_RSA_PRIVATE, SMTP_PASSWORD, etc., ensure you select the "Secret" type if available, or paste the value carefully. Vercel handles multi-line values well.Choose the environments (Production, Preview, Development) where the variable should be available. For secrets, you typically need them in Production and potentially Preview.Save each variable.Your deployed application will automatically use these variables instead of the ones in .env.local.Check out the Vercel Environment Variables documentation and the [Next.js deployment documentation
+4. Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+## Usage
+
+- **Event Selection:** Choose which event to view student data for.
+- **View Selection:** Switch between different table views (e.g., Joined, Eligible).
+- **Search:** Search for students by name or email.
+- **Table Features:** Sorting, checkboxes, inline editing, and real-time updates.
+
+## Architecture
+
+- **DataTable:** Custom table component for displaying student data.
+- **EventSelection:** Dropdown for selecting events.
+- **ViewSelection:** Dropdown for selecting table views.
+- **WebSocket Handling:** Updates in-memory data and triggers eligibility/view re-evaluation.
+
+## Environment Variables
+
+| Variable                        | Description                        | Required |
+|----------------------------------|------------------------------------|----------|
+| `NEXT_PUBLIC_API_URL`            | Base URL for API calls             | Yes      |
+| `NEXT_PUBLIC_STUDENT_HISTORY_URL`| URL for student history pages      | No       |
+
+## Troubleshooting
+
+- **WebSocket Connection Failed:** Check if the backend WebSocket service is running.
+- **API Calls Failing:** Verify `NEXT_PUBLIC_API_URL` is set correctly.
+- **TypeScript Errors:** Run `pnpm install` to ensure all dependencies are installed.
+
+---
+
+If you have further questions about the design or usage, please refer to the code comments or contact the project maintainers.

@@ -1,10 +1,14 @@
-const AWS = require('aws-sdk');
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBDocumentClient, PutCommand, DeleteCommand, GetCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
+const { SQSClient } = require('@aws-sdk/client-sqs');
+const { ApiGatewayManagementApiClient, PostToConnectionCommand } = require('@aws-sdk/client-apigatewaymanagementapi');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
-// Initialize AWS services
-const dynamodb = new AWS.DynamoDB.DocumentClient();
-const sqs = new AWS.SQS();
+// Initialize AWS v3 clients
+const dynamoClient = new DynamoDBClient({});
+const dynamodb = DynamoDBDocumentClient.from(dynamoClient);
+const sqs = new SQSClient({});
 
 // Get environment variables
 const WORK_ORDERS_TABLE = process.env.WORK_ORDERS_TABLE;
@@ -27,10 +31,8 @@ if (WEBSOCKET_API_URL) {
     console.log("[ERROR] WEBSOCKET_API_URL environment variable is not set");
 }
 
-// Initialize API Gateway Management API client
-const apigwmgmt = MGMT_API_URL ? new AWS.ApiGatewayManagementApi({
-    endpoint: MGMT_API_URL
-}) : null;
+// Initialize API Gateway Management API v3 client
+const apigwmgmt = MGMT_API_URL ? new ApiGatewayManagementApiClient({ endpoint: MGMT_API_URL }) : null;
 
 /**
  * Verify JWT token and return decoded payload
@@ -118,12 +120,11 @@ async function getConnectionIds(tableType) {
     const connectionsTable = tableType === 'students' ? STUDENT_CONNECTIONS_TABLE : WORK_ORDER_CONNECTIONS_TABLE;
 
     try {
-        const response = await dynamodb.scan({
+        const response = await dynamodb.send(new ScanCommand({
             TableName: connectionsTable,
             ProjectionExpression: 'connectionId'
-        }).promise();
-
-        return response.Items.map(item => item.connectionId);
+        }));
+        return (response.Items || []).map(item => item.connectionId);
     } catch (error) {
         console.log(`[DEBUG] Error getting connection IDs for ${tableType}: ${error.message}`);
         return [];
@@ -186,7 +187,7 @@ async function handleConnect(event) {
 
     // Store connection with user info
     try {
-        await dynamodb.put({
+        await dynamodb.send(new PutCommand({
             TableName: connectionsTable,
             Item: {
                 connectionId: connectionId,
@@ -197,7 +198,7 @@ async function handleConnect(event) {
                 deviceFingerprint: decodedToken.deviceFingerprint,
                 connectedAt: Math.floor(Date.now() / 1000)
             }
-        }).promise();
+        }));
 
         console.log(`[DEBUG] Connection ${connectionId} authenticated for user ${decodedToken.pid}`);
         return { statusCode: 200 };
@@ -219,14 +220,14 @@ async function handleDisconnect(event) {
     try {
         // Try to remove from both tables (connection might be in either)
         await Promise.all([
-            dynamodb.delete({
+            dynamodb.send(new DeleteCommand({
                 TableName: WORK_ORDER_CONNECTIONS_TABLE,
                 Key: { connectionId: connectionId }
-            }).promise(),
-            dynamodb.delete({
+            })),
+            dynamodb.send(new DeleteCommand({
                 TableName: STUDENT_CONNECTIONS_TABLE,
                 Key: { connectionId: connectionId }
-            }).promise()
+            }))
         ]);
         return { statusCode: 200 };
     } catch (error) {
@@ -269,10 +270,10 @@ async function handleDefault(event) {
         console.log(`[DEBUG] Sending response: ${JSON.stringify(responseData)}`);
 
         try {
-            await apigwmgmt.postToConnection({
-                Data: JSON.stringify(responseData),
+            await apigwmgmt.send(new PostToConnectionCommand({
+                Data: Buffer.from(JSON.stringify(responseData)),
                 ConnectionId: connectionId
-            }).promise();
+            }));
             console.log(`[DEBUG] Successfully sent connection ID ${connectionId} to client`);
             return { statusCode: 200 };
         } catch (error) {
@@ -291,10 +292,10 @@ async function handleDefault(event) {
 
     // Get connection info from database
     try {
-        const connectionResponse = await dynamodb.get({
+        const connectionResponse = await dynamodb.send(new GetCommand({
             TableName: connectionsTable,
             Key: { connectionId: connectionId }
-        }).promise();
+        }));
 
         if (!connectionResponse.Item) {
             console.log(`[DEBUG] Connection ${connectionId} not found in database`);
@@ -319,20 +320,20 @@ async function handleDefault(event) {
             // Close the connection by sending an error message
             if (apigwmgmt) {
                 try {
-                    await apigwmgmt.postToConnection({
-                        Data: JSON.stringify({ type: 'error', message: 'Token expired or invalid' }),
+                    await apigwmgmt.send(new PostToConnectionCommand({
+                        Data: Buffer.from(JSON.stringify({ type: 'error', message: 'Token expired or invalid' })),
                         ConnectionId: connectionId
-                    }).promise();
+                    }));
                 } catch (error) {
                     console.log(`[DEBUG] Error sending close message: ${error.message}`);
                 }
             }
 
             // Remove connection from database
-            await dynamodb.delete({
+            await dynamodb.send(new DeleteCommand({
                 TableName: connectionsTable,
                 Key: { connectionId: connectionId }
-            }).promise();
+            }));
 
             return { statusCode: 401, body: 'Invalid or expired token' };
         }
@@ -351,6 +352,32 @@ async function handleDefault(event) {
 
 
     return { statusCode: 200 };
+}
+
+// Replace the shallow getDiff with a deep diff
+function getDeepDiff(oldObj, newObj) {
+    if (!oldObj) return newObj;
+    const diff = {};
+    for (const key in newObj) {
+        if (!oldObj[key]) {
+            diff[key] = newObj[key];
+        } else if (
+            typeof newObj[key] === 'object' &&
+            typeof oldObj[key] === 'object' &&
+            newObj[key] !== null &&
+            oldObj[key] !== null &&
+            !(Array.isArray(newObj[key]) || Array.isArray(oldObj[key]))
+        ) {
+            // Recursively diff for nested objects
+            const nestedDiff = getDeepDiff(oldObj[key], newObj[key]);
+            if (Object.keys(nestedDiff).length > 0) {
+                diff[key] = nestedDiff;
+            }
+        } else if (JSON.stringify(newObj[key]) !== JSON.stringify(oldObj[key])) {
+            diff[key] = newObj[key];
+        }
+    }
+    return diff;
 }
 
 /**
@@ -385,7 +412,7 @@ async function handleDynamoDBStream(event) {
                 itemId = record.dynamodb.Keys.id.S;
                 messageType = 'workOrderUpdate';
                 console.log(`[DEBUG] Processing work order: ${itemId}`);
-            } else if (tableName.includes('Students')) {
+            } else if (tableName.includes('Students') || tableName.includes('foundations.participants')) {
                 tableType = 'students';
                 itemId = record.dynamodb.Keys.id.S;
                 messageType = 'studentUpdate';
@@ -395,12 +422,13 @@ async function handleDynamoDBStream(event) {
                 continue;
             }
 
-            // Create message for WebSocket
+            // Create message for WebSocket, sending only the diff if possible
+            const diff = getDeepDiff(record.dynamodb.OldImage, record.dynamodb.NewImage);
             const wsMessage = {
                 type: messageType,
                 id: itemId,
                 eventName: record.eventName,
-                newImage: record.dynamodb.NewImage
+                newImage: diff
             };
 
             console.log(`[DEBUG] Sending WebSocket message: ${JSON.stringify(wsMessage)}`);
@@ -411,20 +439,20 @@ async function handleDynamoDBStream(event) {
 
             for (const connectionId of connectionIds) {
                 try {
-                    await apigwmgmt.postToConnection({
-                        Data: JSON.stringify(wsMessage),
+                    await apigwmgmt.send(new PostToConnectionCommand({
+                        Data: Buffer.from(JSON.stringify(wsMessage)),
                         ConnectionId: connectionId
-                    }).promise();
+                    }));
                     console.log(`[DEBUG] Successfully sent to connection ${connectionId}`);
                 } catch (error) {
                     if (error.code === 'GoneException') {
                         // Connection is gone, remove it from the appropriate table
                         console.log(`Connection ${connectionId} is gone, removing from ${tableType} table`);
                         const connectionsTable = tableType === 'students' ? STUDENT_CONNECTIONS_TABLE : WORK_ORDER_CONNECTIONS_TABLE;
-                        await dynamodb.delete({
+                        await dynamodb.send(new DeleteCommand({
                             TableName: connectionsTable,
                             Key: { connectionId: connectionId }
-                        }).promise();
+                        }));
                     } else {
                         console.log(`Error sending to WebSocket: ${error.message}`);
                     }
