@@ -69,6 +69,7 @@ export async function getTableItemOrNull(
         const response = await api.get(`${API_BASE_URL}/table/${resource}/${id}`, pid, hash);
 
         if (response && response.redirected) {
+            console.log(`[API] getTableItemOrNull redirected for ${resource}/${id} - authentication required`);
             return { redirected: true };
         }
 
@@ -81,6 +82,13 @@ export async function getTableItemOrNull(
         }
 
         console.error(`[API] getTableItemOrNull failed for ${resource}/${id}:`, error);
+
+        // Check if this is an authentication error and return redirected response
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log(`[API] getTableItemOrNull authentication failed for ${resource}/${id} - returning redirected response`);
+            return { redirected: true };
+        }
+
         throw new Error(error.message || 'Failed to get table item');
     }
 }
@@ -104,10 +112,11 @@ export async function getAllTableItems(
             });
 
             if (response && response.redirected) {
+                console.log(`[API] getAllTableItems redirected for ${resource} - authentication required`);
                 return { redirected: true };
             }
 
-            if (response.items) {
+            if (response && response.items) {
                 accumulateItems = [...accumulateItems, ...response.items];
                 chunkCount++;
 
@@ -125,12 +134,19 @@ export async function getAllTableItems(
                 }
             }
 
-            lastEvaluatedKey = response.lastEvaluatedKey;
+            lastEvaluatedKey = response?.lastEvaluatedKey;
         } while (lastEvaluatedKey);
 
         return accumulateItems;
     } catch (error: any) {
         console.error(`[API] getAllTableItems failed for ${resource}:`, error);
+
+        // Check if this is an authentication error and return redirected response
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log(`[API] getAllTableItems authentication failed for ${resource} - returning redirected response`);
+            return { redirected: true };
+        }
+
         throw new Error(error.message || 'Failed to get all table items');
     }
 }
@@ -304,5 +320,100 @@ export async function getAllTableItemsFiltered(
     } catch (error: any) {
         console.error(`[API] getAllTableItemsFiltered failed for ${resource}:`, error);
         throw new Error(error.message || 'Failed to get filtered table items');
+    }
+}
+
+export async function getTableCount(
+    resource: string,
+    pid: string,
+    hash: string
+): Promise<{ count: number } | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/table/${resource}/count`, pid, hash, {});
+
+        if (response && response.redirected) {
+            console.log(`[API] getTableCount redirected for ${resource} - authentication required`);
+            return { redirected: true };
+        }
+
+        return { count: response?.count || 0 };
+    } catch (error: any) {
+        console.error(`[API] getTableCount failed for ${resource}:`, error);
+
+        // Check if this is an authentication error and return redirected response
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log(`[API] getTableCount authentication failed for ${resource} - returning redirected response`);
+            return { redirected: true };
+        }
+
+        throw new Error(error.message || 'Failed to get table count');
+    }
+}
+
+export async function authGetViews(
+    pid: string,
+    hash: string
+): Promise<any[] | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/auth/getViews/${pid}`, pid, hash, {});
+
+        if (response && response.redirected) {
+            console.log('[API] authGetViews redirected - authentication required');
+            return { redirected: true };
+        }
+
+        return response?.views || [];
+    } catch (error: any) {
+        console.error('[API] authGetViews failed:', error);
+
+        // Check if this is an authentication error and return redirected response
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log('[API] authGetViews authentication failed - returning redirected response');
+            return { redirected: true };
+        }
+
+        throw new Error(error.message || 'Failed to get views');
+    }
+}
+
+export async function authGetViewsWritePermission(
+    pid: string,
+    hash: string
+): Promise<boolean | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/auth/viewsWritePermission/${pid}`, pid, hash, {});
+        if (response && response.redirected) {
+            console.log('[API] authGetViewsWritePermission redirected - authentication required');
+            return { redirected: true };
+        }
+        return !!response?.viewsWritePermission;
+    } catch (error: any) {
+        console.error('[API] authGetViewsWritePermission failed:', error);
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log('[API] authGetViewsWritePermission authentication failed - returning redirected response');
+            return { redirected: true };
+        }
+        throw new Error(error.message || 'Failed to get views write permission');
+    }
+}
+
+export async function authGetViewsExportCSV(
+    pid: string,
+    hash: string
+): Promise<boolean | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/auth/viewsExportCSV/${pid}`, pid, hash, {});
+        if (response && response.redirected) {
+            console.log('[API] authGetViewsExportCSV redirected - authentication required');
+            return { redirected: true };
+        }
+        return !!response?.exportCSV;
+    } catch (error: any) {
+        console.error('[API] authGetViewsExportCSV failed:', error);
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log('[API] authGetViewsExportCSV authentication failed - returning redirected response');
+            return { redirected: true };
+        }
+        throw new Error(error.message || 'Failed to get export CSV permission');
     }
 } 

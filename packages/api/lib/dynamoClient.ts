@@ -78,6 +78,27 @@ export async function listAll(tableName: string, identityPoolIdOverride?: string
 }
 
 /**
+ * Count all items in a table efficiently without loading them into memory.
+ */
+export async function countAll(tableName: string, identityPoolIdOverride?: string) {
+  const client = getDocClient(identityPoolIdOverride);
+  let totalCount = 0;
+  let ExclusiveStartKey;
+  do {
+    const response = await client.send(
+      new ScanCommand({
+        TableName: tableName,
+        Select: 'COUNT',
+        ExclusiveStartKey,
+      })
+    );
+    totalCount += response.Count || 0;
+    ExclusiveStartKey = response.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+  return totalCount;
+}
+
+/**
  * Scan table in chunks and return items with lastEvaluatedKey for pagination.
  * Modeled after handleChunkedScanTable from packages/backend-core/src/db-actions.js
  */

@@ -1,5 +1,5 @@
 {
-    "name": "email-agent-infrastructure",
+    "name": "dharma-connect-infrastructure",
     "version": "0.1.0",
     "bin": {
         "email-agent-infrastructure": "bin/email-agent-infrastructure.js"

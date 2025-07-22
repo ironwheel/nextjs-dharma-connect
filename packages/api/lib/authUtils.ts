@@ -773,3 +773,84 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
         accessToken: verificationAccessToken,
     };
 }
+
+/**
+ * Get views for a specified participant
+ * @async
+ * @function getViews
+ * @param {string} pid - Participant ID.
+ * @returns {Promise<string[]>} Resolves with a list of views the participant has access to
+ * @throws {Error} If configuration is missing
+ */
+export async function getViews(pid: string, host: string): Promise<string[]> {
+    console.log('getViews(): Starting function with pid:', pid, 'host:', host);
+
+    // Does this user have access?
+    let tableCfg = tableGetConfig('auth');
+    console.log('getViews(): Got auth table config:', tableCfg);
+
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    console.log('getViews(): Retrieved auth data for pid:', pid, 'data:', data);
+
+    if (!data) {
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        if (!data) {
+            console.log('getViews(): ERROR - No default auth data found');
+            throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
+        }
+    }
+
+    const viewsProfile = data.adminDashboardConfig?.viewsProfile;
+    if (!viewsProfile) {
+        throw new Error('AUTH_VIEWS_NO_PROFILE');
+    }
+    console.log('getViews(): Views profile from auth record:', viewsProfile);
+
+    // Lookup related views profile, throw config error if not found
+    tableCfg = tableGetConfig('views-profiles');
+    console.log('getViews(): Got views-profiles table config:', tableCfg);
+
+    const viewsListData = await getOne(tableCfg.tableName, tableCfg.pk, viewsProfile as string, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    console.log('getViews(): Retrieved views list data for profile:', viewsProfile, 'data:', viewsListData);
+
+    if (!viewsListData) {
+        console.log('getViews(): ERROR - No views list data found for profile:', viewsProfile);
+        throw new Error('AUTH_VIEWS_LIST_NOT_FOUND');
+    }
+
+    console.log('getViews(): Returning views:', viewsListData.views);
+    return viewsListData.views;
+}
+
+/**
+ * Get viewsWritePermission for a specified participant and host
+ * @async
+ * @function getViewsWritePermission
+ * @param {string} pid - Participant ID.
+ * @param {string} host - Host string.
+ * @returns {Promise<boolean>} Resolves with the viewsWritePermission boolean
+ * @throws {Error} If configuration is missing
+ */
+export async function getViewsWritePermission(pid: string, host: string): Promise<boolean> {
+    let tableCfg = tableGetConfig('auth');
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    if (!data) {
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        if (!data) {
+            throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
+        }
+    }
+    return !!data.adminDashboardConfig?.writePermission;
+}
+
+export async function getViewsExportCSV(pid: string, host: string): Promise<boolean> {
+    let tableCfg = tableGetConfig('auth');
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    if (!data) {
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        if (!data) {
+            throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
+        }
+    }
+    return !!data.adminDashboardConfig?.exportCSV;
+}
