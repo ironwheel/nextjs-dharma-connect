@@ -6,6 +6,7 @@ import { isMobile } from 'react-device-detect';
 import Navbar from "react-bootstrap/Navbar";
 import Dropdown from "react-bootstrap/Dropdown";
 import DropdownButton from "react-bootstrap/DropdownButton";
+import Modal from 'react-bootstrap/Modal';
 
 import 'react-toastify/dist/ReactToastify.css';
 
@@ -111,11 +112,167 @@ function fromDynamo(item: any): any {
     return item;
 }
 
+// StudentHistoryModal component
+const StudentHistoryModal = ({ show, onClose, student }) => {
+    if (!student) return null;
+    // Define SubEvent type
+    type SubEvent = {
+        event: Event;
+        subEventKey: string;
+        subEventData: any;
+        date: string;
+        displayText: string;
+        eventKey: string;
+    };
+    // Gather all subevents from allEvents
+    const subEvents: SubEvent[] = [];
+    if (Array.isArray(allEvents)) {
+        allEvents.forEach(event => {
+            if (event.hide) return;
+            const subEventKeys = Object.keys(event.subEvents || {});
+            if (subEventKeys.length === 0) {
+                subEvents.push({
+                    event,
+                    subEventKey: '',
+                    subEventData: {},
+                    date: '',
+                    displayText: event.name,
+                    eventKey: `${event.aid}`
+                });
+            } else {
+                subEventKeys.forEach(subEventKey => {
+                    const subEventData = event.subEvents[subEventKey];
+                    const date = subEventData?.date || '';
+                    const displayText = (date ? date + ' ' : '') + event.name + (subEventKeys.length > 1 ? ` (${subEventKey})` : '');
+                    subEvents.push({
+                        event,
+                        subEventKey,
+                        subEventData,
+                        date,
+                        displayText,
+                        eventKey: `${event.aid}:${subEventKey}`
+                    });
+                });
+            }
+        });
+    }
+    // Sort subevents by date descending
+    subEvents.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    // Use eligibility logic
+    const getEligibility = (event: Event, subEventKey: string) => {
+        if (!event.config?.pool) return false;
+        return checkEligibility(event.config.pool, student, event.aid, allPools);
+    };
+    // Get offering info
+    const getOffering = (event: Event, subEventKey: string) => {
+        const prog = student.programs?.[event.aid];
+        if (!prog) return '';
+        if (prog.offeringHistory && prog.offeringHistory[subEventKey] && prog.offeringHistory[subEventKey].offeringTime) {
+            return prog.offeringHistory[subEventKey].offeringTime.slice(0, 10);
+        }
+        return '';
+    };
+    // Get attended info
+    const getAttended = (event: Event, subEventKey: string) => {
+        const prog = student.programs?.[event.aid];
+        if (!prog) return false;
+        return !!prog.attended;
+    };
+    // Get accepted info
+    const getAccepted = (event: Event, subEventKey: string) => {
+        const prog = student.programs?.[event.aid];
+        if (!prog) return false;
+        return !!prog.accepted;
+    };
+    // Get joined info
+    const getJoined = (event: Event, subEventKey: string) => {
+        const prog = student.programs?.[event.aid];
+        if (!prog) return false;
+        return !!prog.join;
+    };
+    // Copy to clipboard handler
+    const handleCopy = (value: string, label: string) => {
+        navigator.clipboard.writeText(value);
+        toast.info(`Copied ${label} to the clipboard`, { autoClose: 2000 });
+    };
+    // Modal header info
+    return (
+        <Modal show={show} onHide={onClose} centered size="lg" backdrop="static">
+            <Modal.Header closeButton>
+                <Modal.Title>
+                    Student History: {student.first} {student.last}
+                    <span style={{ fontSize: 14, marginLeft: 16, color: '#888', cursor: 'pointer', userSelect: 'all' }}
+                        title="Click to copy ID"
+                        onClick={() => handleCopy(student.id, 'ID')}
+                    >
+                        [ID: <u>{student.id}</u>]
+                    </span>
+                </Modal.Title>
+            </Modal.Header>
+            <Modal.Body>
+                <div style={{ marginBottom: 16 }}>
+                    <b>Email:</b>{' '}
+                    <span
+                        style={{ cursor: 'pointer', textDecoration: 'underline dotted', color: '#007bff' }}
+                        title="Click to copy email"
+                        onClick={() => handleCopy(student.email, 'email')}
+                    >
+                        {student.email}
+                    </span>
+                    <br />
+                    <b>Country:</b> {student.country || 'Unknown'} <br />
+                    <b>Languages:</b> {student.spokenLangPref || ''}{student.writtenLangPref ? ` / ${student.writtenLangPref}` : ''} <br />
+                </div>
+                <div style={{ fontWeight: 'bold', marginBottom: 8 }}>Event Participation</div>
+                <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+                    <table className="table table-sm table-bordered" style={{ position: 'relative' }}>
+                        <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: '#f8f9fa' }}>
+                            <tr>
+                                <th>Date</th>
+                                <th>Event</th>
+                                <th>Eligible</th>
+                                <th>Joined</th>
+                                <th>Accepted</th>
+                                <th>Attended</th>
+                                <th>Offering</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {subEvents.map(sub => {
+                                const eligible = getEligibility(sub.event, sub.subEventKey);
+                                const joined = getJoined(sub.event, sub.subEventKey);
+                                const accepted = getAccepted(sub.event, sub.subEventKey);
+                                const attended = getAttended(sub.event, sub.subEventKey);
+                                const offering = getOffering(sub.event, sub.subEventKey);
+                                return (
+                                    <tr key={sub.eventKey}>
+                                        <td>{sub.date}</td>
+                                        <td>{sub.displayText}</td>
+                                        <td>{eligible ? '✔️' : ''}</td>
+                                        <td>{joined ? '✔️' : ''}</td>
+                                        <td>{accepted ? '✔️' : ''}</td>
+                                        <td>{attended ? '✔️' : ''}</td>
+                                        <td>{offering}</td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            </Modal.Body>
+        </Modal>
+    );
+};
+
 const Home = () => {
 
 
     const router = useRouter();
     const { pid, hash } = router.query;
+
+    // Modal state for student history
+    const [showHistoryModal, setShowHistoryModal] = useState(false);
+    const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
     const [loaded, setLoaded] = useState(false);
     const [loadingProgress, setLoadingProgress] = useState({ current: 0, total: 0, message: '' });
@@ -333,8 +490,10 @@ const Home = () => {
     };
 
     const handleCellClicked = (field: string, rowData: any) => {
-        if (field === 'name' && rowData.history) {
-            window.open(rowData.history);
+        if (field === 'name' && rowData.id) {
+            const student = allStudents.find(s => s.id === rowData.id);
+            setSelectedStudent(student || null);
+            setShowHistoryModal(true);
         } else if (field === 'email') {
             navigator.clipboard.writeText(rowData.email);
             toast.info(`Copied ${rowData.email} to the clipboard`, { autoClose: 3000 });
@@ -1511,6 +1670,7 @@ const Home = () => {
                     canExportCSV={canExportCSV}
                 />
             </Container>
+            <StudentHistoryModal show={showHistoryModal} onClose={() => setShowHistoryModal(false)} student={selectedStudent} />
         </>
     );
 };
