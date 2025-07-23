@@ -296,6 +296,7 @@ const Home = () => {
     const [viewError, setViewError] = useState<string | null>(null);
     const [canWriteViews, setCanWriteViews] = useState<boolean>(false);
     const [canExportCSV, setCanExportCSV] = useState<boolean>(false);
+    const [currentViewConditions, setCurrentViewConditions] = useState<any[]>([]);
 
     // WebSocket connection
     const { lastMessage, sendMessage, status, connectionId } = useWebSocket();
@@ -570,6 +571,12 @@ const Home = () => {
         const filteredStudents = (Array.isArray(eligibleStudents) ? eligibleStudents : []).filter(student => {
             if (!currentEvent) return false;
 
+            // Apply view conditions first
+            const conditionsResult = studentMatchesViewConditions(student, currentViewConditions, currentEvent, allPools);
+            if (!conditionsResult) {
+                return false;
+            }
+
             // Apply search filter
             if (searchValue) {
                 const searchLower = searchValue.toLowerCase();
@@ -587,10 +594,12 @@ const Home = () => {
 
         // Generate new row data
         const newRowData: any[] = [];
-        for (const student of filteredStudents) {
-            const row = getRowValues([], columnLabels, student);
-            if (row !== null) {
-                newRowData.push(row);
+        if (currentEvent) {
+            for (const student of filteredStudents) {
+                const row = getRowValuesForStudent(student, columnLabels, columnMetaData, currentEvent, allPools);
+                if (row !== null) {
+                    newRowData.push(row);
+                }
             }
         }
 
@@ -790,73 +799,7 @@ const Home = () => {
 
 
 
-    // Data processing functions
-    const getRowValues = (viewConditions: any[], columnLabels: Column[], student: Student) => {
-        const rowValues: any = {};
 
-        for (const col of columnLabels) {
-            const field = col.field;
-
-            if (field === 'rowIndex') {
-                // Row index will be handled by DataTable component
-                rowValues[field] = undefined;
-            } else if (field === 'id') {
-                rowValues[field] = student.id;
-            } else if (field === 'name') {
-                rowValues[field] = `${student.first} ${student.last}`;
-            } else if (field === 'first') {
-                rowValues[field] = student.first;
-            } else if (field === 'last') {
-                rowValues[field] = student.last;
-            } else if (field === 'email') {
-                rowValues[field] = student.email;
-            } else if (field === 'joined') {
-                try {
-                    rowValues[field] = student.programs[currentEvent!.aid].join;
-                } catch {
-                    rowValues[field] = false;
-                }
-            } else if (field === 'accepted') {
-                try {
-                    rowValues[field] = student.programs[currentEvent!.aid].accepted;
-                } catch {
-                    rowValues[field] = false;
-                }
-            } else if (field === 'allow') {
-                try {
-                    rowValues[field] = student.programs[currentEvent!.aid].allow;
-                } catch {
-                    rowValues[field] = false;
-                }
-            } else if (field === 'withdrawn') {
-                try {
-                    rowValues[field] = student.programs[currentEvent!.aid].withdrawn;
-                } catch {
-                    rowValues[field] = false;
-                }
-            } else if (field === 'notes') {
-                try {
-                    rowValues[field] = student.programs[currentEvent!.aid].notes;
-                } catch {
-                    rowValues[field] = '';
-                }
-            } else if (field === 'offering') {
-                try {
-                    rowValues[field] = student.programs[currentEvent!.aid].offering;
-                } catch {
-                    rowValues[field] = 0;
-                }
-            } else if (field === 'history') {
-                const studentHistoryBaseUrl = process.env.NEXT_PUBLIC_STUDENT_HISTORY_URL;
-                rowValues[field] = studentHistoryBaseUrl ? `${studentHistoryBaseUrl}/?pid=${student.id}` : '';
-            } else {
-                // Handle other fields as needed
-                rowValues[field] = student[field] || '';
-            }
-        }
-
-        return rowValues;
-    };
 
     // Add this helper function above assembleColumnLabelsAndRowData
     function studentMatchesViewConditions(
@@ -1352,6 +1295,7 @@ const Home = () => {
 
         // Debug: Log the column definitions to see what's being generated
         const conditions = (viewConfig as any).viewConditions || viewConfig.conditions || [];
+        setCurrentViewConditions(conditions);
 
         // Filter students: eligibility, then view conditions, then search
         const filteredStudents = (Array.isArray(eligibleStudents) ? eligibleStudents : []).filter(student => {
@@ -1654,7 +1598,7 @@ const Home = () => {
             {/* Main Content */}
             <ToastContainer />
             {/* In the main content area, ensure only one stats/badge row is rendered and all badges are styled consistently: */}
-            <Container style={{ marginTop: '20px' }}>
+            <Container style={{ marginTop: '20px', backgroundColor: 'transparent' }}>
                 <DataTable
                     data={rowData}
                     columns={columnLabels}
