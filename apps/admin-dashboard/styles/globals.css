@@ -74,6 +74,12 @@
   margin: 0;
 }
 
+/* Ensure the page takes full height and has no unwanted spacing */
+#__next {
+  min-height: 100vh;
+  background-color: transparent;
+}
+
 html,
 body {
   max-width: 100vw;
@@ -85,6 +91,8 @@ body {
   background: linear-gradient(to bottom,
       transparent,
       rgb(var(--background-end-rgb))) rgb(var(--background-start-rgb));
+  min-height: 100vh;
+  background-attachment: fixed;
 }
 
 a {
@@ -101,6 +109,16 @@ a {
 /* Custom DataTable Styles */
 .data-table-container {
   width: 100%;
+  background-color: transparent;
+}
+
+/* Ensure Bootstrap containers don't interfere with background */
+.container {
+  background-color: transparent !important;
+}
+
+.container-fluid {
+  background-color: transparent !important;
 }
 
 .sortable-header:hover {
@@ -143,13 +161,15 @@ a {
 /* Frozen Table Styles */
 .table-container {
   position: relative;
-  max-height: 70vh;
+  max-height: calc(100vh - 200px);
   overflow: auto;
   border: 1px solid #dee2e6;
+  background-color: transparent;
 }
 
 .table-wrapper {
   position: relative;
+  background-color: transparent;
 }
 
 .frozen-table {
