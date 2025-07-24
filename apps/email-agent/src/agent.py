@@ -123,30 +123,32 @@ class EmailAgent:
                     sleep_until_dt = datetime.fromisoformat(sleep_until)
                     self.log('debug', f"[SLEEP-QUEUE] Found sleeping work order {wo['id']} with sleepUntil={sleep_until_dt}")
                     
-                    # If sleepUntil is in the past, update it to now + sendInterval
-                    if sleep_until_dt <= now:
-                        self.log('debug', f"[SLEEP-QUEUE] Sleep time is in the past, updating work order {wo['id']}")
-                        # Get the current work order to update the Send step properly
-                        current_work_order = self.aws_client.get_work_order(wo['id'])
-                        if current_work_order:
-                            # Use sendInterval from work order if available, otherwise use EMAIL_CONTINUOUS_SLEEP_SECS
-                            sleep_interval = getattr(current_work_order, 'sendInterval', EMAIL_CONTINUOUS_SLEEP_SECS)
-                            # Ensure sleep_interval is an integer
-                            sleep_interval = int(sleep_interval) if sleep_interval is not None else EMAIL_CONTINUOUS_SLEEP_SECS
-                            new_sleep_until = now + timedelta(seconds=sleep_interval)
-                            new_sleep_message = f"Sleeping until {new_sleep_until.isoformat()}"
-                            
+                    # Get the current work order to check sendUntil
+                    current_work_order = self.aws_client.get_work_order(wo['id'])
+                    if not current_work_order:
+                        self.log('error', f"[SLEEP-QUEUE] Could not retrieve work order {wo['id']} for sendUntil check")
+                        continue
+                    
+                    # Check if sendUntil has been exceeded
+                    send_until = getattr(current_work_order, 'sendUntil', None)
+                    send_continuously = getattr(current_work_order, 'sendContinuously', False)
+                    
+                    if send_continuously and send_until:
+                        send_until_dt = datetime.fromisoformat(send_until) if isinstance(send_until, str) else send_until
+                        if now >= send_until_dt:
+                            self.log('progress', f"[SLEEP-QUEUE] Work order {wo['id']} has exceeded sendUntil time ({send_until_dt}), marking as complete")
+                            # Mark the work order as complete since sendUntil has been exceeded
                             steps = current_work_order.steps.copy()
-                            # Find and update the Send step
+                            # Find and update the Send step to completed
                             for i, step in enumerate(steps):
                                 if self.extract_s(step.name) == 'Send':
                                     steps[i] = Step(
                                         name='Send',
-                                        status=StepStatus.SLEEPING,
-                                        message=new_sleep_message,
-                                        isActive=True,
+                                        status=StepStatus.COMPLETE,
+                                        message=f"Send until date reached: {send_until_dt}",
+                                        isActive=False,
                                         startTime=step.startTime,
-                                        endTime=step.endTime
+                                        endTime=now.isoformat()
                                     )
                                     break
                             
@@ -156,12 +158,52 @@ class EmailAgent:
                             self.aws_client.update_work_order({
                                 'id': wo['id'],
                                 'updates': {
-                                    'sleepUntil': new_sleep_until.isoformat(),
+                                    'state': 'Completed',
+                                    'sleepUntil': None,
                                     'steps': plain_steps
                                 }
                             })
-                            sleep_until_dt = new_sleep_until
-                            self.log('progress', f"[SLEEP-QUEUE] Updated past sleepUntil for work order {wo['id']} to {new_sleep_until.isoformat()}")
+                            # Unlock the work order since it's completed
+                            self.aws_client.unlock_work_order(wo['id'])
+                            self.log('progress', f"[SLEEP-QUEUE] Marked work order {wo['id']} as completed due to exceeded sendUntil time")
+                            continue  # Skip adding to sleep queue
+                    
+                    # If sleepUntil is in the past, update it to now + sendInterval
+                    if sleep_until_dt <= now:
+                        self.log('debug', f"[SLEEP-QUEUE] Sleep time is in the past, updating work order {wo['id']}")
+                        # Use sendInterval from work order if available, otherwise use EMAIL_CONTINUOUS_SLEEP_SECS
+                        sleep_interval = getattr(current_work_order, 'sendInterval', EMAIL_CONTINUOUS_SLEEP_SECS)
+                        # Ensure sleep_interval is an integer
+                        sleep_interval = int(sleep_interval) if sleep_interval is not None else EMAIL_CONTINUOUS_SLEEP_SECS
+                        new_sleep_until = now + timedelta(seconds=sleep_interval)
+                        new_sleep_message = f"Sleeping until {new_sleep_until.isoformat()}"
+                        
+                        steps = current_work_order.steps.copy()
+                        # Find and update the Send step
+                        for i, step in enumerate(steps):
+                            if self.extract_s(step.name) == 'Send':
+                                steps[i] = Step(
+                                    name='Send',
+                                    status=StepStatus.SLEEPING,
+                                    message=new_sleep_message,
+                                    isActive=True,
+                                    startTime=step.startTime,
+                                    endTime=step.endTime
+                                )
+                                break
+                        
+                        # Convert steps to plain dicts
+                        plain_steps = [self.step_to_plain_dict(s) for s in steps]
+                        
+                        self.aws_client.update_work_order({
+                            'id': wo['id'],
+                            'updates': {
+                                'sleepUntil': new_sleep_until.isoformat(),
+                                'steps': plain_steps
+                            }
+                        })
+                        sleep_until_dt = new_sleep_until
+                        self.log('progress', f"[SLEEP-QUEUE] Updated past sleepUntil for work order {wo['id']} to {new_sleep_until.isoformat()}")
                     
                     # Lock the work order and add to sleep queue
                     self.aws_client.lock_work_order(wo['id'], self.agent_id)
@@ -192,6 +234,47 @@ class EmailAgent:
                     work_order_id = entry['work_order_id']
                     work_order = self.aws_client.get_work_order(work_order_id)
                     if work_order:
+                        # Check if sendUntil has been exceeded before processing
+                        send_until = getattr(work_order, 'sendUntil', None)
+                        send_continuously = getattr(work_order, 'sendContinuously', False)
+                        
+                        if send_continuously and send_until:
+                            send_until_dt = datetime.fromisoformat(send_until) if isinstance(send_until, str) else send_until
+                            if now >= send_until_dt:
+                                self.log('progress', f"[SLEEP-QUEUE] Work order {work_order_id} has exceeded sendUntil time ({send_until_dt}), marking as complete")
+                                # Mark the work order as complete since sendUntil has been exceeded
+                                steps = work_order.steps.copy()
+                                # Find and update the Send step to completed
+                                for i, step in enumerate(steps):
+                                    if self.extract_s(step.name) == 'Send':
+                                        steps[i] = Step(
+                                            name='Send',
+                                            status=StepStatus.COMPLETE,
+                                            message=f"Send until date reached: {send_until_dt}",
+                                            isActive=False,
+                                            startTime=step.startTime,
+                                            endTime=now.isoformat()
+                                        )
+                                        break
+                                
+                                # Convert steps to plain dicts
+                                plain_steps = [self.step_to_plain_dict(s) for s in steps]
+                                
+                                self.aws_client.update_work_order({
+                                    'id': work_order_id,
+                                    'updates': {
+                                        'state': 'Completed',
+                                        'sleepUntil': None,
+                                        'steps': plain_steps
+                                    }
+                                })
+                                # Unlock the work order since it's completed
+                                self.aws_client.unlock_work_order(work_order_id)
+                                # Remove from sleep queue
+                                self.sleep_queue[:] = [e for e in self.sleep_queue if e['work_order_id'] != work_order_id]
+                                self.log('progress', f"[SLEEP-QUEUE] Marked work order {work_order_id} as completed due to exceeded sendUntil time and removed from queue")
+                                continue  # Skip processing this work order
+                        
                         self.log('progress', f"[SLEEP-QUEUE] Waking work order {work_order_id} from sleep queue.")
                         # Unlock the work order before processing so the processing lock can work
                         self.aws_client.unlock_work_order(work_order_id)
@@ -481,6 +564,26 @@ class EmailAgent:
                 self.log('debug', f"[DEBUG] ERROR: Step {step_name} has invalid status for start: {current_status}")
                 await self._update_step_status(work_order, step_name, StepStatus.ERROR, f"Cannot start step with status: {current_status}")
                 return False
+            
+            # Check if sendUntil has been exceeded for Send steps
+            if step_name == 'Send':
+                now = datetime.now(timezone.utc)
+                send_until = getattr(work_order, 'sendUntil', None)
+                send_continuously = getattr(work_order, 'sendContinuously', False)
+                
+                if send_continuously and send_until:
+                    send_until_dt = datetime.fromisoformat(send_until) if isinstance(send_until, str) else send_until
+                    if now >= send_until_dt:
+                        self.log('progress', f"[START-REQUEST] Work order {work_order_id} has exceeded sendUntil time ({send_until_dt}), marking as complete")
+                        # Mark the work order as complete since sendUntil has been exceeded
+                        await self._update_step_status(work_order, step_name, StepStatus.COMPLETE, f"Send until date reached: {send_until_dt}")
+                        self.aws_client.update_work_order({
+                            'id': work_order_id,
+                            'updates': {'state': 'Completed', 'sleepUntil': None}
+                        })
+                        # Unlock the work order since it's completed
+                        self.aws_client.unlock_work_order(work_order_id)
+                        return True
             
             # Try to lock the work order
             if not self.aws_client.lock_work_order(work_order_id, self.agent_id):

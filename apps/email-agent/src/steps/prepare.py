@@ -324,10 +324,38 @@ class PrepareStep:
         reg_link_present = getattr(work_order, 'regLinkPresent', True)
         if reg_link_present:
             reg_links = re.findall(r'https://(?:reg|csf)\.slsupport\.link/[^\s"]+', html)
-            aid_ok = any(f"&aid={work_order.eventCode}" in link for link in reg_links)
-            pid_ok = any("?pid=123456789" in link for link in reg_links)
-            if not (reg_links and aid_ok and pid_ok):
-                raise ValueError("QA Failure: registration link with '&aid' and '&pid' not found")
+            
+            if not reg_links:
+                raise ValueError("QA Failure: no registration links found")
+            
+            # Check for aid parameter with either ? or & prefix
+            aid_ok = any(f"&aid={work_order.eventCode}" in link or f"?aid={work_order.eventCode}" in link for link in reg_links)
+            # Check for pid parameter with either ? or & prefix
+            pid_ok = any("?pid=123456789" in link or "&pid=123456789" in link for link in reg_links)
+            
+            if not aid_ok:
+                # Find what aid values are actually present
+                aid_values_found = []
+                for link in reg_links:
+                    aid_matches = re.findall(r'[?&]aid=([^&"]+)', link)
+                    aid_values_found.extend(aid_matches)
+                
+                if aid_values_found:
+                    raise ValueError(f"QA Failure: registration link has wrong 'aid' value. Expected '{work_order.eventCode}', found: {list(set(aid_values_found))}")
+                else:
+                    raise ValueError(f"QA Failure: registration link missing 'aid' parameter. Expected '{work_order.eventCode}'")
+            
+            if not pid_ok:
+                # Find what pid values are actually present
+                pid_values_found = []
+                for link in reg_links:
+                    pid_matches = re.findall(r'[?&]pid=([^&"]+)', link)
+                    pid_values_found.extend(pid_matches)
+                
+                if pid_values_found:
+                    raise ValueError(f"QA Failure: registration link has wrong 'pid' value. Expected '123456789', found: {list(set(pid_values_found))}")
+                else:
+                    raise ValueError("QA Failure: registration link missing 'pid' parameter. Expected '123456789'")
 
     def _upload_to_s3(self, key: str, html: str):
         """Upload HTML content to S3."""

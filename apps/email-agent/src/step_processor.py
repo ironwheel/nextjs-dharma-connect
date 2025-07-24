@@ -105,6 +105,26 @@ class StepProcessor:
                     return False
             elif step.name == "Send":
                 try:
+                    # Check if sendUntil has been exceeded before starting the Send step
+                    now = datetime.now(timezone.utc)
+                    send_until = getattr(work_order, 'sendUntil', None)
+                    send_continuously = getattr(work_order, 'sendContinuously', False)
+                    
+                    if send_continuously and send_until:
+                        send_until_dt = datetime.fromisoformat(send_until) if isinstance(send_until, str) else send_until
+                        if now >= send_until_dt:
+                            self.log('progress', f"[SEND-STEP] Work order {work_order.id} has exceeded sendUntil time ({send_until_dt}), marking as complete")
+                            # Mark the work order as complete since sendUntil has been exceeded
+                            step_message = f"Send until date reached: {send_until_dt}"
+                            await self._update_step_status(work_order, step, StepStatus.COMPLETE, step_message)
+                            self.aws_client.update_work_order({
+                                'id': work_order.id,
+                                'updates': {'state': 'Completed', 'sleepUntil': None}
+                            })
+                            # Unlock the work order since it's completed
+                            self.aws_client.unlock_work_order(work_order.id)
+                            return True
+                    
                     success = await self.send_step.process(work_order, step)
                     if not success:
                         error_message = "Step failed"

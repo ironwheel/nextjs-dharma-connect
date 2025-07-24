@@ -45,6 +45,15 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
     const [isReady, setIsReady] = useState(false);
     const hasConnected = useRef(false); // Guard against duplicate connections in Strict Mode
 
+    // Reconnection state
+    const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const reconnectAttemptsRef = useRef(0);
+    const maxReconnectAttempts = 10;
+    const baseReconnectDelay = 1000; // 1 second
+    const maxReconnectDelay = 30000; // 30 seconds
+    const periodicReconnectIntervalRef = useRef<NodeJS.Timeout | null>(null);
+    const periodicReconnectDelay = 60000; // 1 minute
+
     const connect = useCallback((url: string) => {
         if (ws.current?.readyState === WebSocket.OPEN) {
             console.log('[WebSocket] Already connected');
@@ -60,6 +69,14 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
             console.log('[WebSocket] Connection opened successfully');
             setStatus('open');
             setIsReady(true);
+            // Reset reconnection attempts on successful connection
+            reconnectAttemptsRef.current = 0;
+
+            // Clear any pending reconnection timeouts
+            if (reconnectTimeoutRef.current) {
+                clearTimeout(reconnectTimeoutRef.current);
+                reconnectTimeoutRef.current = null;
+            }
 
             // Wait a brief moment to ensure the connection is fully established
             setTimeout(() => {
@@ -80,11 +97,24 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
             setIsReady(false);
             setConnectionId(null);
 
-            // If the connection was closed unexpectedly (not by user), trigger error
+            // If the connection was closed unexpectedly (not by user), attempt reconnection
             if (event.code !== 1000) { // 1000 is normal closure
+                console.log('[WebSocket] Unexpected closure, attempting reconnection...');
+
+                // Trigger error event for components to handle
                 window.dispatchEvent(new CustomEvent('websocket-error', {
                     detail: { error: `WebSocket connection closed: ${event.reason || 'Unknown error'}` }
                 }));
+
+                // Attempt reconnection with exponential backoff
+                attemptReconnection();
+            } else {
+                // Normal closure - clear any pending reconnection attempts
+                if (reconnectTimeoutRef.current) {
+                    clearTimeout(reconnectTimeoutRef.current);
+                    reconnectTimeoutRef.current = null;
+                }
+                reconnectAttemptsRef.current = 0;
             }
         };
 
@@ -119,8 +149,90 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
         };
     }, []);
 
+    // Exponential backoff reconnection function
+    const attemptReconnection = useCallback(async () => {
+        if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
+            console.log('[WebSocket] Max reconnection attempts reached, stopping automatic reconnection');
+            return;
+        }
+
+        // Check if we're on an auth route - don't reconnect on auth routes
+        if (isAuthRoute(router.pathname)) {
+            console.log('[WebSocket] Skipping reconnection on auth route:', router.pathname);
+            return;
+        }
+
+        reconnectAttemptsRef.current++;
+
+        // Calculate delay with exponential backoff and jitter
+        const delay = Math.min(
+            baseReconnectDelay * Math.pow(2, reconnectAttemptsRef.current - 1) + Math.random() * 1000,
+            maxReconnectDelay
+        );
+
+        console.log(`[WebSocket] Attempting reconnection ${reconnectAttemptsRef.current}/${maxReconnectAttempts} in ${Math.round(delay)}ms`);
+
+        reconnectTimeoutRef.current = setTimeout(async () => {
+            try {
+                const urlParams = new URLSearchParams(window.location.search);
+                const pid = urlParams.get('pid');
+                const hash = urlParams.get('hash');
+
+                if (!pid || !hash) {
+                    console.warn('[WebSocket] No pid/hash found for reconnection');
+                    return;
+                }
+
+                const details = await getWebSocketConnection(resource, pid, hash);
+                if ('websocketUrl' in details && details.websocketUrl) {
+                    connect(details.websocketUrl);
+                } else {
+                    console.error('[WebSocket] Invalid connection details during reconnection:', details);
+                    // Try again after a delay
+                    attemptReconnection();
+                }
+            } catch (err) {
+                console.error('[WebSocket] Reconnection failed:', err);
+                // Try again after a delay
+                attemptReconnection();
+            }
+        }, delay);
+    }, [connect, resource, router.pathname]);
+
+    // Periodic reconnection function
+    const startPeriodicReconnection = useCallback(() => {
+        if (periodicReconnectIntervalRef.current) {
+            clearInterval(periodicReconnectIntervalRef.current);
+        }
+
+        periodicReconnectIntervalRef.current = setInterval(() => {
+            // Only attempt periodic reconnection if we're not currently connected
+            // and not on an auth route
+            if (status === 'closed' && !isAuthRoute(router.pathname)) {
+                console.log('[WebSocket] Periodic reconnection check - attempting to reconnect');
+                attemptReconnection();
+            }
+        }, periodicReconnectDelay);
+    }, [status, router.pathname, attemptReconnection]);
+
     const disconnect = useCallback(() => {
         console.log('[WebSocket] Disconnecting...');
+
+        // Clear any pending reconnection attempts
+        if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current);
+            reconnectTimeoutRef.current = null;
+        }
+
+        // Clear periodic reconnection
+        if (periodicReconnectIntervalRef.current) {
+            clearInterval(periodicReconnectIntervalRef.current);
+            periodicReconnectIntervalRef.current = null;
+        }
+
+        // Reset reconnection attempts
+        reconnectAttemptsRef.current = 0;
+
         if (ws.current) {
             ws.current.close();
             ws.current = null;
@@ -181,6 +293,19 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [resource, router.pathname]);
 
+    // Start periodic reconnection when status becomes closed
+    useEffect(() => {
+        if (status === 'closed') {
+            startPeriodicReconnection();
+        } else {
+            // Clear periodic reconnection when connected
+            if (periodicReconnectIntervalRef.current) {
+                clearInterval(periodicReconnectIntervalRef.current);
+                periodicReconnectIntervalRef.current = null;
+            }
+        }
+    }, [status, startPeriodicReconnection]);
+
     // Listen for manual ping requests
     useEffect(() => {
         const handleManualPing = () => {
@@ -200,6 +325,12 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
     // Cleanup on unmount
     useEffect(() => {
         return () => {
+            if (reconnectTimeoutRef.current) {
+                clearTimeout(reconnectTimeoutRef.current);
+            }
+            if (periodicReconnectIntervalRef.current) {
+                clearInterval(periodicReconnectIntervalRef.current);
+            }
             if (ws.current) {
                 ws.current.close();
             }

@@ -712,6 +712,15 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                         <tbody>
                             {(() => {
                                 const workOrder = workOrders[currentWorkOrderIndex]
+                                if (!workOrder) {
+                                    return (
+                                        <tr>
+                                            <td colSpan={8} className="text-center text-muted py-4">
+                                                No work orders found
+                                            </td>
+                                        </tr>
+                                    )
+                                }
                                 return (
                                     <React.Fragment key={workOrder.id}>
                                         <tr
