@@ -1807,10 +1807,16 @@ const Home = () => {
     // Error display
     if (errMsg) {
         return (
-            <Container style={{ fontSize: 24 }}>
-                <br />
-                <b>ERROR: {errMsg}</b>
-            </Container>
+            <div className="loading-container" style={{ marginTop: '70px', minHeight: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: '24px', color: '#f87171', marginBottom: '10px' }}>
+                        ⚠️ ERROR
+                    </div>
+                    <div style={{ fontSize: '18px', color: 'white' }}>
+                        {errMsg}
+                    </div>
+                </div>
+            </div>
         );
     }
 
@@ -1821,28 +1827,16 @@ const Home = () => {
             : 0;
 
         return (
-            <Container style={{
-                fontSize: 18,
-                marginTop: '70px',
-                color: 'white',
-                backgroundColor: '#007bff',
-                padding: '20px',
-                borderRadius: '8px',
-                minHeight: '200px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center',
-                alignItems: 'center'
-            }}>
+            <div className="loading-container" style={{ marginTop: '70px', minHeight: '400px' }}>
                 <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-                    <b style={{ fontSize: '24px', marginBottom: '10px', display: 'block' }}>
+                    <b style={{ fontSize: '24px', marginBottom: '10px', display: 'block', color: 'white' }}>
                         {loadingProgress.message || 'Loading...'}
                     </b>
                     <Spinner animation="border" role="status" style={{ color: 'white', width: '3rem', height: '3rem' }} />
                 </div>
 
                 {loadingProgress.current > 0 && (
-                    <div style={{ width: '100%', maxWidth: '400px' }}>
+                    <div style={{ width: '100%', maxWidth: '400px', margin: '0 auto' }}>
                         <div style={{ color: 'white', marginBottom: '10px', textAlign: 'center' }}>
                             Items loaded: {loadingProgress.current}
                             {loadingProgress.total > loadingProgress.current && ` of ${loadingProgress.total}`}
@@ -1855,21 +1849,22 @@ const Home = () => {
                         </div>
                         <div style={{
                             width: '100%',
-                            backgroundColor: 'rgba(255,255,255,0.3)',
+                            backgroundColor: 'rgba(255,255,255,0.1)',
                             borderRadius: '10px',
-                            overflow: 'hidden'
+                            overflow: 'hidden',
+                            border: '1px solid rgba(255,255,255,0.2)'
                         }}>
                             <div style={{
                                 width: `${Math.min(100, (loadingProgress.current / loadingProgress.total) * 100)}%`,
                                 height: '25px',
-                                backgroundColor: 'white',
+                                background: 'linear-gradient(135deg, rgba(139, 69, 219, 0.8), rgba(88, 28, 135, 0.8))',
                                 borderRadius: '10px',
                                 transition: 'width 0.3s ease'
                             }}></div>
                         </div>
                     </div>
                 )}
-            </Container>
+            </div>
         );
     }
 
