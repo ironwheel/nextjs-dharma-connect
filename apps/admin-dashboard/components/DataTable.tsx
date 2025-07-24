@@ -239,38 +239,39 @@ export const DataTable: React.FC<DataTableProps> = ({
 
     if (loading) {
         return (
-            <div className="text-center p-4">
-                <div className="spinner-border" role="status">
+            <div className="loading-container">
+                <div className="spinner-border text-light" role="status">
                     <span className="visually-hidden">Loading...</span>
                 </div>
+                <div className="mt-3 text-light">Loading data...</div>
             </div>
         );
     }
 
     return (
         <div className="data-table-container">
-            <div className="d-flex align-items-center mb-3">
-                <h5 className="me-3">Total Records: {itemCount}</h5>
+            <div className="status-bar">
+                <span className="total-records">Total Records: {itemCount}</span>
                 {websocketStatus && (
-                    <span className={`badge ${websocketStatus === 'open' ? 'bg-success' : websocketStatus === 'connecting' ? 'bg-warning' : 'bg-danger'} me-2`}>
+                    <span className={`status-item ${websocketStatus === 'open' ? 'websocket-connected' : 'websocket-disconnected'}`}>
                         WebSocket: {websocketStatus}
                     </span>
                 )}
                 {connectionId && websocketStatus === 'open' && (
-                    <span className="badge bg-primary me-2">
+                    <span className="status-item">
                         ID: {connectionId}
                     </span>
                 )}
                 {typeof studentUpdateCount !== 'undefined' && (
-                    <span className="badge bg-info me-2">
+                    <span className="status-item">
                         Updates: {studentUpdateCount}
                     </span>
                 )}
-                <span className={`badge ${canWriteViews ? 'bg-success' : 'bg-secondary'} me-2`}>
+                <span className={`status-item ${canWriteViews ? 'websocket-connected' : ''}`}>
                     {canWriteViews ? 'Write Enabled' : 'Read Only'}
                 </span>
                 {canViewStudentHistory === true && (
-                    <span className="badge bg-success me-2">
+                    <span className="status-item websocket-connected">
                         Student History
                     </span>
                 )}
@@ -278,7 +279,7 @@ export const DataTable: React.FC<DataTableProps> = ({
 
             <div className="table-container">
                 <div className="table-wrapper">
-                    <Table striped bordered hover className="frozen-table">
+                    <Table striped bordered hover className="frozen-table ag-theme-alpine">
                         <thead>
                             <tr>
                                 {visibleColumns.map((col, index) => (
@@ -329,8 +330,6 @@ export const DataTable: React.FC<DataTableProps> = ({
                     </Table>
                 </div>
             </div>
-
-
         </div>
     );
 }; 

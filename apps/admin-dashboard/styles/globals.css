@@ -517,3 +517,172 @@ a {
     font-size: 0.9rem;
   }
 }
+
+/* Modern Grid Styles */
+.ag-theme-alpine {
+  --ag-background-color: rgba(255, 255, 255, 0.05);
+  --ag-foreground-color: white;
+  --ag-header-background-color: rgba(139, 69, 219, 0.8);
+  --ag-header-foreground-color: white;
+  --ag-row-hover-color: rgba(139, 69, 219, 0.2);
+  --ag-selected-row-background-color: rgba(139, 69, 219, 0.3);
+  --ag-border-color: rgba(255, 255, 255, 0.1);
+  --ag-cell-horizontal-border: solid rgba(255, 255, 255, 0.1);
+  --ag-row-border-color: rgba(255, 255, 255, 0.05);
+  --ag-font-size: 14px;
+  --ag-font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  border-radius: 12px;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+/* Grid Header Styling */
+.ag-header {
+  background: linear-gradient(135deg, rgba(139, 69, 219, 0.9), rgba(88, 28, 135, 0.9));
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.ag-header-cell {
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 12px;
+}
+
+.ag-header-cell:last-child {
+  border-right: none;
+}
+
+/* Grid Body Styling */
+.ag-body-viewport {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.ag-row {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  transition: all 0.2s ease;
+}
+
+.ag-row:hover {
+  background: rgba(139, 69, 219, 0.1);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(139, 69, 219, 0.2);
+}
+
+.ag-row-selected {
+  background: rgba(139, 69, 219, 0.2);
+  border-left: 4px solid rgba(139, 69, 219, 0.8);
+}
+
+/* Grid Cell Styling */
+.ag-cell {
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 12px 16px;
+  font-weight: 500;
+}
+
+.ag-cell:last-child {
+  border-right: none;
+}
+
+/* Checkbox Styling */
+.ag-checkbox-input-wrapper {
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.ag-checkbox-input-wrapper.ag-checked {
+  background: rgba(139, 69, 219, 0.8);
+  border-color: rgba(139, 69, 219, 0.8);
+}
+
+.ag-checkbox-input-wrapper:hover {
+  background: rgba(139, 69, 219, 0.3);
+  border-color: rgba(139, 69, 219, 0.5);
+}
+
+/* Status Bar Styling */
+.status-bar {
+  background: linear-gradient(135deg, rgba(139, 69, 219, 0.1), rgba(88, 28, 135, 0.1));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  backdrop-filter: blur(10px);
+}
+
+.status-item {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  padding: 6px 12px;
+  margin-right: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: white;
+  transition: all 0.2s ease;
+}
+
+.status-item:hover {
+  background: rgba(255, 255, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+.status-item.websocket-connected {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #4ade80;
+}
+
+.status-item.websocket-disconnected {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #f87171;
+}
+
+/* Total Records Styling */
+.total-records {
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* Loading State */
+.loading-container {
+  background: linear-gradient(135deg, rgba(139, 69, 219, 0.1), rgba(88, 28, 135, 0.1));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 40px;
+  text-align: center;
+  backdrop-filter: blur(10px);
+}
+
+/* Scrollbar Styling */
+.ag-body-vertical-scroll-viewport::-webkit-scrollbar,
+.ag-body-horizontal-scroll-viewport::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.ag-body-vertical-scroll-viewport::-webkit-scrollbar-track,
+.ag-body-horizontal-scroll-viewport::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+}
+
+.ag-body-vertical-scroll-viewport::-webkit-scrollbar-thumb,
+.ag-body-horizontal-scroll-viewport::-webkit-scrollbar-thumb {
+  background: rgba(139, 69, 219, 0.5);
+  border-radius: 4px;
+}
+
+.ag-body-vertical-scroll-viewport::-webkit-scrollbar-thumb:hover,
+.ag-body-horizontal-scroll-viewport::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 69, 219, 0.7);
+}
