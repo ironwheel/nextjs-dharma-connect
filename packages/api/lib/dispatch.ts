@@ -3,7 +3,7 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import { tables, TableConfig } from './tableConfig';
 import { websockets, WebSocketConfig, websocketGetConfig } from './websocketConfig';
 import { listAll, listAllChunked, getOne, deleteOne, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll } from './dynamoClient';
-import { verificationEmailSend, verificationEmailCallback, createToken, getViews, getViewsWritePermission, getViewsExportCSV } from './authUtils';
+import { verificationEmailSend, verificationEmailCallback, createToken, getViews, getViewsWritePermission, getViewsExportCSV, getViewsHistoryPermission } from './authUtils';
 import { serialize } from 'cookie';
 import { v4 as uuidv4 } from 'uuid';
 import { sendWorkOrderMessage } from './sqsClient';
@@ -153,6 +153,9 @@ async function dispatchAuth(
       case 'viewsExportCSV':
         const exportCSV = await getViewsExportCSV(pid, host);
         return res.status(200).json({ exportCSV });
+      case 'viewsHistoryPermission':
+        const studentHistory = await getViewsHistoryPermission(pid, host);
+        return res.status(200).json({ studentHistory });
       default:
         return res.status(404).json({ error: `Unknown auth action: ${action}` });
     }

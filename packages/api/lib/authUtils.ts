@@ -854,3 +854,15 @@ export async function getViewsExportCSV(pid: string, host: string): Promise<bool
     }
     return !!data.adminDashboardConfig?.exportCSV;
 }
+
+export async function getViewsHistoryPermission(pid: string, host: string): Promise<boolean> {
+    let tableCfg = tableGetConfig('auth');
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    if (!data) {
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        if (!data) {
+            throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
+        }
+    }
+    return !!data.adminDashboardConfig?.studentHistory;
+}

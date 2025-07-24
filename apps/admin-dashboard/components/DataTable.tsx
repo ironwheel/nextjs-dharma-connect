@@ -26,6 +26,7 @@ export interface DataTableProps {
     itemCount?: number;
     canWriteViews?: boolean;
     canExportCSV?: boolean;
+    canViewStudentHistory?: boolean;
 }
 
 export const DataTable: React.FC<DataTableProps> = ({
@@ -40,7 +41,8 @@ export const DataTable: React.FC<DataTableProps> = ({
     studentUpdateCount,
     itemCount,
     canWriteViews,
-    canExportCSV
+    canExportCSV,
+    canViewStudentHistory
 }) => {
     const [sortConfig, setSortConfig] = useState<{ field: string; direction: 'asc' | 'desc' } | null>(null);
     const [editingCell, setEditingCell] = useState<{ rowIndex: number; field: string } | null>(null);
@@ -196,8 +198,30 @@ export const DataTable: React.FC<DataTableProps> = ({
             );
         }
 
-        // Clickable cell
+        // Clickable cell for name/email/owyaa
         if (col.field === 'name' || col.field === 'email' || col.field === 'owyaa') {
+            if (col.field === 'name') {
+                if (canViewStudentHistory === true) {
+                    return (
+                        <span
+                            className="text-primary cursor-pointer"
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => handleCellClick(col.field, row)}
+                        >
+                            {value}
+                        </span>
+                    );
+                } else {
+                    return (
+                        <span
+                            style={{ color: 'black', cursor: 'default' }}
+                        >
+                            {value}
+                        </span>
+                    );
+                }
+            }
+            // For email/owyaa, keep existing logic
             return (
                 <span
                     className="text-primary cursor-pointer"
@@ -245,6 +269,11 @@ export const DataTable: React.FC<DataTableProps> = ({
                 <span className={`badge ${canWriteViews ? 'bg-success' : 'bg-secondary'} me-2`}>
                     {canWriteViews ? 'Write Enabled' : 'Read Only'}
                 </span>
+                {canViewStudentHistory === true && (
+                    <span className="badge bg-success me-2">
+                        Student History
+                    </span>
+                )}
             </div>
 
             <div className="table-container">

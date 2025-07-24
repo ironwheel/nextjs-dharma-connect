@@ -18,6 +18,7 @@ import {
     authGetViews,
     authGetViewsWritePermission,
     authGetViewsExportCSV,
+    authGetViewsHistoryPermission,
     useWebSocket,
     getTableCount,
     checkEligibility,
@@ -113,7 +114,8 @@ function fromDynamo(item: any): any {
 }
 
 // StudentHistoryModal component
-const StudentHistoryModal = ({ show, onClose, student }) => {
+const StudentHistoryModal = ({ show, onClose, student, fetchConfig }) => {
+    const [copying, setCopying] = React.useState(false);
     if (!student) return null;
     // Define SubEvent type
     type SubEvent = {
@@ -195,6 +197,24 @@ const StudentHistoryModal = ({ show, onClose, student }) => {
         navigator.clipboard.writeText(value);
         toast.info(`Copied ${label} to the clipboard`, { autoClose: 2000 });
     };
+    // Add click handler for event row
+    const handleEventRowClick = async (sub) => {
+        const eligible = getEligibility(sub.event, sub.subEventKey);
+        if (!eligible) return;
+        setCopying(true);
+        try {
+            const regDomainConfig = await fetchConfig('registrationDomain');
+            const regDomain = typeof regDomainConfig === 'string' ? regDomainConfig : regDomainConfig?.value || '';
+            if (!regDomain) throw new Error('No registration domain configured');
+            const url = `${regDomain}/?pid=${student.id}&aid=${sub.event.aid}`;
+            await navigator.clipboard.writeText(url);
+            toast.success(`Registration link copied: ${url}`, { autoClose: 4000 });
+        } catch (err) {
+            toast.error('Failed to copy registration link');
+        } finally {
+            setCopying(false);
+        }
+    };
     // Modal header info
     return (
         <Modal show={show} onHide={onClose} centered size="lg" backdrop="static">
@@ -232,8 +252,6 @@ const StudentHistoryModal = ({ show, onClose, student }) => {
                                 <th>Event</th>
                                 <th>Eligible</th>
                                 <th>Joined</th>
-                                <th>Accepted</th>
-                                <th>Attended</th>
                                 <th>Offering</th>
                             </tr>
                         </thead>
@@ -241,17 +259,19 @@ const StudentHistoryModal = ({ show, onClose, student }) => {
                             {subEvents.map(sub => {
                                 const eligible = getEligibility(sub.event, sub.subEventKey);
                                 const joined = getJoined(sub.event, sub.subEventKey);
-                                const accepted = getAccepted(sub.event, sub.subEventKey);
-                                const attended = getAttended(sub.event, sub.subEventKey);
                                 const offering = getOffering(sub.event, sub.subEventKey);
                                 return (
                                     <tr key={sub.eventKey}>
                                         <td>{sub.date}</td>
-                                        <td>{sub.displayText}</td>
+                                        <td
+                                            style={{ cursor: eligible ? 'pointer' : 'not-allowed', color: eligible ? '#007bff' : undefined, textDecoration: eligible ? 'underline dotted' : undefined }}
+                                            title={eligible ? 'Click to copy registration link' : 'Student not eligible for this event'}
+                                            onClick={() => eligible && handleEventRowClick(sub)}
+                                        >
+                                            {sub.displayText}
+                                        </td>
                                         <td>{eligible ? '✔️' : ''}</td>
                                         <td>{joined ? '✔️' : ''}</td>
-                                        <td>{accepted ? '✔️' : ''}</td>
-                                        <td>{attended ? '✔️' : ''}</td>
                                         <td>{offering}</td>
                                     </tr>
                                 );
@@ -297,6 +317,7 @@ const Home = () => {
     const [canWriteViews, setCanWriteViews] = useState<boolean>(false);
     const [canExportCSV, setCanExportCSV] = useState<boolean>(false);
     const [currentViewConditions, setCurrentViewConditions] = useState<any[]>([]);
+    const [canViewStudentHistory, setCanViewStudentHistory] = useState<boolean>(false);
 
     // WebSocket connection
     const { lastMessage, sendMessage, status, connectionId } = useWebSocket();
@@ -491,8 +512,9 @@ const Home = () => {
     };
 
     const handleCellClicked = (field: string, rowData: any) => {
-        if (field === 'name' && rowData.id) {
-            const student = allStudents.find(s => s.id === rowData.id);
+        if (field === 'name' && canViewStudentHistory) {
+            // Look up the full student object by id
+            const student = allStudents.find(s => s.id === rowData.id) || allStudents.find(s => `${s.first} ${s.last}` === rowData.name);
             setSelectedStudent(student || null);
             setShowHistoryModal(true);
         } else if (field === 'email') {
@@ -1349,6 +1371,9 @@ const Home = () => {
                 // Fetch export CSV permission
                 const exportCSV = await authGetViewsExportCSV(pid as string, hash as string);
                 setCanExportCSV(exportCSV === true);
+                // Fetch student history permission
+                const historyPermission = await authGetViewsHistoryPermission(pid as string, hash as string);
+                setCanViewStudentHistory(historyPermission === true);
 
                 // Fetch all data in parallel
                 const [students, events, pools, viewsData] = await Promise.all([
@@ -1612,9 +1637,10 @@ const Home = () => {
                     itemCount={itemCount}
                     canWriteViews={canWriteViews}
                     canExportCSV={canExportCSV}
+                    canViewStudentHistory={canViewStudentHistory}
                 />
             </Container>
-            <StudentHistoryModal show={showHistoryModal} onClose={() => setShowHistoryModal(false)} student={selectedStudent} />
+            <StudentHistoryModal show={showHistoryModal} onClose={() => setShowHistoryModal(false)} student={selectedStudent} fetchConfig={fetchConfig} />
         </>
     );
 };

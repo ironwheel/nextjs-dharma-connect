@@ -416,4 +416,25 @@ export async function authGetViewsExportCSV(
         }
         throw new Error(error.message || 'Failed to get export CSV permission');
     }
+}
+
+export async function authGetViewsHistoryPermission(
+    pid: string,
+    hash: string
+): Promise<boolean | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/auth/viewsHistoryPermission/${pid}`, pid, hash, {});
+        if (response && response.redirected) {
+            console.log('[API] authGetViewsHistoryPermission redirected - authentication required');
+            return { redirected: true };
+        }
+        return !!response?.studentHistory;
+    } catch (error: any) {
+        console.error('[API] authGetViewsHistoryPermission failed:', error);
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log('[API] authGetViewsHistoryPermission authentication failed - returning redirected response');
+            return { redirected: true };
+        }
+        throw new Error(error.message || 'Failed to get views history permission');
+    }
 } 
