@@ -3,9 +3,6 @@ import { useRouter } from 'next/router';
 import { Container, Row, Col, Form, Button, Spinner } from "react-bootstrap";
 import { ToastContainer, toast } from 'react-toastify';
 import { isMobile } from 'react-device-detect';
-import Navbar from "react-bootstrap/Navbar";
-import Dropdown from "react-bootstrap/Dropdown";
-import DropdownButton from "react-bootstrap/DropdownButton";
 import Modal from 'react-bootstrap/Modal';
 
 import 'react-toastify/dist/ReactToastify.css';
@@ -293,6 +290,8 @@ const Home = () => {
     // Modal state for student history
     const [showHistoryModal, setShowHistoryModal] = useState(false);
     const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+    const [eventDropdownOpen, setEventDropdownOpen] = useState(false);
+    const [viewDropdownOpen, setViewDropdownOpen] = useState(false);
 
     const [loaded, setLoaded] = useState(false);
     const [loadingProgress, setLoadingProgress] = useState({ current: 0, total: 0, message: '' });
@@ -310,6 +309,9 @@ const Home = () => {
     const [rowData, setRowData] = useState<any[]>([]);
     const [lastEvaluatedKey, setLastEvaluatedKey] = useState(null);
     const [views, setViews] = useState<string[]>([]);
+    const [allEvents, setAllEvents] = useState<Event[]>([]);
+    const [allStudents, setAllStudents] = useState<Student[]>([]);
+    const [allPools, setAllPools] = useState<Pool[]>([]);
     const [studentUpdateCount, setStudentUpdateCount] = useState(0);
     const initialLoadStarted = useRef(false);
     // 1. Add state for error message when view is missing
@@ -452,11 +454,11 @@ const Home = () => {
     };
 
     const updateStudentEventField = async (studentId: string, fieldName: string, fieldValue: any) => {
-        if (!currentEvent || !currentEvent.aid) {
+        if (!evShadow || !evShadow.aid) {
             toast.error('No current event selected');
             return false;
         }
-        const eventFieldName = `programs.${currentEvent.aid}.${fieldName}`;
+        const eventFieldName = `programs.${evShadow.aid}.${fieldName}`;
         try {
             await updateTableItem('students', studentId, eventFieldName, fieldValue, pid as string, hash as string);
             toast.success('Field updated successfully');
@@ -470,18 +472,17 @@ const Home = () => {
 
     // Helper functions
     const addEligible = (student: Student) => {
-        // Return early if student is unsubscribed
         if (student.unsubscribe) {
             return;
         }
-
-        // Check eligibility using the new checkEligibility function
-        if (currentEvent && currentEvent.config?.pool && Array.isArray(allPools) && allPools.length > 0) {
-            const isEligible = checkEligibility(currentEvent.config.pool, student, currentEvent.aid, allPools);
+        if (evShadow && evShadow.config?.pool && Array.isArray(allPools) && allPools.length > 0) {
+            const isEligible = checkEligibility(evShadow.config.pool, student, evShadow.aid, allPools);
             if (isEligible) {
-                eligibleStudents.push(student);
+                // Don't modify module-level variable, just return eligibility status
+                return true;
             }
         }
+        return false;
     };
 
     const compareNames = (a: Student, b: Student) => {
@@ -567,13 +568,19 @@ const Home = () => {
             const leaseTimestamp = new Date().toISOString();
             const success = await updateStudentEventField(id, 'owyaaLease', leaseTimestamp);
             if (success) {
-                allStudents[studentIndex].owyaaLease = leaseTimestamp;
+                const updatedStudents = [...allStudents];
+                updatedStudents[studentIndex] = { ...student, owyaaLease: leaseTimestamp };
+                setAllStudents(updatedStudents);
                 toast.info(`OWYAA Enabled for ${name} for 90 days`, { autoClose: 3000 });
             }
         } else {
             const success = await updateStudentEventField(id, 'owyaaLease', '');
             if (success) {
-                delete allStudents[studentIndex].owyaaLease;
+                const updatedStudents = [...allStudents];
+                const updatedStudent = { ...student };
+                delete updatedStudent.owyaaLease;
+                updatedStudents[studentIndex] = updatedStudent;
+                setAllStudents(updatedStudents);
                 toast.info(`OWYAA DISABLED for ${name}`, { autoClose: 3000 });
             }
         }
@@ -586,47 +593,14 @@ const Home = () => {
 
     // Search and export functions
     const handleSearch = async (searchValue: string) => {
-
         setSearchTerm(searchValue);
 
-        // Filter the data immediately without API calls
-        const filteredStudents = (Array.isArray(eligibleStudents) ? eligibleStudents : []).filter(student => {
-            if (!currentEvent) return false;
-
-            // Apply view conditions first
-            const conditionsResult = studentMatchesViewConditions(student, currentViewConditions, currentEvent, allPools);
-            if (!conditionsResult) {
-                return false;
-            }
-
-            // Apply search filter
-            if (searchValue) {
-                const searchLower = searchValue.toLowerCase();
-                const fullName = `${student.first} ${student.last}`.toLowerCase();
-                const email = student.email.toLowerCase();
-                if (!fullName.includes(searchLower) && !email.includes(searchLower)) {
-                    return false;
-                }
-            }
-
-            return true;
-        });
-
-
-
-        // Generate new row data
-        const newRowData: any[] = [];
-        if (currentEvent) {
-            for (const student of filteredStudents) {
-                const row = getRowValuesForStudent(student, columnLabels, columnMetaData, currentEvent, allPools);
-                if (row !== null) {
-                    newRowData.push(row);
-                }
-            }
+        // Rebuild the data with the new search term
+        if (view) {
+            const [cl, rd] = await assembleColumnLabelsAndRowData(view, month, year);
+            setColumnLabels(cl);
+            setRowData(rd);
         }
-
-        setRowData(newRowData);
-        setItemCount(newRowData.length);
     };
 
     const handleSearchChange = (searchValue: string) => {
@@ -726,7 +700,7 @@ const Home = () => {
 
     // Event selection components
     const EventSelection = () => {
-        const handleEventSelection = async (eventKey: string | null) => {
+        const handleEventSelection = async (eventKey: string) => {
             if (!eventKey) return;
 
             // Parse the event key to get event aid and sub-event key
@@ -737,54 +711,121 @@ const Home = () => {
             if (!selectedEvent) return;
 
             // Set the current event and sub-event
-            currentEvent = selectedEvent;
+            const updatedEvent = { ...selectedEvent };
 
             // Store the selected sub-event in the event object for reference
             if (subEventKey) {
-                currentEvent.selectedSubEvent = subEventKey;
+                updatedEvent.selectedSubEvent = subEventKey;
             }
 
-            localStorage.setItem('event', JSON.stringify(currentEvent));
-            eligibleStudents = [];
+            localStorage.setItem('event', JSON.stringify(updatedEvent));
+            setEvShadow(updatedEvent);
 
-            allStudents.forEach(student => addEligible(student));
-            eligibleStudents.sort(compareNames);
-
-            setEvShadow(currentEvent);
-            const [cl, rd] = await assembleColumnLabelsAndRowData(view || 'Joined', month, year);
-            setColumnLabels(cl);
-            setRowData(rd);
+            // Rebuild the data with the new event using the new function
+            try {
+                const [cl, rd] = await assembleColumnLabelsAndRowDataWithData(view || 'Joined', month, year, updatedEvent, allStudents, allPools);
+                setColumnLabels(cl);
+                setRowData(rd);
+            } catch (error) {
+                console.error('Error updating data for new event:', error);
+            }
+            setEventDropdownOpen(false);
         };
 
         // Get all sub-events and sort them
-        const allSubEvents = getAllSubEvents(Array.isArray(allEvents) ? allEvents : []);
+        const allSubEvents = getAllSubEvents(allEvents);
         const sortedSubEvents = sortSubEventsByDate(allSubEvents);
+
+        console.log('EventSelection - allEvents:', allEvents);
+        console.log('EventSelection - allSubEvents:', allSubEvents);
+        console.log('EventSelection - sortedSubEvents:', sortedSubEvents);
+        console.log('EventSelection - eventDropdownOpen:', eventDropdownOpen);
+        console.log('EventSelection - evShadow:', evShadow);
+        console.log('EventSelection - rendering dropdown items:', sortedSubEvents.length);
+        console.log('EventSelection - first few items:', sortedSubEvents.slice(0, 3));
+        console.log('EventSelection - first item structure:', sortedSubEvents[0]);
+        console.log('EventSelection - first item displayText:', sortedSubEvents[0]?.displayText);
+        console.log('EventSelection - first item eventKey:', sortedSubEvents[0]?.eventKey);
 
         // Find the current sub-event for the title
         let currentSubEvent: SubEventItem | null = null;
-        if (currentEvent) {
-            const selectedKey = currentEvent.selectedSubEvent;
+        if (evShadow) {
+            const selectedKey = evShadow.selectedSubEvent;
             currentSubEvent = allSubEvents.find(se =>
-                se.event.aid === currentEvent!.aid &&
+                se.event.aid === evShadow!.aid &&
                 (selectedKey ? se.subEventKey === selectedKey : true)
             ) || null;
         }
 
         const title = currentSubEvent ? currentSubEvent.displayText : "Select Event";
+        console.log('EventSelection - title:', title);
+        console.log('EventSelection - sortedSubEvents.length:', sortedSubEvents.length);
+        console.log('EventSelection - rendering dropdown items:', sortedSubEvents.length);
+
+        useEffect(() => {
+            const handleClickOutside = (event: MouseEvent) => {
+                const target = event.target as Element;
+                if (!target.closest('.modern-dropdown')) {
+                    setEventDropdownOpen(false);
+                }
+            };
+
+            if (eventDropdownOpen) {
+                document.addEventListener('mousedown', handleClickOutside);
+            }
+
+            return () => {
+                document.removeEventListener('mousedown', handleClickOutside);
+            };
+        }, [eventDropdownOpen]);
 
         return (
-            <DropdownButton
-                className="group"
-                id="dropdown-basic-button"
-                onSelect={handleEventSelection}
-                title={title}
-            >
-                {sortedSubEvents.map((subEvent) => (
-                    <Dropdown.Item key={subEvent.eventKey} eventKey={subEvent.eventKey}>
-                        {subEvent.displayText}
-                    </Dropdown.Item>
-                ))}
-            </DropdownButton>
+            <div className="modern-dropdown">
+                <button
+                    type="button"
+                    className="dropdown-trigger"
+                    onClick={() => {
+                        setEventDropdownOpen(!eventDropdownOpen);
+                    }}
+                >
+                    <span className="dropdown-title">{title}</span>
+                    <svg
+                        className={`dropdown-arrow ${eventDropdownOpen ? 'rotated' : ''}`}
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                    >
+                        <polyline points="6,9 12,15 18,9" />
+                    </svg>
+                </button>
+                {eventDropdownOpen && (
+                    <div className="custom-dropdown-menu" style={{
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        right: 0,
+                        background: 'white',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '0.5rem',
+                        boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)',
+                        zIndex: 1000,
+                        maxHeight: '300px',
+                        overflowY: 'auto',
+                        marginTop: '0.25rem'
+                    }}>
+                        {sortedSubEvents.map((subEvent, index) => (
+                            <button
+                                key={subEvent.eventKey}
+                                className="dropdown-item"
+                                onClick={() => handleEventSelection(subEvent.eventKey)}
+                            >
+                                {subEvent.displayText}
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </div>
         );
     };
 
@@ -801,21 +842,71 @@ const Home = () => {
             } catch (error) {
                 console.error('[VIEW SELECTION DEBUG] Error in assembleColumnLabelsAndRowData', { viewName, error });
             }
+            setViewDropdownOpen(false);
         };
 
+        useEffect(() => {
+            const handleClickOutside = (event: MouseEvent) => {
+                const target = event.target as Element;
+                if (!target.closest('.modern-dropdown')) {
+                    setViewDropdownOpen(false);
+                }
+            };
+
+            if (viewDropdownOpen) {
+                document.addEventListener('mousedown', handleClickOutside);
+            }
+
+            return () => {
+                document.removeEventListener('mousedown', handleClickOutside);
+            };
+        }, [viewDropdownOpen]);
+
         return (
-            <DropdownButton
-                className="group"
-                id="dropdown-view-button"
-                onSelect={handleViewSelection}
-                title={view || "Select View"}
-            >
-                {views.map((viewName) => (
-                    <Dropdown.Item key={viewName} eventKey={viewName}>
-                        {viewName}
-                    </Dropdown.Item>
-                ))}
-            </DropdownButton>
+            <div className="modern-dropdown">
+                <button
+                    type="button"
+                    className="dropdown-trigger"
+                    onClick={() => setViewDropdownOpen(!viewDropdownOpen)}
+                >
+                    <span className="dropdown-title">{view || "Select View"}</span>
+                    <svg
+                        className={`dropdown-arrow ${viewDropdownOpen ? 'rotated' : ''}`}
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                    >
+                        <polyline points="6,9 12,15 18,9" />
+                    </svg>
+                </button>
+                {viewDropdownOpen && (
+                    <div className="custom-dropdown-menu" style={{
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        right: 0,
+                        background: 'white',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '0.5rem',
+                        boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)',
+                        zIndex: 1000,
+                        maxHeight: '300px',
+                        overflowY: 'auto',
+                        marginTop: '0.25rem'
+                    }}>
+                        {views.map((viewName) => (
+                            <button
+                                key={viewName}
+                                className="dropdown-item"
+                                onClick={() => handleViewSelection(viewName)}
+                            >
+                                {viewName}
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </div>
         );
     };
 
@@ -1266,18 +1357,26 @@ const Home = () => {
     //    - Display error if view is missing (no fallback columns)
     //    - Always apply view conditions after eligibility and search
     const assembleColumnLabelsAndRowData = async (viewName: string, monthValue: string, yearValue: string) => {
+        console.log('assembleColumnLabelsAndRowData called with:', { viewName, monthValue, yearValue });
+        console.log('Current state - evShadow:', evShadow);
+        console.log('Current state - allStudents length:', allStudents.length);
+        console.log('Current state - allPools length:', allPools.length);
+
         setViewError(null); // Reset error
         let effectiveViewName = viewName;
         // Check for translation in currentEvent.config.dashboardViews
-        if (currentEvent && currentEvent.config && currentEvent.config.dashboardViews) {
-            const translation = currentEvent.config.dashboardViews[viewName];
+        if (evShadow && evShadow.config && evShadow.config.dashboardViews) {
+            const translation = evShadow.config.dashboardViews[viewName];
             if (translation) {
                 effectiveViewName = translation;
             }
             // If no translation, just use the original viewName (do not show error)
         }
+        console.log('Effective view name:', effectiveViewName);
+
         // Fetch the view definition
         const viewConfig = await fetchView(effectiveViewName);
+        console.log('View config:', viewConfig);
         if (!viewConfig || !viewConfig.columnDefs) {
             setViewError(`View '${effectiveViewName}' not found`);
             return [[], []];
@@ -1320,12 +1419,37 @@ const Home = () => {
         setCurrentViewConditions(conditions);
 
         // Filter students: eligibility, then view conditions, then search
-        const filteredStudents = (Array.isArray(eligibleStudents) ? eligibleStudents : []).filter(student => {
-            if (!currentEvent) {
+        // Use the state variables instead of module-level variables
+        const currentEligibleStudents: Student[] = [];
+        console.log('Calculating eligibility for students...');
+        if (evShadow && Array.isArray(allStudents)) {
+            console.log('Processing', allStudents.length, 'students');
+            allStudents.forEach((student, index) => {
+                if (student.unsubscribe) {
+                    return;
+                }
+                if (evShadow.config?.pool && Array.isArray(allPools) && allPools.length > 0) {
+                    const isEligible = checkEligibility(evShadow.config.pool, student, evShadow.aid, allPools);
+                    if (isEligible) {
+                        currentEligibleStudents.push(student);
+                    }
+                }
+                if (index % 100 === 0) {
+                    console.log(`Processed ${index} students, ${currentEligibleStudents.length} eligible so far`);
+                }
+            });
+            currentEligibleStudents.sort(compareNames);
+            console.log('Final eligible students count:', currentEligibleStudents.length);
+        } else {
+            console.log('No evShadow or allStudents not available');
+        }
+
+        const filteredStudents = currentEligibleStudents.filter(student => {
+            if (!evShadow) {
                 return false;
             }
 
-            const conditionsResult = studentMatchesViewConditions(student, conditions, currentEvent, allPools);
+            const conditionsResult = studentMatchesViewConditions(student, conditions, evShadow, allPools);
             if (!conditionsResult) {
                 return false;
             }
@@ -1342,15 +1466,156 @@ const Home = () => {
         });
 
         const rowValues: any[] = [];
-        if (currentEvent) {
+        console.log('Generating row data...');
+        if (evShadow) {
+            console.log('Processing', filteredStudents.length, 'filtered students');
             for (const student of filteredStudents) {
-                const row = getRowValuesForStudent(student, columnLabels, columnMetaData, currentEvent, allPools);
+                const row = getRowValuesForStudent(student, columnLabels, columnMetaData, evShadow, allPools);
                 if (row !== null) {
                     rowValues.push(row);
                 }
             }
+            console.log('Generated', rowValues.length, 'rows');
+        } else {
+            console.log('No evShadow available for row generation');
         }
         setItemCount(rowValues.length);
+        console.log('Final result - columns:', columnLabels.length, 'rows:', rowValues.length);
+        return [columnLabels, rowValues];
+    };
+
+    const assembleColumnLabelsAndRowDataWithData = async (
+        viewName: string,
+        monthValue: string,
+        yearValue: string,
+        currentEvent: Event,
+        students: Student[],
+        pools: Pool[]
+    ) => {
+        console.log('assembleColumnLabelsAndRowDataWithData called with:', { viewName, monthValue, yearValue });
+        console.log('Current event:', currentEvent);
+        console.log('Students length:', students.length);
+        console.log('Pools length:', pools.length);
+
+        setViewError(null); // Reset error
+        let effectiveViewName = viewName;
+        // Check for translation in currentEvent.config.dashboardViews
+        if (currentEvent && currentEvent.config && currentEvent.config.dashboardViews) {
+            const translation = currentEvent.config.dashboardViews[viewName];
+            if (translation) {
+                effectiveViewName = translation;
+            }
+        }
+        console.log('Effective view name:', effectiveViewName);
+
+        // Fetch the view definition
+        const viewConfig = await fetchView(effectiveViewName);
+        console.log('View config:', viewConfig);
+        if (!viewConfig || !viewConfig.columnDefs) {
+            setViewError(`View '${effectiveViewName}' not found`);
+            return [[], []];
+        }
+
+        // Define the predefined columns (mimic g_predefinedColumnDefinitions)
+        const predefinedColumnDefinitions: Record<string, Column> = {
+            'rowIndex': { field: 'rowIndex', headerName: '#', pinned: 'left', width: 75 },
+            'name': { field: 'name', pinned: 'left', sortable: true },
+            'first': { field: 'first', pinned: 'left', sortable: true },
+            'last': { field: 'last', pinned: 'left', sortable: true },
+            'spokenLanguage': { field: 'spokenLanguage', sortable: true },
+            'writtenLanguage': { field: 'writtenLanguage', sortable: true },
+            'accepted': { field: 'accepted', headerName: 'Accept', cellRenderer: 'checkboxRenderer', sortable: true, width: 85, writeEnabled: true },
+            'allow': { field: 'allow', headerName: 'Allow', cellRenderer: 'checkboxRenderer', sortable: true, width: 85 },
+            'joined': { field: 'joined', headerName: 'Joined', cellRenderer: 'checkboxRenderer', sortable: true, width: 85 },
+            'withdrawn': { field: 'withdrawn', headerName: 'Withdrawn', cellRenderer: 'checkboxRenderer', sortable: true, width: 85, writeEnabled: true },
+            'email': { field: 'email', headerName: 'Email', sortable: true, width: 200 },
+            'notes': { field: 'notes', editable: true },
+            'id': { field: 'id', hide: true },
+            'history': { field: 'history', hide: true },
+            'emailRegSent': { field: 'emailRegSent', headerName: 'Reg email', width: 120, sortable: true },
+            'emailAcceptSent': { field: 'emailAcceptSent', headerName: 'Accept email', width: 120, sortable: true },
+            'emailZoomSent': { field: 'emailZoomSent', headerName: 'Zoom email', width: 120, sortable: true },
+            'owyaa': { field: 'owyaa', writeEnabled: true },
+            'attended': { field: 'attended', cellRenderer: 'checkboxRenderer', sortable: true },
+            'deposit': { field: 'deposit', cellRenderer: 'checkboxRenderer', sortable: true, width: 100 },
+            'offering': { field: 'offering', sortable: true, width: 120 },
+            'installmentsTotal': { field: 'installmentsTotal', headerName: 'Total', sortable: true, width: 125 },
+            'installmentsReceived': { field: 'installmentsReceived', headerName: 'Received', sortable: true, width: 125 },
+            'installmentsDue': { field: 'installmentsDue', headerName: 'Balance', sortable: true, width: 125 },
+            'installmentsRefunded': { field: 'installmentsRefunded', headerName: 'Refunded', sortable: true, width: 125 },
+            'installmentsLF': { field: 'installmentsLF', headerName: 'LF', cellRenderer: 'checkboxRenderer', sortable: true, width: 100 }
+        };
+
+        // Use the helper:
+        const { columns: columnLabels, columnMetaData: newColumnMetaData } = buildColumnLabelsAndMetaData(viewConfig.columnDefs, predefinedColumnDefinitions);
+        columnMetaData = newColumnMetaData;
+
+        // Debug: Log the column definitions to see what's being generated
+        const conditions = (viewConfig as any).viewConditions || viewConfig.conditions || [];
+        setCurrentViewConditions(conditions);
+
+        // Filter students: eligibility, then view conditions, then search
+        const currentEligibleStudents: Student[] = [];
+        console.log('Calculating eligibility for students...');
+        if (currentEvent && Array.isArray(students)) {
+            console.log('Processing', students.length, 'students');
+            students.forEach((student, index) => {
+                if (student.unsubscribe) {
+                    return;
+                }
+                if (currentEvent.config?.pool && Array.isArray(pools) && pools.length > 0) {
+                    const isEligible = checkEligibility(currentEvent.config.pool, student, currentEvent.aid, pools);
+                    if (isEligible) {
+                        currentEligibleStudents.push(student);
+                    }
+                }
+                if (index % 100 === 0) {
+                    console.log(`Processed ${index} students, ${currentEligibleStudents.length} eligible so far`);
+                }
+            });
+            currentEligibleStudents.sort(compareNames);
+            console.log('Final eligible students count:', currentEligibleStudents.length);
+        } else {
+            console.log('No currentEvent or students not available');
+        }
+
+        const filteredStudents = currentEligibleStudents.filter(student => {
+            if (!currentEvent) {
+                return false;
+            }
+
+            const conditionsResult = studentMatchesViewConditions(student, conditions, currentEvent, pools);
+            if (!conditionsResult) {
+                return false;
+            }
+            // Apply search filter
+            if (searchTerm) {
+                const searchLower = searchTerm.toLowerCase();
+                const fullName = `${student.first} ${student.last}`.toLowerCase();
+                const email = student.email.toLowerCase();
+                if (!fullName.includes(searchLower) && !email.includes(searchLower)) {
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        const rowValues: any[] = [];
+        console.log('Generating row data...');
+        if (currentEvent) {
+            console.log('Processing', filteredStudents.length, 'filtered students');
+            for (const student of filteredStudents) {
+                const row = getRowValuesForStudent(student, columnLabels, columnMetaData, currentEvent, pools);
+                if (row !== null) {
+                    rowValues.push(row);
+                }
+            }
+            console.log('Generated', rowValues.length, 'rows');
+        } else {
+            console.log('No currentEvent available for row generation');
+        }
+        setItemCount(rowValues.length);
+        console.log('Final result - columns:', columnLabels.length, 'rows:', rowValues.length);
         return [columnLabels, rowValues];
     };
 
@@ -1384,42 +1649,77 @@ const Home = () => {
                 ]);
 
                 // Defensive coding: ensure we have arrays before processing
-                allStudents = Array.isArray(students) ? students : [];
-                allEvents = Array.isArray(events) ? events.filter(e => !e.hide) : [];
-                allPools = Array.isArray(pools) ? pools : [];
-                setViews(Array.isArray(viewsData) ? viewsData : []);
+                const studentsArray = Array.isArray(students) ? students : [];
+                const filteredEvents = Array.isArray(events) ? events.filter(e => !e.hide) : [];
+                const filteredPools = Array.isArray(pools) ? pools : [];
+                const filteredViews = Array.isArray(viewsData) ? viewsData : [];
 
+                setAllStudents(studentsArray);
+                setAllEvents(filteredEvents);
+                setAllPools(filteredPools);
+                setViews(filteredViews);
 
 
                 // Set current event
                 const aidData = await fetchConfig("adminDashboardLandingAID");
                 const seData = await fetchConfig("adminDashboardLandingSubEvent");
 
-                if (aidData && seData && aidData.value && seData.value && Array.isArray(allEvents)) {
-                    currentEvent = allEvents.find(e => e.aid === aidData.value && e.subEvents && e.subEvents[seData.value]) || null;
+                let currentEventToUse: Event | null = null;
+                if (aidData && seData && aidData.value && seData.value && Array.isArray(filteredEvents)) {
+                    const foundEvent = filteredEvents.find(e => e.aid === aidData.value && e.subEvents && e.subEvents[seData.value]) || null;
                     // Set the selected sub-event in the event object for reference
-                    if (currentEvent && seData.value) {
-                        currentEvent.selectedSubEvent = seData.value;
+                    if (foundEvent && seData.value) {
+                        foundEvent.selectedSubEvent = seData.value;
                     }
-                }
-
-                if (!currentEvent && Array.isArray(allEvents) && allEvents.length > 0) {
-                    currentEvent = allEvents[0];
-                }
-
-                // Process eligible students
-                eligibleStudents = [];
-                if (currentEvent && Array.isArray(allStudents)) {
-                    allStudents.forEach(student => addEligible(student));
-                    eligibleStudents.sort(compareNames);
+                    currentEventToUse = foundEvent;
+                    setEvShadow(foundEvent);
+                } else if (filteredEvents.length > 0) {
+                    // If no config found, use the first event
+                    currentEventToUse = filteredEvents[0];
+                    setEvShadow(filteredEvents[0]);
                 }
 
                 // Set initial view
                 setView('Joined');
-                const [cl, rd] = await assembleColumnLabelsAndRowData('Joined', month, year);
-                setColumnLabels(cl);
-                setRowData(rd);
-                setEvShadow(currentEvent);
+
+                // Ensure we have the current event set before assembling data
+                if (currentEventToUse) {
+                    console.log('Setting evShadow:', currentEventToUse);
+                    console.log('Students loaded:', studentsArray.length);
+                    console.log('Pools loaded:', filteredPools.length);
+                    console.log('Events loaded:', filteredEvents.length);
+
+                    // Check if we have the required data
+                    if (studentsArray.length === 0) {
+                        console.log('No students loaded, cannot assemble data');
+                        setLoaded(true);
+                        return;
+                    }
+
+                    if (filteredPools.length === 0) {
+                        console.log('No pools loaded, cannot assemble data');
+                        setLoaded(true);
+                        return;
+                    }
+
+                    // Temporarily set the state variables for the function call
+                    const tempEvShadow = currentEventToUse;
+                    const tempAllStudents = studentsArray;
+                    const tempAllPools = filteredPools;
+
+                    try {
+                        console.log('Assembling data with event:', currentEventToUse);
+                        const [cl, rd] = await assembleColumnLabelsAndRowDataWithData('Joined', month, year, tempEvShadow, tempAllStudents, tempAllPools);
+                        console.log('Assembled data - columns:', cl.length, 'rows:', rd.length);
+                        setColumnLabels(cl);
+                        setRowData(rd);
+                    } catch (error) {
+                        console.error('Error assembling data:', error);
+                    }
+                } else {
+                    console.log('No currentEventToUse found');
+                }
+
                 setLoaded(true);
 
             } catch (error) {
@@ -1431,6 +1731,8 @@ const Home = () => {
 
         loadInitialData();
     }, [router.isReady, pid, hash]);
+
+
 
     // 3. Update WebSocket message handling to process studentUpdate messages and update in-memory table, eligibility, and view
     useEffect(() => {
@@ -1460,9 +1762,10 @@ const Home = () => {
                     }
                 }
                 // Update in-memory allStudents
-                const idx = allStudents.findIndex(s => s.id === lastMessage.id);
+                const currentStudents = [...allStudents];
+                const idx = currentStudents.findIndex(s => s.id === lastMessage.id);
                 if (idx !== -1) {
-                    const existing = allStudents[idx];
+                    const existing = currentStudents[idx];
                     for (const key in tempStudent) {
                         const value = fromDynamo(tempStudent[key]);
                         if (['programs', 'practice', 'emails', 'offeringHistory'].includes(key) && typeof value === 'object' && value !== null) {
@@ -1471,12 +1774,12 @@ const Home = () => {
                             existing[key] = value;
                         }
                     }
-                    allStudents[idx] = existing;
+                    currentStudents[idx] = existing;
                     // Debug: log the final state after merge
                     console.log('[Student Merge] After merge:', JSON.parse(JSON.stringify(existing)));
                 } else {
                     // If new, create a full object as before
-                    allStudents.push({
+                    currentStudents.push({
                         id: tempStudent.id || '',
                         first: tempStudent.first || '',
                         last: tempStudent.last || '',
@@ -1488,12 +1791,8 @@ const Home = () => {
                         ...tempStudent
                     });
                 }
-                // Rebuild eligibleStudents
-                eligibleStudents = [];
-                if (currentEvent && Array.isArray(allStudents)) {
-                    allStudents.forEach(student => addEligible(student));
-                    eligibleStudents.sort(compareNames);
-                }
+                setAllStudents(currentStudents);
+
                 // Refresh view
                 if (view) {
                     assembleColumnLabelsAndRowData(view, month, year).then(([cl, rd]) => {
@@ -1516,7 +1815,7 @@ const Home = () => {
     }
 
     // Loading display
-    if (!loaded || currentEvent === null) {
+    if (!loaded || evShadow === null) {
         const progress = loadingProgress.total > 0
             ? Math.min(100, Math.round((loadingProgress.current / loadingProgress.total) * 100))
             : 0;
@@ -1589,37 +1888,43 @@ const Home = () => {
     return (
         <>
             {/* Navigation Header */}
-            <Navbar sticky="top" bg="primary" variant="dark" expand="lg" style={{ fontSize: 18 }}>
-                <Navbar.Toggle aria-controls="basic-navbar-nav" />
-                <div className="d-flex flex-wrap align-items-center w-100 gap-2">
-                    <div style={{ minWidth: 500 }} className="me-2">
-                        <EventSelection />
+            <nav className="modern-navbar">
+                <div className="navbar-container">
+                    <div className="navbar-left">
+                        <div className="navbar-item event-selector">
+                            <EventSelection />
+                        </div>
+                        <div className="navbar-item view-selector">
+                            <ViewSelection />
+                        </div>
                     </div>
-                    <div style={{ minWidth: 180 }} className="me-2">
-                        <ViewSelection />
-                    </div>
-                    <div className="ms-auto me-2 d-flex align-items-center">
-                        <Form.Control
-                            onChange={(e) => handleSearchChange(e.target.value)}
-                            id='searchInput'
-                            type="search"
-                            placeholder="Search"
-                            aria-label="Search"
-                            style={{ minWidth: 200, maxWidth: 300, height: 40 }}
-                        />
+                    <div className="navbar-right">
+                        <div className="search-container">
+                            <input
+                                onChange={(e) => handleSearchChange(e.target.value)}
+                                id='searchInput'
+                                type="search"
+                                placeholder="Search participants..."
+                                aria-label="Search"
+                                className="search-input"
+                            />
+                        </div>
                         {canExportCSV && (
-                            <Button
-                                variant="secondary"
-                                className="ms-2"
+                            <button
+                                className="export-button"
                                 onClick={handleCSVExport}
-                                style={{ minWidth: 120, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', whiteSpace: 'nowrap', fontSize: 18 }}
                             >
+                                <svg className="export-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="7,10 12,15 17,10" />
+                                    <line x1="12" y1="15" x2="12" y2="3" />
+                                </svg>
                                 Export CSV
-                            </Button>
+                            </button>
                         )}
                     </div>
                 </div>
-            </Navbar>
+            </nav>
             {/* Main Content */}
             <ToastContainer />
             {/* In the main content area, ensure only one stats/badge row is rendered and all badges are styled consistently: */}
