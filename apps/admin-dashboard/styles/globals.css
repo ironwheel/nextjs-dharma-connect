@@ -423,7 +423,7 @@ a {
   padding: 0.75rem 1rem;
   border: none;
   background: none;
-  color: white;
+  color: white !important;
   font-size: 0.9rem;
   font-weight: 500;
   text-align: left;
@@ -434,14 +434,39 @@ a {
 
 .dropdown-item:hover {
   background-color: #1a1a1a;
-  color: white;
+  color: white !important;
   font-weight: 700;
   transform: translateX(2px);
 }
 
 .dropdown-item:active {
   background-color: #0a0a0a;
+  color: white !important;
   transform: translateX(0);
+}
+
+/* Additional specificity for production environment */
+.custom-dropdown-menu .dropdown-item {
+  color: white !important;
+}
+
+.custom-dropdown-menu .dropdown-item:hover {
+  color: white !important;
+}
+
+.custom-dropdown-menu .dropdown-item:active {
+  color: white !important;
+}
+
+/* Bootstrap override for production */
+.dropdown-menu .dropdown-item,
+.dropdown-menu button.dropdown-item {
+  color: white !important;
+}
+
+.dropdown-menu .dropdown-item:hover,
+.dropdown-menu button.dropdown-item:hover {
+  color: white !important;
 }
 
 .dropdown-item:last-child {
