@@ -249,7 +249,9 @@ export const DataTable: React.FC<DataTableProps> = ({
     return (
         <div className="data-table-container">
             <div className="status-bar">
-                <span className="total-records">Total Records: {itemCount}</span>
+                <span className="status-item">
+                    Records: {itemCount}
+                </span>
                 {websocketStatus && (
                     <span className={`status-item ${websocketStatus === 'open' ? 'websocket-connected' : 'websocket-disconnected'}`}>
                         {websocketStatus === 'open' ? 'Database connected' : 'Database disconnected'}
