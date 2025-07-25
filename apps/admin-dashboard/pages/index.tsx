@@ -455,25 +455,33 @@ const Home = () => {
         }
     };
 
-    const fetchCurrentUser = async () => {
+    const fetchCurrentUser = (studentsArray?: Student[]) => {
         try {
-            if (!pid) return;
+            const studentsToUse = studentsArray || allStudents;
 
-            // Try to get user information from the students table using the pid
-            const userInfo = await getTableItemOrNull('students', pid as string, pid as string, hash as string);
+            if (!pid || !Array.isArray(studentsToUse) || studentsToUse.length === 0) {
+                console.log('fetchCurrentUser: pid:', pid);
+                console.log('fetchCurrentUser: studentsToUse:', studentsToUse?.length || 0);
+                setCurrentUserName(`User ${pid || 'Unknown'}`);
+                return;
+            }
 
-            if (userInfo && !('redirected' in userInfo)) {
-                const firstName = userInfo.first || '';
-                const lastName = userInfo.last || '';
+            // Find the current user in the students array using the pid
+            const currentUser = studentsToUse.find(student => student.id === pid);
+
+            if (currentUser) {
+                const firstName = currentUser.first || '';
+                const lastName = currentUser.last || '';
                 const fullName = `${firstName} ${lastName}`.trim();
                 setCurrentUserName(fullName || 'Unknown User');
             } else {
-                // If we can't get user info, use the pid as a fallback
+                // If we can't find the user in the array, use the pid as a fallback
                 setCurrentUserName(`User ${pid}`);
+                console.log('fetchCurrentUser: currentUser not found:', currentUser);
             }
         } catch (error) {
-            console.error('Error fetching current user:', error);
-            setCurrentUserName(`User ${pid}`);
+            console.error('Error setting current user name:', error);
+            setCurrentUserName(`User ${pid || 'Unknown'}`);
         }
     };
 
@@ -1746,9 +1754,6 @@ const Home = () => {
                 const historyPermission = await authGetViewsHistoryPermission(pid as string, hash as string);
                 setCanViewStudentHistory(historyPermission === true);
 
-                // Fetch current user information
-                await fetchCurrentUser();
-
                 // Calculate version
                 calculateVersion();
 
@@ -1771,6 +1776,8 @@ const Home = () => {
                 setAllPools(filteredPools);
                 setViews(filteredViews);
 
+                // Set current user information after students are loaded
+                fetchCurrentUser(studentsArray);
 
                 // Set current event
                 const aidData = await fetchConfig("adminDashboardLandingAID");
