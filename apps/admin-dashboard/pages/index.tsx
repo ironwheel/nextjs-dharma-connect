@@ -160,13 +160,6 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
     // Use eligibility logic
     const getEligibility = (event: Event, subEventKey: string) => {
         if (!event.config?.pool) return false;
-        console.log('Eligibility check:', {
-            pool: event.config.pool,
-            studentId: student.id,
-            eventAid: event.aid,
-            allPoolsLength: allPools?.length || 0,
-            allPools: allPools
-        });
         return checkEligibility(event.config.pool, student, event.aid, allPools);
     };
     // Get offering info
@@ -743,17 +736,6 @@ const Home = () => {
         const allSubEvents = getAllSubEvents(allEvents);
         const sortedSubEvents = sortSubEventsByDate(allSubEvents);
 
-        console.log('EventSelection - allEvents:', allEvents);
-        console.log('EventSelection - allSubEvents:', allSubEvents);
-        console.log('EventSelection - sortedSubEvents:', sortedSubEvents);
-        console.log('EventSelection - eventDropdownOpen:', eventDropdownOpen);
-        console.log('EventSelection - evShadow:', evShadow);
-        console.log('EventSelection - rendering dropdown items:', sortedSubEvents.length);
-        console.log('EventSelection - first few items:', sortedSubEvents.slice(0, 3));
-        console.log('EventSelection - first item structure:', sortedSubEvents[0]);
-        console.log('EventSelection - first item displayText:', sortedSubEvents[0]?.displayText);
-        console.log('EventSelection - first item eventKey:', sortedSubEvents[0]?.eventKey);
-
         // Find the current sub-event for the title
         let currentSubEvent: SubEventItem | null = null;
         if (evShadow) {
@@ -765,9 +747,6 @@ const Home = () => {
         }
 
         const title = currentSubEvent ? currentSubEvent.displayText : "Select Event";
-        console.log('EventSelection - title:', title);
-        console.log('EventSelection - sortedSubEvents.length:', sortedSubEvents.length);
-        console.log('EventSelection - rendering dropdown items:', sortedSubEvents.length);
 
         useEffect(() => {
             const handleClickOutside = (event: MouseEvent) => {
@@ -1425,47 +1404,35 @@ const Home = () => {
         const conditions = (viewConfig as any).viewConditions || viewConfig.conditions || [];
         setCurrentViewConditions(conditions);
 
-        // Filter students: eligibility, then view conditions, then search
-        // Use the state variables instead of module-level variables
-        const currentEligibleStudents: Student[] = [];
-        console.log('Calculating eligibility for students...');
-        if (evShadow && Array.isArray(allStudents)) {
-            console.log('Processing', allStudents.length, 'students');
-            allStudents.forEach((student, index) => {
-                if (student.unsubscribe) {
-                    return;
-                }
-                if (evShadow.config?.pool && Array.isArray(allPools) && allPools.length > 0) {
-                    const isEligible = checkEligibility(evShadow.config.pool, student, evShadow.aid, allPools);
-                    if (isEligible) {
-                        currentEligibleStudents.push(student);
-                    }
-                }
-                if (index % 100 === 0) {
-                    console.log(`Processed ${index} students, ${currentEligibleStudents.length} eligible so far`);
-                }
-            });
-            currentEligibleStudents.sort(compareNames);
-            console.log('Final eligible students count:', currentEligibleStudents.length);
-        } else {
-            console.log('No evShadow or allStudents not available');
-        }
-
-        const filteredStudents = currentEligibleStudents.filter(student => {
+        // Filter students: view conditions, then search (eligibility already handled)
+        const filteredStudents = allStudents.filter(student => {
             if (!evShadow) {
                 return false;
+            }
+
+            // Skip unsubscribed students
+            if (student.unsubscribe) {
+                return false;
+            }
+
+            // Check eligibility (this should be pre-filtered but we'll double-check)
+            if (evShadow.config?.pool && Array.isArray(allPools) && allPools.length > 0) {
+                const isEligible = checkEligibility(evShadow.config.pool, student, evShadow.aid, allPools);
+                if (!isEligible) {
+                    return false;
+                }
             }
 
             const conditionsResult = studentMatchesViewConditions(student, conditions, evShadow, allPools);
             if (!conditionsResult) {
                 return false;
             }
-            // Apply search filter
-            if (searchTerm) {
-                const searchLower = searchTerm.toLowerCase();
+            // Apply search filter - case insensitive partial match on name field
+            if (searchTerm && searchTerm.trim()) {
+                const searchLower = searchTerm.toLowerCase().trim();
                 const fullName = `${student.first} ${student.last}`.toLowerCase();
-                const email = student.email.toLowerCase();
-                if (!fullName.includes(searchLower) && !email.includes(searchLower)) {
+                const matches = fullName.includes(searchLower);
+                if (!matches) {
                     return false;
                 }
             }
@@ -1595,12 +1562,12 @@ const Home = () => {
             if (!conditionsResult) {
                 return false;
             }
-            // Apply search filter
-            if (searchTerm) {
-                const searchLower = searchTerm.toLowerCase();
+            // Apply search filter - case insensitive partial match on name field
+            if (searchTerm && searchTerm.trim()) {
+                const searchLower = searchTerm.toLowerCase().trim();
                 const fullName = `${student.first} ${student.last}`.toLowerCase();
-                const email = student.email.toLowerCase();
-                if (!fullName.includes(searchLower) && !email.includes(searchLower)) {
+                const matches = fullName.includes(searchLower);
+                if (!matches) {
                     return false;
                 }
             }
@@ -1903,11 +1870,14 @@ const Home = () => {
                     <div className="navbar-right">
                         <div className="search-container">
                             <input
+                                value={searchTerm}
                                 onChange={(e) => handleSearchChange(e.target.value)}
+                                onKeyUp={(e) => handleSearchChange(e.currentTarget.value)}
+                                onInput={(e) => handleSearchChange(e.currentTarget.value)}
                                 id='searchInput'
-                                type="search"
-                                placeholder="Search participants..."
-                                aria-label="Search"
+                                type="text"
+                                placeholder="Search by name..."
+                                aria-label="Search by name"
                                 className="search-input"
                             />
                         </div>
