@@ -163,22 +163,24 @@ a {
   position: relative;
   max-height: calc(100vh - 200px);
   overflow: auto;
-  background-color: white;
+  background-color: #000000;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
 }
 
 .table-wrapper {
   position: relative;
-  background-color: white;
+  background-color: #000000;
 }
 
 .frozen-table {
   margin-bottom: 0;
   border-collapse: collapse;
-  background-color: white !important;
+  background-color: #000000 !important;
   width: 100%;
   min-width: 1000px;
-  border: 2px solid #764ba2;
-  border-top: 2px solid #764ba2 !important;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
 }
 
 /* Simplified header */
@@ -186,17 +188,17 @@ a {
   position: sticky !important;
   top: 0 !important;
   z-index: 20 !important;
-  background-color: #8b5cf6 !important;
-  border-top: 2px solid rgba(255, 255, 255, 0.3) !important;
+  background-color: #1a1a1a !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.2) !important;
 }
 
 .frozen-table thead th {
-  background-color: #8b5cf6 !important;
+  background-color: #1a1a1a !important;
   color: white !important;
   font-weight: 600;
   font-size: 14px;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   padding: 12px 16px;
   position: sticky;
   top: 0;
@@ -205,34 +207,34 @@ a {
 
 /* Override any Bootstrap table header styles */
 .table thead th {
-  background-color: #8b5cf6 !important;
+  background-color: #1a1a1a !important;
   color: white !important;
 }
 
 .table thead {
-  background-color: #8b5cf6 !important;
+  background-color: #1a1a1a !important;
 }
 
 /* Simplified table body */
 .frozen-table tbody {
-  background-color: white;
+  background-color: #000000;
 }
 
 .frozen-table tbody tr {
-  border-bottom: 1px solid #dee2e6;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   transition: background-color 0.2s ease;
 }
 
 .frozen-table tbody tr:hover {
-  background-color: #e9ecef;
+  background-color: #1a1a1a;
 }
 
 .frozen-table tbody td {
-  border-right: 1px solid #dee2e6;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
   padding: 12px 16px;
   font-weight: 500;
-  color: black !important;
-  background-color: white;
+  color: white !important;
+  background-color: #000000;
 }
 
 .frozen-table tbody td:last-child {
@@ -240,23 +242,23 @@ a {
 }
 
 .frozen-table tbody tr:nth-child(even) td {
-  background-color: #f8f9fa;
+  background-color: #0a0a0a;
 }
 
 .frozen-table tbody tr:hover td {
-  background-color: #e9ecef;
+  background-color: #1a1a1a;
 }
 
-/* Ensure all text in table cells is black */
+/* Ensure all text in table cells is white */
 .frozen-table tbody td,
 .frozen-table tbody td * {
-  color: black !important;
+  color: white !important;
 }
 
 /* Checkbox styling for better visibility */
 .frozen-table .form-check-input {
-  background-color: white;
-  border-color: #dee2e6;
+  background-color: #1a1a1a;
+  border-color: rgba(255, 255, 255, 0.3);
   border-width: 2px;
   width: 18px;
   height: 18px;
@@ -283,12 +285,12 @@ a {
 
 /* Clickable name links */
 .frozen-table .text-primary {
-  color: #007bff !important;
+  color: #60a5fa !important;
   text-decoration: underline;
 }
 
 .frozen-table .text-primary:hover {
-  color: #0056b3 !important;
+  color: #93c5fd !important;
 }
 
 /* Modern Navbar Styles */
@@ -296,17 +298,19 @@ a {
   position: sticky;
   top: 0;
   z-index: 1000;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: #000000;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-  padding: 0.75rem 0;
 }
 
 .navbar-container {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 0 1.5rem;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -358,7 +362,6 @@ a {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
-  backdrop-filter: blur(10px);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
@@ -388,10 +391,10 @@ a {
   top: 100%;
   left: 0;
   right: 0;
-  background: white;
-  border: 1px solid #e5e7eb;
-  border-radius: 0.5rem;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  background: #000000;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
   z-index: 1000;
   opacity: 0;
   visibility: hidden;
@@ -414,24 +417,24 @@ a {
   padding: 0.75rem 1rem;
   border: none;
   background: none;
-  color: #374151;
+  color: white;
   font-size: 0.9rem;
   font-weight: 500;
   text-align: left;
   cursor: pointer;
   transition: all 0.15s ease;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .dropdown-item:hover {
-  background-color: #f8fafc;
-  color: #1f2937;
+  background-color: #1a1a1a;
+  color: white;
   font-weight: 700;
   transform: translateX(2px);
 }
 
 .dropdown-item:active {
-  background-color: #e5e7eb;
+  background-color: #0a0a0a;
   transform: translateX(0);
 }
 
@@ -454,7 +457,6 @@ a {
   font-size: 0.95rem;
   min-width: 250px;
   max-width: 350px;
-  backdrop-filter: blur(10px);
   transition: all 0.2s ease;
 }
 
@@ -501,7 +503,6 @@ a {
   align-items: center;
   gap: 0.5rem;
   transition: all 0.2s ease;
-  backdrop-filter: blur(10px);
   white-space: nowrap;
   min-width: 140px;
   justify-content: center;
@@ -525,10 +526,6 @@ a {
 
 /* Responsive Design */
 @media (max-width: 1200px) {
-  .navbar-container {
-    padding: 0 1rem;
-  }
-
   .event-selector {
     min-width: 400px;
   }
@@ -564,11 +561,7 @@ a {
 
 @media (max-width: 768px) {
   .modern-navbar {
-    padding: 0.5rem 0;
-  }
-
-  .navbar-container {
-    padding: 0 0.75rem;
+    padding: 8px 12px;
   }
 
   .dropdown-trigger,
@@ -653,4 +646,80 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* Dark Theme Modal Styles */
+.modal-content {
+  background-color: #000000 !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: 8px !important;
+  color: white !important;
+}
+
+.modal-header {
+  background-color: #1a1a1a !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2) !important;
+  color: white !important;
+}
+
+.modal-title {
+  color: white !important;
+}
+
+.modal-header .btn-close {
+  filter: invert(1) !important;
+}
+
+.modal-body {
+  background-color: #000000 !important;
+  color: white !important;
+}
+
+/* Modal table styling */
+.modal-content .table {
+  background-color: #000000 !important;
+  color: white !important;
+}
+
+.modal-content .table thead {
+  background-color: #1a1a1a !important;
+  color: white !important;
+}
+
+.modal-content .table thead th {
+  background-color: #1a1a1a !important;
+  color: white !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+}
+
+.modal-content .table tbody {
+  background-color: #000000 !important;
+  color: white !important;
+}
+
+.modal-content .table tbody tr {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+.modal-content .table tbody tr:nth-child(even) {
+  background-color: #0a0a0a !important;
+}
+
+.modal-content .table tbody tr:hover {
+  background-color: #1a1a1a !important;
+}
+
+.modal-content .table tbody td {
+  background-color: transparent !important;
+  color: white !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+.modal-content .table-bordered {
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+}
+
+.modal-content .table-bordered th,
+.modal-content .table-bordered td {
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
 }

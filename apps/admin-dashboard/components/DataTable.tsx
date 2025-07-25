@@ -267,7 +267,7 @@ export const DataTable: React.FC<DataTableProps> = ({
                 </span>
                 {canViewStudentHistory === true && (
                     <span className="status-item student-history">
-                        Student History
+                        History Enabled
                     </span>
                 )}
             </div>
