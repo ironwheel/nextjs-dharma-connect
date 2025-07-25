@@ -320,6 +320,8 @@ const Home = () => {
     const [canExportCSV, setCanExportCSV] = useState<boolean>(false);
     const [currentViewConditions, setCurrentViewConditions] = useState<any[]>([]);
     const [canViewStudentHistory, setCanViewStudentHistory] = useState<boolean>(false);
+    const [currentUserName, setCurrentUserName] = useState<string>("Unknown");
+    const [version, setVersion] = useState<string>("dev");
 
     // WebSocket connection
     const { lastMessage, sendMessage, status, connectionId } = useWebSocket();
@@ -450,6 +452,40 @@ const Home = () => {
             console.error('Error fetching views:', error);
             toast.error('Failed to fetch views');
             return [];
+        }
+    };
+
+    const fetchCurrentUser = async () => {
+        try {
+            if (!pid) return;
+
+            // Try to get user information from the students table using the pid
+            const userInfo = await getTableItemOrNull('students', pid as string, pid as string, hash as string);
+
+            if (userInfo && !('redirected' in userInfo)) {
+                const firstName = userInfo.first || '';
+                const lastName = userInfo.last || '';
+                const fullName = `${firstName} ${lastName}`.trim();
+                setCurrentUserName(fullName || 'Unknown User');
+            } else {
+                // If we can't get user info, use the pid as a fallback
+                setCurrentUserName(`User ${pid}`);
+            }
+        } catch (error) {
+            console.error('Error fetching current user:', error);
+            setCurrentUserName(`User ${pid}`);
+        }
+    };
+
+    const calculateVersion = () => {
+        if (typeof window !== 'undefined') {
+            const hostname = window.location.hostname;
+            if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                setVersion('localhost');
+            } else {
+                const commitSha = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || 'dev';
+                setVersion(commitSha.substring(0, 7));
+            }
         }
     };
 
@@ -609,8 +645,69 @@ const Home = () => {
     };
 
     const handleCSVExport = () => {
-        // This will be handled by the DataTable component
-        console.log("CSV export handled by DataTable");
+        if (!canExportCSV) {
+            toast.error('You do not have permission to export CSV');
+            return;
+        }
+
+        if (!rowData || rowData.length === 0) {
+            toast.error('No data to export');
+            return;
+        }
+
+        // Get visible columns (excluding hidden ones)
+        const visibleColumns = columnLabels.filter(col => !col.hide);
+
+        // Create CSV headers
+        const headers = visibleColumns.map(col => col.headerName || col.field);
+
+        // Create CSV content
+        const csvContent = [
+            headers.join(','),
+            ...rowData.map(row =>
+                visibleColumns.map(col => {
+                    const value = row[col.field];
+
+                    // Handle different data types
+                    let displayValue = '';
+                    if (value === null || value === undefined) {
+                        displayValue = '';
+                    } else if (typeof value === 'boolean') {
+                        displayValue = value ? 'Yes' : 'No';
+                    } else if (typeof value === 'object') {
+                        displayValue = JSON.stringify(value);
+                    } else {
+                        displayValue = value.toString();
+                    }
+
+                    // Escape commas and quotes in CSV
+                    if (typeof displayValue === 'string' && (displayValue.includes(',') || displayValue.includes('"') || displayValue.includes('\n'))) {
+                        return `"${displayValue.replace(/"/g, '""')}"`;
+                    }
+                    return displayValue;
+                }).join(',')
+            )
+        ].join('\n');
+
+        // Create and download the file
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+
+        // Generate filename with current date and view name
+        const date = new Date().toISOString().split('T')[0];
+        const eventName = evShadow?.name || 'unknown-event';
+        const viewName = view || 'unknown-view';
+        const filename = `admin-dashboard-${eventName}-${viewName}-${date}.csv`;
+
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+
+        toast.success(`CSV exported successfully: ${filename}`);
     };
 
     // Interface for sub-event items
@@ -1649,6 +1746,12 @@ const Home = () => {
                 const historyPermission = await authGetViewsHistoryPermission(pid as string, hash as string);
                 setCanViewStudentHistory(historyPermission === true);
 
+                // Fetch current user information
+                await fetchCurrentUser();
+
+                // Calculate version
+                calculateVersion();
+
                 // Fetch all data in parallel
                 const [students, events, pools, viewsData] = await Promise.all([
                     fetchStudents(),
@@ -1949,6 +2052,8 @@ const Home = () => {
                     canWriteViews={canWriteViews}
                     canExportCSV={canExportCSV}
                     canViewStudentHistory={canViewStudentHistory}
+                    currentUserName={currentUserName}
+                    version={version}
                 />
             </Container>
             <StudentHistoryModal show={showHistoryModal} onClose={() => setShowHistoryModal(false)} student={selectedStudent} fetchConfig={fetchConfig} allEvents={allEvents} allPools={allPools} />
