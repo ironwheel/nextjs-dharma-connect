@@ -111,7 +111,7 @@ function fromDynamo(item: any): any {
 }
 
 // StudentHistoryModal component
-const StudentHistoryModal = ({ show, onClose, student, fetchConfig }) => {
+const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, allPools }) => {
     const [copying, setCopying] = React.useState(false);
     if (!student) return null;
     // Define SubEvent type
@@ -123,7 +123,7 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig }) => {
         displayText: string;
         eventKey: string;
     };
-    // Gather all subevents from allEvents
+    // Gather all subevents from allEvents prop
     const subEvents: SubEvent[] = [];
     if (Array.isArray(allEvents)) {
         allEvents.forEach(event => {
@@ -160,6 +160,13 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig }) => {
     // Use eligibility logic
     const getEligibility = (event: Event, subEventKey: string) => {
         if (!event.config?.pool) return false;
+        console.log('Eligibility check:', {
+            pool: event.config.pool,
+            studentId: student.id,
+            eventAid: event.aid,
+            allPoolsLength: allPools?.length || 0,
+            allPools: allPools
+        });
         return checkEligibility(event.config.pool, student, event.aid, allPools);
     };
     // Get offering info
@@ -1940,7 +1947,7 @@ const Home = () => {
                     canViewStudentHistory={canViewStudentHistory}
                 />
             </Container>
-            <StudentHistoryModal show={showHistoryModal} onClose={() => setShowHistoryModal(false)} student={selectedStudent} fetchConfig={fetchConfig} />
+            <StudentHistoryModal show={showHistoryModal} onClose={() => setShowHistoryModal(false)} student={selectedStudent} fetchConfig={fetchConfig} allEvents={allEvents} allPools={allPools} />
         </>
     );
 };

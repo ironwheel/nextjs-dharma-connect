@@ -257,21 +257,16 @@ export const DataTable: React.FC<DataTableProps> = ({
                         WebSocket: {websocketStatus}
                     </span>
                 )}
-                {connectionId && websocketStatus === 'open' && (
-                    <span className="status-item">
-                        ID: {connectionId}
-                    </span>
-                )}
                 {typeof studentUpdateCount !== 'undefined' && (
                     <span className="status-item">
                         Updates: {studentUpdateCount}
                     </span>
                 )}
-                <span className={`status-item ${canWriteViews ? 'websocket-connected' : ''}`}>
+                <span className={`status-item ${canWriteViews ? 'write-enabled' : ''}`}>
                     {canWriteViews ? 'Write Enabled' : 'Read Only'}
                 </span>
                 {canViewStudentHistory === true && (
-                    <span className="status-item websocket-connected">
+                    <span className="status-item student-history">
                         Student History
                     </span>
                 )}
@@ -285,8 +280,6 @@ export const DataTable: React.FC<DataTableProps> = ({
                                 {visibleColumns.map((col, index) => (
                                     <th
                                         key={col.field}
-                                        data-field={col.field}
-                                        data-pinned={col.pinned}
                                         style={{
                                             width: col.width,
                                             cursor: col.sortable ? 'pointer' : 'default',
@@ -313,8 +306,6 @@ export const DataTable: React.FC<DataTableProps> = ({
                                     {visibleColumns.map((col, colIndex) => (
                                         <td
                                             key={col.field}
-                                            data-field={col.field}
-                                            data-pinned={col.pinned}
                                             style={{
                                                 width: col.width,
                                                 cursor: col.editable ? 'pointer' : 'default'
