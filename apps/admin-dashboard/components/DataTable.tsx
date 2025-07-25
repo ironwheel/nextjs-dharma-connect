@@ -18,7 +18,7 @@ export interface DataTableProps {
     columns: Column[];
     onCellValueChanged?: (field: string, rowIndex: number, value: any) => void;
     onCellClicked?: (field: string, rowData: any) => void;
-    onCheckboxChanged?: (field: string, rowIndex: number, checked: boolean) => void;
+    onCheckboxChanged?: (field: string, studentId: string, checked: boolean) => void;
     loading?: boolean;
     websocketStatus?: string;
     connectionId?: string;
@@ -106,15 +106,6 @@ export const DataTable: React.FC<DataTableProps> = ({
         setEditValue('');
     };
 
-    // Handle checkbox changes
-    const handleCheckboxChange = (rowIndex: number, field: string, checked: boolean) => {
-        const col = columns.find(c => c.field === field);
-        if (!canWriteViews || !col?.writeEnabled) return;
-        if (onCheckboxChanged) {
-            onCheckboxChanged(col.field, rowIndex, checked);
-        }
-    };
-
     // Handle cell clicks
     const handleCellClick = (field: string, rowData: any) => {
         if (onCellClicked) {
@@ -169,7 +160,11 @@ export const DataTable: React.FC<DataTableProps> = ({
                     checked={!!value}
                     onChange={(e) => {
                         if (isWriteEnabled && onCheckboxChanged) {
-                            onCheckboxChanged(col.field, rowIndex, e.target.checked);
+                            // Pass the student ID instead of row index
+                            const studentId = row.id;
+                            if (studentId) {
+                                onCheckboxChanged(col.field, studentId, e.target.checked);
+                            }
                         }
                     }}
                     disabled={!isWriteEnabled || loading}

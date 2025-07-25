@@ -570,14 +570,18 @@ const Home = () => {
         }
     };
 
-    const handleCheckboxChanged = async (field: string, rowIndex: number, checked: boolean) => {
+    const handleCheckboxChanged = async (field: string, studentId: string, checked: boolean) => {
         if (!canWriteViews) {
             toast.info('Value not changed. READ ONLY', { autoClose: 3000 });
             return;
         }
 
-        const student = rowData[rowIndex];
-        if (!student) return;
+        // Find the student by ID instead of using row index
+        const student = rowData.find(s => s.id === studentId);
+        if (!student) {
+            console.error('Student not found for ID:', studentId);
+            return;
+        }
 
         let dataField = field;
         if (field === 'joined') dataField = 'join';
@@ -587,12 +591,15 @@ const Home = () => {
             dataField = columnMetaData[field]?.boolName || field;
         }
 
-        const success = await updateStudentEventField(student.id, dataField, checked);
+        const success = await updateStudentEventField(studentId, dataField, checked);
         if (success) {
-            // Update local data
-            const updatedRowData = [...rowData];
-            updatedRowData[rowIndex] = { ...student, [field]: checked };
-            setRowData(updatedRowData);
+            // Update local data by finding the correct row index
+            const rowIndex = rowData.findIndex(s => s.id === studentId);
+            if (rowIndex !== -1) {
+                const updatedRowData = [...rowData];
+                updatedRowData[rowIndex] = { ...student, [field]: checked };
+                setRowData(updatedRowData);
+            }
         }
     };
 
@@ -1894,8 +1901,6 @@ const Home = () => {
                         }
                     }
                     currentStudents[idx] = existing;
-                    // Debug: log the final state after merge
-                    console.log('[Student Merge] After merge:', JSON.parse(JSON.stringify(existing)));
                 } else {
                     // If new, create a full object as before
                     currentStudents.push({
