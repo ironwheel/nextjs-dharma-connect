@@ -44,7 +44,7 @@ export const DataTable: React.FC<DataTableProps> = ({
     canExportCSV,
     canViewStudentHistory
 }) => {
-    const [sortConfig, setSortConfig] = useState<{ field: string; direction: 'asc' | 'desc' } | null>(null);
+    const [sortConfig, setSortConfig] = useState<{ field: string; direction: 'asc' | 'desc' }>({ field: 'name', direction: 'asc' });
     const [editingCell, setEditingCell] = useState<{ rowIndex: number; field: string } | null>(null);
     const [editValue, setEditValue] = useState('');
 
@@ -56,8 +56,6 @@ export const DataTable: React.FC<DataTableProps> = ({
 
     // Sort data
     const sortedData = useMemo(() => {
-        if (!sortConfig) return data;
-
         return [...data].sort((a, b) => {
             const aValue = a[sortConfig.field];
             const bValue = b[sortConfig.field];
@@ -74,10 +72,10 @@ export const DataTable: React.FC<DataTableProps> = ({
     // Handle column sorting
     const handleSort = (field: string) => {
         setSortConfig(current => {
-            if (current?.field === field) {
+            if (current.field === field) {
                 return current.direction === 'asc'
                     ? { field, direction: 'desc' }
-                    : null;
+                    : { field, direction: 'asc' };
             }
             return { field, direction: 'asc' };
         });
@@ -254,7 +252,7 @@ export const DataTable: React.FC<DataTableProps> = ({
                 <span className="total-records">Total Records: {itemCount}</span>
                 {websocketStatus && (
                     <span className={`status-item ${websocketStatus === 'open' ? 'websocket-connected' : 'websocket-disconnected'}`}>
-                        WebSocket: {websocketStatus}
+                        {websocketStatus === 'open' ? 'Database connected' : 'Database disconnected'}
                     </span>
                 )}
                 {typeof studentUpdateCount !== 'undefined' && (
@@ -290,7 +288,7 @@ export const DataTable: React.FC<DataTableProps> = ({
                                     >
                                         <div className="d-flex align-items-center">
                                             {col.headerName || col.field}
-                                            {col.sortable && sortConfig?.field === col.field && (
+                                            {col.sortable && sortConfig.field === col.field && (
                                                 <span className="ms-1">
                                                     {sortConfig.direction === 'asc' ? '↑' : '↓'}
                                                 </span>
