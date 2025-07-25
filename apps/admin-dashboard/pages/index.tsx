@@ -837,6 +837,7 @@ const Home = () => {
                             <button
                                 key={subEvent.eventKey}
                                 className="dropdown-item"
+                                style={{ color: 'white' }}
                                 onClick={() => handleEventSelection(subEvent.eventKey)}
                             >
                                 {subEvent.displayText}
@@ -918,6 +919,7 @@ const Home = () => {
                             <button
                                 key={viewName}
                                 className="dropdown-item"
+                                style={{ color: 'white' }}
                                 onClick={() => handleViewSelection(viewName)}
                             >
                                 {viewName}
