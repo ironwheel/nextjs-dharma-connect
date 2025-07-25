@@ -1831,7 +1831,7 @@ const Home = () => {
                             <div style={{
                                 width: `${Math.min(100, (loadingProgress.current / loadingProgress.total) * 100)}%`,
                                 height: '25px',
-                                background: 'linear-gradient(135deg, rgba(139, 69, 219, 0.8), rgba(88, 28, 135, 0.8))',
+                                background: '#1a1a1a',
                                 borderRadius: '10px',
                                 transition: 'width 0.3s ease'
                             }}></div>
