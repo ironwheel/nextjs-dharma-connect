@@ -748,6 +748,38 @@ const Home = () => {
 
         const title = currentSubEvent ? currentSubEvent.displayText : "Select Event";
 
+        // Calculate the maximum width needed for the dropdown button
+        const calculateMaxWidth = () => {
+            if (sortedSubEvents.length === 0) return 'auto';
+
+            // Create a temporary element to measure text width
+            const tempElement = document.createElement('span');
+            tempElement.style.visibility = 'hidden';
+            tempElement.style.position = 'absolute';
+            tempElement.style.whiteSpace = 'nowrap';
+            tempElement.style.fontSize = '0.9rem';
+            tempElement.style.fontWeight = '600';
+            tempElement.style.fontFamily = 'inherit';
+            document.body.appendChild(tempElement);
+
+            let maxWidth = 0;
+
+            // Measure each dropdown item
+            sortedSubEvents.forEach(subEvent => {
+                tempElement.textContent = subEvent.displayText;
+                const width = tempElement.offsetWidth;
+                maxWidth = Math.max(maxWidth, width);
+            });
+
+            // Clean up
+            document.body.removeChild(tempElement);
+
+            // Add padding for the dropdown arrow and some buffer
+            return `${maxWidth + 60}px`;
+        };
+
+        const dropdownWidth = calculateMaxWidth();
+
         useEffect(() => {
             const handleClickOutside = (event: MouseEvent) => {
                 const target = event.target as Element;
@@ -770,6 +802,7 @@ const Home = () => {
                 <button
                     type="button"
                     className="dropdown-trigger"
+                    style={{ width: dropdownWidth, minWidth: dropdownWidth }}
                     onClick={() => {
                         setEventDropdownOpen(!eventDropdownOpen);
                     }}
@@ -790,7 +823,7 @@ const Home = () => {
                         position: 'absolute',
                         top: '100%',
                         left: 0,
-                        right: 0,
+                        width: dropdownWidth,
                         background: '#000000',
                         border: '1px solid rgba(255, 255, 255, 0.2)',
                         borderRadius: '8px',
@@ -1831,7 +1864,7 @@ const Home = () => {
                             <div style={{
                                 width: `${Math.min(100, (loadingProgress.current / loadingProgress.total) * 100)}%`,
                                 height: '25px',
-                                background: '#1a1a1a',
+                                background: 'linear-gradient(135deg, rgba(139, 69, 219, 0.8), rgba(88, 28, 135, 0.8))',
                                 borderRadius: '10px',
                                 transition: 'width 0.3s ease'
                             }}></div>
