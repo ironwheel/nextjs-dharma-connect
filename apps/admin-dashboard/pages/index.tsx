@@ -230,7 +230,7 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
                 <div style={{ marginBottom: 16 }}>
                     <b>Email:</b>{' '}
                     <span
-                        style={{ cursor: 'pointer', textDecoration: 'underline dotted', color: '#007bff' }}
+                        style={{ cursor: 'pointer', textDecoration: 'underline dotted', color: '#60a5fa' }}
                         title="Click to copy email"
                         onClick={() => handleCopy(student.email, 'email')}
                     >
@@ -243,7 +243,7 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
                 <div style={{ fontWeight: 'bold', marginBottom: 8 }}>Event Participation</div>
                 <div style={{ maxHeight: 400, overflowY: 'auto' }}>
                     <table className="table table-sm table-bordered" style={{ position: 'relative' }}>
-                        <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: '#f8f9fa' }}>
+                        <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                             <tr>
                                 <th>Date</th>
                                 <th>Event</th>
@@ -261,7 +261,7 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
                                     <tr key={sub.eventKey}>
                                         <td>{sub.date}</td>
                                         <td
-                                            style={{ cursor: eligible ? 'pointer' : 'not-allowed', color: eligible ? '#007bff' : undefined, textDecoration: eligible ? 'underline dotted' : undefined }}
+                                            style={{ cursor: eligible ? 'pointer' : 'not-allowed', color: eligible ? '#60a5fa' : 'white', textDecoration: eligible ? 'underline dotted' : undefined }}
                                             title={eligible ? 'Click to copy registration link' : 'Student not eligible for this event'}
                                             onClick={() => eligible && handleEventRowClick(sub)}
                                         >
@@ -791,10 +791,10 @@ const Home = () => {
                         top: '100%',
                         left: 0,
                         right: 0,
-                        background: 'white',
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '0.5rem',
-                        boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)',
+                        background: '#000000',
+                        border: '1px solid rgba(255, 255, 255, 0.2)',
+                        borderRadius: '8px',
+                        boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
                         zIndex: 1000,
                         maxHeight: '300px',
                         overflowY: 'auto',
@@ -872,10 +872,10 @@ const Home = () => {
                         top: '100%',
                         left: 0,
                         right: 0,
-                        background: 'white',
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '0.5rem',
-                        boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)',
+                        background: '#000000',
+                        border: '1px solid rgba(255, 255, 255, 0.2)',
+                        borderRadius: '8px',
+                        boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
                         zIndex: 1000,
                         maxHeight: '300px',
                         overflowY: 'auto',
@@ -1856,51 +1856,50 @@ const Home = () => {
 
     return (
         <>
-            {/* Navigation Header */}
-            <nav className="modern-navbar">
-                <div className="navbar-container">
-                    <div className="navbar-left">
-                        <div className="navbar-item event-selector">
-                            <EventSelection />
-                        </div>
-                        <div className="navbar-item view-selector">
-                            <ViewSelection />
-                        </div>
-                    </div>
-                    <div className="navbar-right">
-                        <div className="search-container">
-                            <input
-                                value={searchTerm}
-                                onChange={(e) => handleSearchChange(e.target.value)}
-                                onKeyUp={(e) => handleSearchChange(e.currentTarget.value)}
-                                onInput={(e) => handleSearchChange(e.currentTarget.value)}
-                                id='searchInput'
-                                type="text"
-                                placeholder="Search by name..."
-                                aria-label="Search by name"
-                                className="search-input"
-                            />
-                        </div>
-                        {canExportCSV && (
-                            <button
-                                className="export-button"
-                                onClick={handleCSVExport}
-                            >
-                                <svg className="export-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                    <polyline points="7,10 12,15 17,10" />
-                                    <line x1="12" y1="15" x2="12" y2="3" />
-                                </svg>
-                                Export CSV
-                            </button>
-                        )}
-                    </div>
-                </div>
-            </nav>
             {/* Main Content */}
             <ToastContainer />
-            {/* In the main content area, ensure only one stats/badge row is rendered and all badges are styled consistently: */}
             <Container style={{ marginTop: '20px', backgroundColor: 'transparent' }}>
+                {/* Navigation Header */}
+                <nav className="modern-navbar">
+                    <div className="navbar-container">
+                        <div className="navbar-left">
+                            <div className="navbar-item event-selector">
+                                <EventSelection />
+                            </div>
+                            <div className="navbar-item view-selector">
+                                <ViewSelection />
+                            </div>
+                        </div>
+                        <div className="navbar-right">
+                            <div className="search-container">
+                                <input
+                                    value={searchTerm}
+                                    onChange={(e) => handleSearchChange(e.target.value)}
+                                    onKeyUp={(e) => handleSearchChange(e.currentTarget.value)}
+                                    onInput={(e) => handleSearchChange(e.currentTarget.value)}
+                                    id='searchInput'
+                                    type="text"
+                                    placeholder="Search by name..."
+                                    aria-label="Search by name"
+                                    className="search-input"
+                                />
+                            </div>
+                            {canExportCSV && (
+                                <button
+                                    className="export-button"
+                                    onClick={handleCSVExport}
+                                >
+                                    <svg className="export-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                        <polyline points="7,10 12,15 17,10" />
+                                        <line x1="12" y1="15" x2="12" y2="3" />
+                                    </svg>
+                                    Export CSV
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </nav>
                 <DataTable
                     data={rowData}
                     columns={columnLabels}
