@@ -88,9 +88,7 @@ body {
 
 body {
   color: rgb(var(--foreground-rgb));
-  background: linear-gradient(to bottom,
-      transparent,
-      rgb(var(--background-end-rgb))) rgb(var(--background-start-rgb));
+  background: #000000;
   min-height: 100vh;
   background-attachment: fixed;
 }
@@ -636,7 +634,7 @@ a {
 
 /* Loading State */
 .loading-container {
-  background: linear-gradient(135deg, rgba(139, 69, 219, 0.1), rgba(88, 28, 135, 0.1));
+  background: #000000;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   padding: 40px;
