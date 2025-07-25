@@ -1801,8 +1801,8 @@ const Home = () => {
             : 0;
 
         return (
-            <div className="loading-container" style={{ marginTop: '70px', minHeight: '400px' }}>
-                <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+            <div className="loading-container" style={{ marginTop: '70px', minHeight: '400px', flexDirection: 'column', justifyContent: 'flex-start', paddingTop: '100px' }}>
+                <div style={{ textAlign: 'center', marginBottom: '40px' }}>
                     <b style={{ fontSize: '24px', marginBottom: '10px', display: 'block', color: 'white' }}>
                         {loadingProgress.message || 'Loading...'}
                     </b>
