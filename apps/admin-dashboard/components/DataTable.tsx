@@ -162,16 +162,18 @@ export const DataTable: React.FC<DataTableProps> = ({
 
         // Checkbox renderer
         if (col.cellRenderer === 'checkboxRenderer') {
+            const isWriteEnabled = canWriteViews && col.writeEnabled;
             return (
                 <Form.Check
                     type="checkbox"
                     checked={!!value}
                     onChange={(e) => {
-                        if (canWriteViews && col.writeEnabled && onCheckboxChanged) {
+                        if (isWriteEnabled && onCheckboxChanged) {
                             onCheckboxChanged(col.field, rowIndex, e.target.checked);
                         }
                     }}
-                    disabled={!canWriteViews || !col.writeEnabled || loading}
+                    disabled={!isWriteEnabled || loading}
+                    style={{ cursor: isWriteEnabled ? 'pointer' : 'default' }}
                 />
             );
         }
@@ -272,6 +274,11 @@ export const DataTable: React.FC<DataTableProps> = ({
                 {canViewStudentHistory === true && (
                     <span className="status-item student-history">
                         History Enabled
+                    </span>
+                )}
+                {canExportCSV && (
+                    <span className="status-item export-enabled">
+                        Export Enabled
                     </span>
                 )}
                 {currentUserName && (
