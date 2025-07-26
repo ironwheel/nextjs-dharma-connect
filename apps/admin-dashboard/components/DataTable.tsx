@@ -19,6 +19,7 @@ export interface DataTableProps {
     onCellValueChanged?: (field: string, rowIndex: number, value: any) => void;
     onCellClicked?: (field: string, rowData: any) => void;
     onCheckboxChanged?: (field: string, studentId: string, checked: boolean) => void;
+    onCSVExport?: () => void;
     loading?: boolean;
     websocketStatus?: string;
     connectionId?: string;
@@ -37,6 +38,7 @@ export const DataTable: React.FC<DataTableProps> = ({
     onCellValueChanged,
     onCellClicked,
     onCheckboxChanged,
+    onCSVExport,
     loading = false,
     websocketStatus,
     connectionId,
@@ -113,33 +115,7 @@ export const DataTable: React.FC<DataTableProps> = ({
         }
     };
 
-    // Export to CSV
-    const exportToCSV = () => {
-        const headers = visibleColumns.map(col => col.headerName || col.field);
-        const csvContent = [
-            headers.join(','),
-            ...sortedData.map(row =>
-                visibleColumns.map(col => {
-                    const value = row[col.field];
-                    // Escape commas and quotes in CSV
-                    if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
-                        return `"${value.replace(/"/g, '""')}"`;
-                    }
-                    return value?.toString() || '';
-                }).join(',')
-            )
-        ].join('\n');
 
-        const blob = new Blob([csvContent], { type: 'text/csv' });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'admin-dashboard-export.csv';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-    };
 
     // Render cell content
     const renderCell = (row: any, col: Column, rowIndex: number) => {
@@ -272,9 +248,18 @@ export const DataTable: React.FC<DataTableProps> = ({
                     </span>
                 )}
                 {canExportCSV && (
-                    <span className="status-item export-enabled">
+                    <button
+                        className="status-item export-enabled"
+                        onClick={onCSVExport}
+                        title="Click to export CSV"
+                    >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '4px' }}>
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="7,10 12,15 17,10" />
+                            <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
                         Export Enabled
-                    </span>
+                    </button>
                 )}
                 {currentUserName && (
                     <span className="status-item user-info">
