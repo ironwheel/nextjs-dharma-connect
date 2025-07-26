@@ -1241,6 +1241,10 @@ const Home = () => {
                     obj = predefined[defName];
                 }
             }
+            // Inherit writeEnabled from colDef if present (for all custom columns)
+            if (typeof colDef.writeEnabled !== 'undefined') {
+                obj.writeEnabled = colDef.writeEnabled;
+            }
             // Validate column object before adding
             if (obj && obj.field && obj.field.trim() !== '') {
                 columns.push(obj);
