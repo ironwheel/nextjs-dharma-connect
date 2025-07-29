@@ -437,4 +437,115 @@ export async function authGetViewsHistoryPermission(
         }
         throw new Error(error.message || 'Failed to get views history permission');
     }
+}
+
+export async function authGetLink(
+    domainName: string,
+    studentId: string,
+    pid: string,
+    hash: string
+): Promise<string | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/auth/getLink`, pid, hash, {
+            domainName,
+            studentId
+        });
+        if (response && response.redirected) {
+            console.log('[API] authGetLink redirected - authentication required');
+            return { redirected: true };
+        }
+        return response?.accessLink || '';
+    } catch (error: any) {
+        console.error('[API] authGetLink failed:', error);
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log('[API] authGetLink authentication failed - returning redirected response');
+            return { redirected: true };
+        }
+        throw new Error(error.message || 'Failed to get access link');
+    }
+}
+
+export async function authGetActionsProfiles(
+    pid: string,
+    hash: string
+): Promise<string[] | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/auth/getActionsProfiles`, pid, hash, {});
+        if (response && response.redirected) {
+            console.log('[API] authGetActionsProfiles redirected - authentication required');
+            return { redirected: true };
+        }
+        return response?.profileNames || [];
+    } catch (error: any) {
+        console.error('[API] authGetActionsProfiles failed:', error);
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log('[API] authGetActionsProfiles authentication failed - returning redirected response');
+            return { redirected: true };
+        }
+        throw new Error(error.message || 'Failed to get actions profiles');
+    }
+}
+
+export async function authGetAuthList(
+    pid: string,
+    hash: string
+): Promise<any[] | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/auth/getAuthList`, pid, hash, {});
+        if (response && response.redirected) {
+            console.log('[API] authGetAuthList redirected - authentication required');
+            return { redirected: true };
+        }
+        return response?.authRecords || [];
+    } catch (error: any) {
+        console.error('[API] authGetAuthList failed:', error);
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log('[API] authGetAuthList authentication failed - returning redirected response');
+            return { redirected: true };
+        }
+        throw new Error(error.message || 'Failed to get auth list');
+    }
+}
+
+export async function authGetViewsProfiles(
+    pid: string,
+    hash: string
+): Promise<string[] | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/auth/getViewsProfiles`, pid, hash, {});
+        if (response && response.redirected) {
+            console.log('[API] authGetViewsProfiles redirected - authentication required');
+            return { redirected: true };
+        }
+        return response?.viewsProfileNames || [];
+    } catch (error: any) {
+        console.error('[API] authGetViewsProfiles failed:', error);
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log('[API] authGetViewsProfiles authentication failed - returning redirected response');
+            return { redirected: true };
+        }
+        throw new Error(error.message || 'Failed to get views profiles');
+    }
+}
+
+export async function authPutAuthItem(
+    authRecord: any,
+    pid: string,
+    hash: string
+): Promise<any | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/auth/putAuthItem`, pid, hash, { authRecord });
+        if (response && response.redirected) {
+            console.log('[API] authPutAuthItem redirected - authentication required');
+            return { redirected: true };
+        }
+        return response;
+    } catch (error: any) {
+        console.error('[API] authPutAuthItem failed:', error);
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log('[API] authPutAuthItem authentication failed - returning redirected response');
+            return { redirected: true };
+        }
+        throw new Error(error.message || 'Failed to put auth item');
+    }
 } 

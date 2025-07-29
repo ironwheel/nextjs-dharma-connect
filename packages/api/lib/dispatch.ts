@@ -3,7 +3,7 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import { tables, TableConfig } from './tableConfig';
 import { websockets, WebSocketConfig, websocketGetConfig } from './websocketConfig';
 import { listAll, listAllChunked, getOne, deleteOne, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll } from './dynamoClient';
-import { verificationEmailSend, verificationEmailCallback, createToken, getViews, getViewsWritePermission, getViewsExportCSV, getViewsHistoryPermission } from './authUtils';
+import { verificationEmailSend, verificationEmailCallback, createToken, getViews, getViewsWritePermission, getViewsExportCSV, getViewsHistoryPermission, authGetLink, getActionsProfiles, getAuthList, getViewsProfiles, getActionsProfileForHost, getAllActionsForUser, putAuthItem } from './authUtils';
 import { serialize } from 'cookie';
 import { v4 as uuidv4 } from 'uuid';
 import { sendWorkOrderMessage } from './sqsClient';
@@ -156,6 +156,29 @@ async function dispatchAuth(
       case 'viewsHistoryPermission':
         const studentHistory = await getViewsHistoryPermission(pid, host);
         return res.status(200).json({ studentHistory });
+      case 'getLink':
+        const { domainName, studentId } = req.body;
+        if (!domainName || !studentId) {
+          return res.status(400).json({ error: 'Missing required parameters: domainName, studentId' });
+        }
+        const accessLink = await authGetLink(domainName, studentId);
+        return res.status(200).json({ accessLink });
+      case 'getActionsProfiles':
+        const profileNames = await getActionsProfiles();
+        return res.status(200).json({ profileNames });
+      case 'getAuthList':
+        const authRecords = await getAuthList();
+        return res.status(200).json({ authRecords });
+      case 'getViewsProfiles':
+        const viewsProfileNames = await getViewsProfiles();
+        return res.status(200).json({ viewsProfileNames });
+      case 'putAuthItem':
+        const { authRecord } = req.body;
+        if (!authRecord || !authRecord.id) {
+          return res.status(400).json({ error: 'Missing required parameters: authRecord with id' });
+        }
+        await putAuthItem(authRecord.id, authRecord);
+        return res.status(200).json({ success: true });
       default:
         return res.status(404).json({ error: `Unknown auth action: ${action}` });
     }
