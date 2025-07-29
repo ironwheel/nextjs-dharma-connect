@@ -8,15 +8,11 @@ import jwt from 'jsonwebtoken';
 import axios from 'axios';
 import nodemailer from 'nodemailer';
 import { tableGetConfig } from './tableConfig';
-import { listAllFiltered, getOne, putOne, getOneWithSort, deleteOne, deleteOneWithSort } from './dynamoClient';
+import { listAllFiltered, listAll, getOne, putOne, getOneWithSort, deleteOne, deleteOneWithSort } from './dynamoClient';
 import crypto from 'crypto';
 
 // Add this type at the top of the file, after imports
-type PermittedHost = {
-    host: string;
-    actionsProfile?: string;
-    [key: string]: any;
-};
+type PermittedHost = string; // Now just a string representing the host
 
 // JWT Configuration (Constants)
 export const JWT_ISSUER = process.env.JWT_ISSUER_NAME;
@@ -315,9 +311,9 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
     }
 
     // Does this user have access to this HOST?
-    const permittedHosts: PermittedHost[] = data['permitted-hosts'] || [];
-    const permission = permittedHosts.find(permission => permission.host === host);
-    if (!permission) throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
+    const permittedHosts: string[] = data['permitted-hosts'] || [];
+    const hasPermission = permittedHosts.includes(host);
+    if (!hasPermission) throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
 
     // User has access to this HOST - send the verification email   
 
@@ -477,12 +473,12 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
     }
 
     // Does this user have access to this host?
-    const permittedHosts: PermittedHost[] = data['permitted-hosts'] || [];
-    const permission = permittedHosts.find(permission => permission.host === host);
-    if (!permission) {
+    const permittedHosts: string[] = data['permitted-hosts'] || [];
+    const hasPermission = permittedHosts.includes(host);
+    if (!hasPermission) {
         throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
     }
-    const actionsProfile = permission.actionsProfile;
+    const actionsProfile = await getActionsProfileForHost(host);
 
     // User has access to this host, so if we can find the verification record we're good to go
     tableCfg = tableGetConfig('verification-tokens');
@@ -500,29 +496,10 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
         throw new Error('AUTH_VERIFICATION_TOKEN_DEVICE_FINGERPRINT_MISMATCH');
     }
 
-    // Lookup related actions list, throw config error if not found
-    tableCfg = tableGetConfig('actions-profile');
-    const actionsListData = await getOne(tableCfg.tableName, tableCfg.pk, actionsProfile as string, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
-    if (!actionsListData) throw new Error('AUTH_ACTIONS_LIST_NOT_FOUND');
-
-    // Ensure actionsList is an array
-    let actionsList: string[];
-    if (Array.isArray(actionsListData.actions)) {
-        actionsList = actionsListData.actions;
-    } else if (actionsListData.actions && typeof actionsListData.actions === 'string') {
-        // If it's a string, try to parse it as JSON
-        try {
-            actionsList = JSON.parse(actionsListData.actions);
-        } catch (e) {
-            console.error("Failed to parse actions as JSON:", actionsListData.actions);
-            throw new Error('AUTH_ACTIONS_LIST_INVALID_FORMAT');
-        }
-    } else {
-        console.error("Actions list is not in expected format:", actionsListData);
-        throw new Error('AUTH_ACTIONS_LIST_INVALID_FORMAT');
-    }
-
-    // console.log("verificationEmailCallback: actionsList:", actionsList);
+    // Get all actions for all apps the user has access to (design improvement)
+    console.log("verificationEmailCallback: getting all actions for user across all permitted hosts");
+    const allActionsList = await getAllActionsForUser(permittedHosts);
+    console.log("verificationEmailCallback: allActionsList:", allActionsList);
 
     // Delete the current verification record
     await deleteOne(tableCfg.tableName, tableCfg.pk, verificationTokenId, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
@@ -542,7 +519,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
         throw new Error('AUTH_SESSION_CREATION_FAILED');
     }
 
-    const newAccessToken = createToken(pid, deviceFingerprint, actionsList);
+    const newAccessToken = createToken(pid, deviceFingerprint, allActionsList);
     return {
         status: 'authenticated',
         accessToken: newAccessToken,
@@ -682,45 +659,21 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
 
     // Does this user have access to this host?
     // console.log("checkAccess: permittedHosts:", permittedHosts);
-    const permission = permittedHosts.find(permission => permission.host === host);
-    // console.log("checkAccess: permission:", permission);
-    if (!permission) {
+    const hasPermission = permittedHosts.includes(host);
+    // console.log("checkAccess: hasPermission:", hasPermission);
+    if (!hasPermission) {
         throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
     }
 
-    // Check operation permission, throw config error if not found
-    const actionsProfile = permission.actionsProfile;
-    if (!actionsProfile) throw new Error('AUTH_ACTIONS_PROFILE_NOT_FOUND');
-    console.log("checkAccess: actionsProfile:", actionsProfile);
-
-    // Lookup related actions list, throw config error if not found
-    tableCfg = tableGetConfig('actions-profile');
-    const actionsListData = await getOne(tableCfg.tableName, tableCfg.pk, actionsProfile as string, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
-    if (!actionsListData) throw new Error('AUTH_ACTIONS_LIST_NOT_FOUND');
-
-    // Ensure actionsList is an array
-    let actionsList: string[];
-    if (Array.isArray(actionsListData.actions)) {
-        actionsList = actionsListData.actions;
-    } else if (actionsListData.actions && typeof actionsListData.actions === 'string') {
-        // If it's a string, try to parse it as JSON
-        try {
-            actionsList = JSON.parse(actionsListData.actions);
-        } catch (e) {
-            console.error("Failed to parse actions as JSON:", actionsListData.actions);
-            throw new Error('AUTH_ACTIONS_LIST_INVALID_FORMAT');
-        }
-    } else {
-        console.error("Actions list is not in expected format:", actionsListData);
-        throw new Error('AUTH_ACTIONS_LIST_INVALID_FORMAT');
-    }
-
-    // console.log("checkAccess: actionsList:", actionsList);
+    // Get all actions for all apps the user has access to (design improvement)
+    console.log("checkAccess: getting all actions for user across all permitted hosts");
+    const allActionsList = await getAllActionsForUser(permittedHosts);
+    console.log("checkAccess: allActionsList:", allActionsList);
 
     // Check if the requested operation is allowed
-    if (!actionsList.includes(operation)) {
-        console.log("checkAccess: operation not allowed:", operation, "allowed actions:", actionsList);
-        throw new Error(`AUTH_OPERATION_NOT_ALLOWED: Operation '${operation}' is not permitted. Actions profile: ${actionsProfile}`);
+    if (!allActionsList.includes(operation)) {
+        console.log("checkAccess: operation not allowed:", operation, "allowed actions:", allActionsList);
+        throw new Error(`AUTH_OPERATION_NOT_ALLOWED: Operation '${operation}' is not permitted for user across all apps`);
     }
 
     // Check for existing session which is only created after email verification
@@ -738,10 +691,11 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
             await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, session.id, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
             // console.log("checkAccess: session deleted");
         } else {
-            // Session is valid, generate fresh access token
+            // Session is valid, generate fresh access token with all actions
+            const allActionsList = await getAllActionsForUser(permittedHosts);
             return {
                 status: 'authenticated',
-                accessToken: createToken(pid, deviceFingerprint, actionsList)
+                accessToken: createToken(pid, deviceFingerprint, allActionsList)
             };
         }
     }
@@ -865,4 +819,212 @@ export async function getViewsHistoryPermission(pid: string, host: string): Prom
         }
     }
     return !!data.adminDashboardConfig?.studentHistory;
+}
+
+/**
+ * Generates an access link for a student to a specific domain.
+ * @async
+ * @function authGetLink
+ * @param {string} domainName - The domain name for the app.
+ * @param {string} studentId - The student ID.
+ * @returns {Promise<string>} The access link in format: https://${domainName}/?pid=${studentId}&hash=${appSpecificHash}
+ * @throws {Error} If the student doesn't have access to the domain or configuration is missing.
+ */
+export async function authGetLink(domainName: string, studentId: string): Promise<string> {
+    // Parse and validate APP_ACCESS_JSON
+    const accessJson = process.env.APP_ACCESS_JSON;
+    if (!accessJson) {
+        throw new Error('APP_ACCESS_JSON environment variable not set');
+    }
+
+    let accessList: any[];
+    try {
+        accessList = JSON.parse(accessJson);
+    } catch (e) {
+        throw new Error('APP_ACCESS_JSON is not valid JSON');
+    }
+
+    // Find domain configuration
+    const entry = accessList.find((e: any) => e.host === domainName);
+    if (!entry) {
+        throw new Error(`Domain '${domainName}' not found in APP_ACCESS_JSON`);
+    }
+
+    // Check if student has access to this domain
+    let tableCfg = tableGetConfig('auth');
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, studentId, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+
+    if (!data) {
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        if (!data) {
+            throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
+        }
+    }
+
+    // Check if student has access to this domain
+    const permittedHosts: string[] = data['permitted-hosts'] || [];
+    const hasPermission = permittedHosts.includes(domainName);
+    if (!hasPermission) {
+        throw new Error(`Student ${studentId} does not have access to domain '${domainName}'`);
+    }
+
+    // Generate the app-specific hash
+    const appSpecificHash = generateAuthHash(studentId, entry.secret);
+
+    // Return the access link
+    return `https://${domainName}/?pid=${studentId}&hash=${appSpecificHash}`;
+}
+
+/**
+ * Retrieves all action profile names from the actions-profiles table.
+ * @async
+ * @function getActionsProfiles
+ * @returns {Promise<string[]>} Resolves with a list of profile names from the 'profile' field
+ * @throws {Error} If the database scan fails or table name is not configured.
+ */
+export async function getActionsProfiles(): Promise<string[]> {
+    const tableCfg = tableGetConfig('actions-profile');
+    const allProfiles = await listAllFiltered(tableCfg.tableName, 'profile', 'profile', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+
+    // Extract just the profile names from the results
+    const profileNames = allProfiles.map((item: any) => item.profile).filter(Boolean);
+
+    return profileNames;
+}
+
+/**
+ * Retrieves all auth records from the auth table.
+ * @async
+ * @function getAuthList
+ * @returns {Promise<any[]>} Resolves with a list of all auth records
+ * @throws {Error} If the database scan fails or table name is not configured.
+ */
+export async function getAuthList(): Promise<any[]> {
+    const tableCfg = tableGetConfig('auth');
+    const allAuthRecords = await listAll(tableCfg.tableName, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+
+    return allAuthRecords;
+}
+
+/**
+ * Updates or creates an auth record in the auth table.
+ * @async
+ * @function putAuthItem
+ * @param {string} id - The auth record ID (student ID or 'default')
+ * @param {any} authRecord - The auth record data to save
+ * @returns {Promise<void>} Resolves when the record is saved
+ * @throws {Error} If the database operation fails or table name is not configured.
+ */
+export async function putAuthItem(id: string, authRecord: any): Promise<void> {
+    const tableCfg = tableGetConfig('auth');
+    await putOne(tableCfg.tableName, authRecord, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+}
+
+/**
+ * Retrieves all views profile names from the views-profiles table.
+ * @async
+ * @function getViewsProfiles
+ * @returns {Promise<string[]>} Resolves with a list of profile names from the 'profile' field
+ * @throws {Error} If the database scan fails or table name is not configured.
+ */
+export async function getViewsProfiles(): Promise<string[]> {
+    const tableCfg = tableGetConfig('views-profiles');
+    console.log('getViewsProfiles: tableCfg:', tableCfg);
+
+    try {
+        // Try listAll first to see what's in the table
+        const allProfiles = await listAll(tableCfg.tableName, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        console.log('getViewsProfiles: allProfiles from listAll:', allProfiles);
+
+        // Extract just the profile names from the results
+        const profileNames = allProfiles.map((item: any) => item.profile).filter(Boolean);
+        console.log('getViewsProfiles: extracted profileNames:', profileNames);
+
+        return profileNames;
+    } catch (error) {
+        console.error('getViewsProfiles: Error with listAll:', error);
+
+        // Fallback to listAllFiltered if listAll fails
+        try {
+            const filteredProfiles = await listAllFiltered(tableCfg.tableName, 'profile', 'profile', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+            console.log('getViewsProfiles: filteredProfiles from listAllFiltered:', filteredProfiles);
+
+            const profileNames = filteredProfiles.map((item: any) => item.profile).filter(Boolean);
+            console.log('getViewsProfiles: extracted profileNames from filtered:', profileNames);
+
+            return profileNames;
+        } catch (filteredError) {
+            console.error('getViewsProfiles: Error with listAllFiltered:', filteredError);
+            return [];
+        }
+    }
+}
+
+/**
+ * Gets the actions profile for a given host from the app.actions table
+ * @async
+ * @function getActionsProfileForHost
+ * @param {string} host - The host to look up
+ * @returns {Promise<string>} The actions profile name for the host
+ * @throws {Error} If host not found in app.actions table
+ */
+export async function getActionsProfileForHost(host: string): Promise<string> {
+    const tableCfg = tableGetConfig('app.actions');
+    const appActionData = await getOne(tableCfg.tableName, tableCfg.pk, host, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    if (!appActionData) {
+        throw new Error(`AUTH_APP_ACTIONS_NOT_FOUND: No actions profile found for host '${host}'`);
+    }
+    return appActionData.actionsProfile;
+}
+
+/**
+ * Gets all actions for a user based on their permitted hosts
+ * @async
+ * @function getAllActionsForUser
+ * @param {string[]} permittedHosts - Array of hosts the user has access to
+ * @returns {Promise<string[]>} Array of all actions the user has access to
+ * @throws {Error} If any host's actions profile is not found
+ */
+export async function getAllActionsForUser(permittedHosts: string[]): Promise<string[]> {
+    const allActions: string[] = [];
+
+    for (const host of permittedHosts) {
+        try {
+            const actionsProfile = await getActionsProfileForHost(host);
+
+            // Lookup the actions list for this profile
+            const tableCfg = tableGetConfig('actions-profile');
+            const actionsListData = await getOne(tableCfg.tableName, tableCfg.pk, actionsProfile, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+
+            if (!actionsListData) {
+                throw new Error(`AUTH_ACTIONS_LIST_NOT_FOUND: No actions list found for profile '${actionsProfile}'`);
+            }
+
+            // Ensure actionsList is an array
+            let actionsList: string[];
+            if (Array.isArray(actionsListData.actions)) {
+                actionsList = actionsListData.actions;
+            } else if (actionsListData.actions && typeof actionsListData.actions === 'string') {
+                try {
+                    actionsList = JSON.parse(actionsListData.actions);
+                } catch (e) {
+                    throw new Error(`AUTH_ACTIONS_LIST_INVALID_FORMAT: Invalid JSON for profile '${actionsProfile}'`);
+                }
+            } else {
+                throw new Error(`AUTH_ACTIONS_LIST_INVALID_FORMAT: Actions list is not in expected format for profile '${actionsProfile}'`);
+            }
+
+            // Add actions to the combined list (avoiding duplicates)
+            for (const action of actionsList) {
+                if (!allActions.includes(action)) {
+                    allActions.push(action);
+                }
+            }
+        } catch (error) {
+            console.error(`Failed to get actions for host ${host}:`, error);
+            throw error;
+        }
+    }
+
+    return allActions;
 }
