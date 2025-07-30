@@ -842,3 +842,34 @@ a {
     padding: 0.75rem 1rem !important;
     margin: 0 !important;
 }
+
+/* Tooltip override to ensure black text */
+.copy-tooltip,
+.copy-tooltip *,
+.copy-tooltip span,
+.copy-tooltip div {
+    color: #000000 !important;
+    background-color: #ffffff !important;
+}
+
+/* Additional specificity for tooltip text */
+.copy-tooltip span,
+.copy-tooltip div,
+.copy-tooltip * {
+    color: #000000 !important;
+}
+
+/* Override any inherited text colors */
+.copy-tooltip {
+    color: #000000 !important;
+    background-color: #ffffff !important;
+}
+
+/* Specific tooltip styling for student manager */
+.student-manager-tooltip,
+.student-manager-tooltip *,
+.student-manager-tooltip span,
+.student-manager-tooltip div {
+    color: #000000 !important;
+    background-color: #ffffff !important;
+}

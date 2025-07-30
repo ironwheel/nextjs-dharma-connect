@@ -1,5 +1,5 @@
-// --- access-manager/login.tsx ---
-// This is the application-specific login file for access-manager.
+// --- student-manager/login.tsx ---
+// This is the application-specific login file for student-manager.
 // It imports the shared AuthVerification component.
 
 import React from 'react';

@@ -1,6 +1,55 @@
 import React, { useState, useMemo } from 'react';
 import { Table, Button, Form } from 'react-bootstrap';
 
+// Tooltip component for the hover popup
+const Tooltip: React.FC<{ show: boolean; children: React.ReactNode }> = ({ show, children }) => {
+    if (!show) return null;
+
+    return (
+        <div
+            className="copy-tooltip student-manager-tooltip"
+            style={{
+                position: 'absolute',
+                backgroundColor: '#ffffff',
+                color: '#000000',
+                padding: '6px 10px',
+                borderRadius: '6px',
+                fontSize: '12px',
+                fontWeight: '500',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                zIndex: 9999,
+                whiteSpace: 'nowrap',
+                pointerEvents: 'none',
+                transform: 'translateX(-50%)',
+                top: '-40px',
+                left: '50%',
+                border: '1px solid #cccccc'
+            }}
+        >
+            <span style={{
+                display: 'block',
+                fontWeight: '500',
+                color: '#000000'
+            }}>
+                {children}
+            </span>
+            <div
+                style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    width: 0,
+                    height: 0,
+                    borderLeft: '4px solid transparent',
+                    borderRight: '4px solid transparent',
+                    borderTop: '4px solid white'
+                }}
+            />
+        </div>
+    );
+};
+
 export interface Column {
     field: string;
     headerName?: string;
@@ -53,6 +102,7 @@ export const DataTable: React.FC<DataTableProps> = ({
     const [sortConfig, setSortConfig] = useState<{ field: string; direction: 'asc' | 'desc' }>({ field: 'studentName', direction: 'asc' });
     const [editingCell, setEditingCell] = useState<{ rowIndex: number; field: string } | null>(null);
     const [editValue, setEditValue] = useState('');
+    const [tooltipState, setTooltipState] = useState<{ show: boolean; appName: string; rowIndex: number; appIndex: number } | null>(null);
 
     // Filter out hidden columns
     const visibleColumns = useMemo(() => {
@@ -187,6 +237,14 @@ export const DataTable: React.FC<DataTableProps> = ({
             );
         }
 
+        // Email and language columns - hide for unsubscribed students
+        if (col.field === 'email' || col.field === 'language') {
+            if (isUnsubscribed) {
+                return <span className="text-muted">—</span>;
+            }
+            return value?.toString() || '';
+        }
+
         // Clickable cell for permitted apps
         if (col.field === 'permittedApps') {
             if (value === 'None' || isUnsubscribed) {
@@ -202,10 +260,14 @@ export const DataTable: React.FC<DataTableProps> = ({
                             return <span key={index} className="text-muted">{appName}</span>;
                         }
 
+                        const isTooltipVisible = !!(tooltipState?.show &&
+                            tooltipState.rowIndex === rowIndex &&
+                            tooltipState.appIndex === index);
+
                         return (
                             <span
                                 key={index}
-                                className="badge cursor-pointer"
+                                className="badge cursor-pointer position-relative"
                                 style={{
                                     cursor: 'pointer',
                                     backgroundColor: '#000000',
@@ -217,8 +279,13 @@ export const DataTable: React.FC<DataTableProps> = ({
                                     borderRadius: '12px',
                                     fontSize: '0.875rem',
                                     lineHeight: '1',
-                                    minHeight: '24px',
-                                    border: '0.5px solid #ffffff'
+                                    minHeight: '24px'
+                                }}
+                                onMouseEnter={() => {
+                                    setTooltipState({ show: true, appName, rowIndex, appIndex: index });
+                                }}
+                                onMouseLeave={() => {
+                                    setTooltipState(null);
                                 }}
                                 onClick={(e) => {
                                     e.stopPropagation();
@@ -227,6 +294,9 @@ export const DataTable: React.FC<DataTableProps> = ({
                                 }}
                             >
                                 {appName}
+                                <Tooltip show={isTooltipVisible}>
+                                    Click to copy
+                                </Tooltip>
                             </span>
                         );
                     })}
