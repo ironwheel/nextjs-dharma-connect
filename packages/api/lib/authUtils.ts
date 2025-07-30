@@ -382,7 +382,7 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
         throw new Error('AUTH_VERIFICATION_TOKEN_CREATION_FAILED');
     }
 
-    let verificationCallbackUrl = `${hostNameWithProtocol}/login/callback/?pid=${pid}&hash=${hash}&tokenid=${verificationTokenId}`;
+    let verificationCallbackUrl = `${hostNameWithProtocol}/login/callback/?pid=${pid}&hash=${hash}&tokenid=${verificationTokenId}&targetWindow=emailVerificationWindow`;
     // console.log("verificationEmailSend: hostNameWithProtocol:", hostNameWithProtocol);
     // console.log("verificationEmailSend: verificationTokenId:", verificationTokenId);
     // console.log("verificationEmailSend: verificationCallbackUrl:", verificationCallbackUrl);
@@ -397,7 +397,9 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
         auth: {
             user: SMTP_USERNAME,
             pass: SMTP_PASSWORD
-        }
+        },
+        // Ensure proper encoding to avoid quoted-printable encoding issues
+        encoding: 'utf8'
     });
 
     const mailOptions = {

@@ -1,6 +1,6 @@
-# Access Manager
+# Student Manager
 
-The Access Manager is a web application for managing user access to various applications in the Dharma Connect monorepo. It provides a centralized interface for administrators to control which students have access to which applications and what permissions they have.
+The Student Manager is a web application for managing user access to various applications in the Dharma Connect monorepo. It provides a centralized interface for administrators to control which students have access to which applications and what permissions they have.
 
 ## Features
 
@@ -14,7 +14,7 @@ The Access Manager is a web application for managing user access to various appl
 
 ## Data Structure
 
-The access-manager manages auth table records with the following structure:
+The student-manager manages auth table records with the following structure:
 
 ```json
 {
@@ -65,10 +65,10 @@ The app integrates with the shared backend API and uses the following endpoints:
 
 ## Development
 
-To run the access-manager in development mode:
+To run the student-manager in development mode:
 
 ```bash
-cd apps/access-manager
+cd apps/student-manager
 npm run dev
 ```
 
@@ -84,4 +84,4 @@ The app will be available at `http://localhost:3000`.
 
 ## Authentication
 
-The access-manager uses the same authentication system as other apps in the monorepo, requiring a valid PID and hash for access. 
+The student-manager uses the same authentication system as other apps in the monorepo, requiring a valid PID and hash for access. 

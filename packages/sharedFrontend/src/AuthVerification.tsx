@@ -21,6 +21,33 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
     const [error, setError] = useState<string | null>(null);
     const [isSent, setIsSent] = useState(false);
 
+    // Name the window when component mounts (when user needs email verification)
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            window.name = 'emailVerificationWindow';
+            // Store flags in both sessionStorage and localStorage to identify this window
+            sessionStorage.setItem('emailVerificationWindow', 'true');
+            localStorage.setItem('emailVerificationWindow', 'true');
+            console.log('AuthVerification: Window named and storage flags set');
+
+            // Add message listener to handle verification callbacks from other windows
+            const handleMessage = (event: MessageEvent) => {
+                console.log('AuthVerification: Received message:', event.data);
+                if (event.data && event.data.type === 'VERIFICATION_CALLBACK') {
+                    console.log('AuthVerification: Received verification callback, redirecting to:', event.data.redirectUrl);
+                    window.location.href = event.data.redirectUrl;
+                }
+            };
+
+            window.addEventListener('message', handleMessage);
+
+            // Cleanup function
+            return () => {
+                window.removeEventListener('message', handleMessage);
+            };
+        }
+    }, []);
+
     /**
      * Initiates the email verification process by calling the backend API.
      * Displays loading, success, or error messages based on the API response.

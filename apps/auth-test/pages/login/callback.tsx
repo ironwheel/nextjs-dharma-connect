@@ -4,7 +4,7 @@ import { useRouter } from 'next/router';
 
 const Callback: React.FC = () => {
     const router = useRouter();
-    const { pid, hash, tokenid } = router.query;
+    const { pid, hash, tokenid, targetWindow } = router.query;
 
     return (
         // The Callback component simply renders the shared AuthVerificationCallback component
@@ -13,6 +13,7 @@ const Callback: React.FC = () => {
             pid={pid as string}
             hash={hash as string}
             tokenId={tokenid as string}
+            targetWindow={targetWindow as string}
         />
     );
 };
