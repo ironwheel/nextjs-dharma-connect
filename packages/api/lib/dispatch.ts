@@ -75,10 +75,35 @@ async function dispatchTable(
   if (req.method === 'POST' && id && req.body && req.body.fieldName && req.body.fieldValue !== undefined) {
     const { fieldName, fieldValue } = req.body;
 
-    // Handle reserved keywords by using expression attribute names
-    const expressionAttributeNames = { '#fieldName': fieldName };
-    const updateExpression = `SET #fieldName = :fieldValue`;
+    // Handle nested field updates (e.g., "programs.sw2025.accepted")
+    let expressionAttributeNames: Record<string, string>;
+    let updateExpression: string;
     const expressionAttributeValues = { ':fieldValue': fieldValue };
+
+    if (fieldName.includes('.')) {
+      const pathParts = fieldName.split('.');
+      expressionAttributeNames = {};
+
+      // Create expression attribute names for each path part
+      pathParts.forEach((part, index) => {
+        expressionAttributeNames[`#part${index}`] = part;
+      });
+
+      // Build the update expression for nested path
+      updateExpression = 'SET ';
+      for (let i = 0; i < pathParts.length; i++) {
+        if (i === 0) {
+          updateExpression += `#part${i}`;
+        } else {
+          updateExpression += `.#part${i}`;
+        }
+      }
+      updateExpression += ' = :fieldValue';
+    } else {
+      // Handle simple field updates
+      expressionAttributeNames = { '#fieldName': fieldName };
+      updateExpression = `SET #fieldName = :fieldValue`;
+    }
 
     // Use conditional update for work-orders to prevent recreating deleted items
     if (resource === 'work-orders') {
