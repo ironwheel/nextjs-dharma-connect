@@ -31,8 +31,8 @@ The student-manager manages auth table records with the following structure:
       "host": "localhost"
     },
     {
-      "actionsProfile": "admin-dashboard-actions",
-      "host": "admin-dashboard.slsupport.link"
+      "actionsProfile": "event-dashboard-actions",
+"host": "event-dashboard.slsupport.link"
     }
   ]
 }
@@ -42,8 +42,7 @@ The student-manager manages auth table records with the following structure:
 
 The app requires the following configuration values in the config table:
 
-- `accessManagerAppList`: List of domain names representing each app
-- `accessManagerPool`: Pool name for eligibility checking
+- `studentManagerAppList`: List of domain names representing each app
 
 ## Usage
 

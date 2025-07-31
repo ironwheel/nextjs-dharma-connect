@@ -43,7 +43,7 @@ The admin dashboard uses a custom favicon featuring a shield and gear design to 
 
 2. **Generate PNG files**:
    ```bash
-   cd apps/admin-dashboard
+   cd apps/event-dashboard
    node generate-favicons.js
    ```
 
@@ -51,7 +51,7 @@ The admin dashboard uses a custom favicon featuring a shield and gear design to 
 
 1. **Open the preview page**:
    ```bash
-   cd apps/admin-dashboard
+   cd apps/event-dashboard
    open favicon-preview.html
    ```
 
@@ -133,7 +133,7 @@ Modify the SVG paths to change the shield or gear design while maintaining the 3
 ## File Structure
 
 ```
-apps/admin-dashboard/
+apps/event-dashboard/
 ├── public/
 │   ├── favicon.svg          # Source SVG file
 │   ├── favicon-16x16.png    # Standard favicon

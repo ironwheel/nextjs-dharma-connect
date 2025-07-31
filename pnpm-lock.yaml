@@ -8,7 +8,7 @@ importers:
 
   .: {}
 
-  apps/admin-dashboard:
+  apps/event-dashboard:
     dependencies:
       '@fingerprintjs/fingerprintjs':
         specifier: ^4.6.1

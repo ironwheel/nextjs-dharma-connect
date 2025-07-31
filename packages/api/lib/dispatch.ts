@@ -74,13 +74,16 @@ async function dispatchTable(
   // UPDATE ITEM (POST method for updating specific fields)
   if (req.method === 'POST' && id && req.body && req.body.fieldName && req.body.fieldValue !== undefined) {
     const { fieldName, fieldValue } = req.body;
-    const updateExpression = `SET ${fieldName} = :fieldValue`;
+
+    // Handle reserved keywords by using expression attribute names
+    const expressionAttributeNames = { '#fieldName': fieldName };
+    const updateExpression = `SET #fieldName = :fieldValue`;
     const expressionAttributeValues = { ':fieldValue': fieldValue };
 
     // Use conditional update for work-orders to prevent recreating deleted items
     if (resource === 'work-orders') {
       try {
-        await updateItemWithCondition(tableName, { [cfg.pk]: id }, updateExpression, expressionAttributeValues);
+        await updateItemWithCondition(tableName, { [cfg.pk]: id }, updateExpression, expressionAttributeValues, expressionAttributeNames);
         return res.status(200).json({ success: true });
       } catch (error: any) {
         // If the item doesn't exist, return success since the goal (unlocked state) is achieved
@@ -91,7 +94,7 @@ async function dispatchTable(
         throw error;
       }
     } else {
-      await updateItem(tableName, { [cfg.pk]: id }, updateExpression, expressionAttributeValues);
+      await updateItem(tableName, { [cfg.pk]: id }, updateExpression, expressionAttributeValues, expressionAttributeNames);
       return res.status(200).json({ success: true });
     }
   }
