@@ -75,6 +75,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
     const [campaignExistenceLoading, setCampaignExistenceLoading] = useState<Record<string, boolean>>({});
     const [recipientSearch, setRecipientSearch] = useState('');
     const [currentCampaignString, setCurrentCampaignString] = useState<string>('');
+    const [eventNames, setEventNames] = useState<Record<string, string>>({});
 
     // Navigation functions
     const goToNextWorkOrder = () => {
@@ -225,6 +226,20 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
         }
     }
 
+    const loadEventName = async (eventCode: string) => {
+        if (!eventCode || eventNames[eventCode]) return
+        try {
+            const result = await getTableItem('events', eventCode, userPid, userHash)
+            if (result && result.name) {
+                setEventNames(prev => ({ ...prev, [eventCode]: result.name }))
+            } else {
+                setEventNames(prev => ({ ...prev, [eventCode]: eventCode }))
+            }
+        } catch {
+            setEventNames(prev => ({ ...prev, [eventCode]: eventCode }))
+        }
+    }
+
     const loadWorkOrders = async () => {
         setLoading(true)
         try {
@@ -250,6 +265,18 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                 uniquePids.forEach(pid => {
                     if (!participantNames[pid]) {
                         loadParticipantName(pid)
+                    }
+                })
+
+                // Load event names for all work orders
+                const uniqueEventCodes = new Set<string>()
+                activeWorkOrders.forEach(wo => {
+                    if (wo.eventCode) uniqueEventCodes.add(wo.eventCode)
+                })
+
+                uniqueEventCodes.forEach(eventCode => {
+                    if (!eventNames[eventCode]) {
+                        loadEventName(eventCode)
                     }
                 })
             }
@@ -453,6 +480,28 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [workOrders, currentWorkOrderIndex]);
+
+    const handleUnlockWorkOrder = async (workOrderId: string) => {
+        try {
+            // Unlock the work order using the API
+            await updateTableItem('work-orders', workOrderId, 'locked', false, userPid, userHash)
+            await updateTableItem('work-orders', workOrderId, 'lockedBy', undefined, userPid, userHash)
+
+            // Update state immediately to reflect the unlock
+            setWorkOrders(prevOrders => {
+                const index = prevOrders.findIndex(wo => wo.id === workOrderId)
+                if (index === -1) return prevOrders
+                const newOrders = [...prevOrders]
+                newOrders[index] = { ...newOrders[index], locked: false, lockedBy: undefined }
+                return newOrders
+            })
+
+            toast.success('Work order unlocked successfully')
+        } catch (error) {
+            console.error('Error unlocking work order:', error)
+            toast.error('Failed to unlock work order')
+        }
+    }
 
     const handleRowClick = async (workOrder: WorkOrder) => {
         if (workOrder.locked) {
@@ -701,7 +750,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                         <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: '#212529' }}>
                             <tr style={{ border: 'none' }}>
                                 <th style={{ border: 'none' }}>Status</th>
-                                <th style={{ border: 'none' }}>Event Code</th>
+                                <th style={{ border: 'none' }}>Event</th>
                                 <th style={{ border: 'none' }}>Sub Event</th>
                                 <th style={{ border: 'none' }}>Stage</th>
                                 <th style={{ border: 'none' }}>Languages</th>
@@ -731,12 +780,22 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                         >
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
                                                 <div className="d-flex align-items-center">
-                                                    <Badge
-                                                        bg={workOrder.locked ? 'danger' : 'success'}
+                                                    <Button
+                                                        variant={workOrder.locked ? 'danger' : 'success'}
+                                                        size="sm"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation()
+                                                            if (workOrder.locked) {
+                                                                handleUnlockWorkOrder(workOrder.id)
+                                                            } else {
+                                                                handleRowClick(workOrder)
+                                                            }
+                                                        }}
                                                         className="px-3 py-2"
+                                                        title={workOrder.locked ? 'Click to unlock work order' : 'Click to edit work order'}
                                                     >
                                                         {workOrder.locked ? 'Locked' : 'Edit'}
-                                                    </Badge>
+                                                    </Button>
                                                     {!workOrder.archived && isWorkOrderCompleted(workOrder) && (
                                                         <Button
                                                             variant="warning"
@@ -756,7 +815,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                 </div>
                                             </td>
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
-                                                {workOrder.eventCode}
+                                                {eventNames[workOrder.eventCode] || workOrder.eventCode}
                                             </td>
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.subEvent}</td>
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.stage}</td>
@@ -1151,7 +1210,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                 <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: '#212529' }}>
                                     <tr style={{ border: 'none' }}>
                                         <th style={{ border: 'none' }}>Actions</th>
-                                        <th style={{ border: 'none' }}>Event Code</th>
+                                        <th style={{ border: 'none' }}>Event</th>
                                         <th style={{ border: 'none' }}>Sub Event</th>
                                         <th style={{ border: 'none' }}>Stage</th>
                                         <th style={{ border: 'none' }}>Languages</th>
@@ -1174,7 +1233,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                 </Button>
                                             </td>
                                             <td style={{ border: 'none', verticalAlign: 'middle' }}>
-                                                {workOrder.eventCode}
+                                                {eventNames[workOrder.eventCode] || workOrder.eventCode}
                                             </td>
                                             <td style={{ border: 'none', verticalAlign: 'middle' }}>
                                                 {workOrder.subEvent}
