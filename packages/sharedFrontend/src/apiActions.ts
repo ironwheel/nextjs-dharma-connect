@@ -439,6 +439,27 @@ export async function authGetViewsHistoryPermission(
     }
 }
 
+export async function authGetViewsEmailDisplayPermission(
+    pid: string,
+    hash: string
+): Promise<boolean | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/auth/viewsEmailDisplayPermission/${pid}`, pid, hash, {});
+        if (response && response.redirected) {
+            console.log('[API] authGetViewsEmailDisplayPermission redirected - authentication required');
+            return { redirected: true };
+        }
+        return !!response?.emailDisplay;
+    } catch (error: any) {
+        console.error('[API] authGetViewsEmailDisplayPermission failed:', error);
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log('[API] authGetViewsEmailDisplayPermission authentication failed - returning redirected response');
+            return { redirected: true };
+        }
+        throw new Error(error.message || 'Failed to get views email display permission');
+    }
+}
+
 export async function authGetLink(
     domainName: string,
     studentId: string,

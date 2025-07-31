@@ -16,6 +16,7 @@ import {
     authGetViewsWritePermission,
     authGetViewsExportCSV,
     authGetViewsHistoryPermission,
+    authGetViewsEmailDisplayPermission,
     useWebSocket,
     getTableCount,
     checkEligibility,
@@ -111,35 +112,16 @@ function fromDynamo(item: any): any {
 }
 
 // StudentHistoryModal component
-const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, allPools }) => {
+const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, allPools, emailDisplayPermission }) => {
     const [copying, setCopying] = React.useState(false);
-    const [demoMode, setDemoMode] = React.useState(false);
 
     // Helper function to mask email in demo mode
-    const maskEmail = (email: string, demoModeValue: boolean = demoMode): string => {
-        if (demoModeValue && email) {
-            return 'xxxxxxxxxx';
+    const maskEmail = (email: string, emailDisplayValue: boolean = emailDisplayPermission): string => {
+        if (!emailDisplayValue && email) {
+            return '**********';
         }
         return email;
     };
-
-    // Fetch demo mode config when modal opens
-    React.useEffect(() => {
-        if (show && fetchConfig) {
-            const fetchDemoMode = async () => {
-                try {
-                    const demoModeConfig = await fetchConfig('demoMode');
-                    if (demoModeConfig) {
-                        const isDemoMode = demoModeConfig.value === 'true';
-                        setDemoMode(isDemoMode);
-                    }
-                } catch (error) {
-                    console.error('Error fetching demo mode config:', error);
-                }
-            };
-            fetchDemoMode();
-        }
-    }, [show, fetchConfig]);
 
     if (!student) return null;
     // Define SubEvent type
@@ -258,11 +240,15 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
                 <div style={{ marginBottom: 16 }}>
                     <b>Email:</b>{' '}
                     <span
-                        style={{ cursor: 'pointer', textDecoration: 'underline dotted', color: '#60a5fa' }}
-                        title="Click to copy email"
-                        onClick={() => handleCopy(student.email, 'email')}
+                        style={{
+                            cursor: emailDisplayPermission ? 'pointer' : 'default',
+                            textDecoration: emailDisplayPermission ? 'underline dotted' : 'none',
+                            color: emailDisplayPermission ? '#60a5fa' : '#888'
+                        }}
+                        title={emailDisplayPermission ? "Click to copy email" : "Email copy disabled"}
+                        onClick={emailDisplayPermission ? () => handleCopy(student.email, 'email') : undefined}
                     >
-                        {maskEmail(student.email)}
+                        {maskEmail(student.email, emailDisplayPermission)}
                     </span>
                     <br />
                     <b>Country:</b> {student.country || 'Unknown'} <br />
@@ -350,7 +336,8 @@ const Home = () => {
     const [canViewStudentHistory, setCanViewStudentHistory] = useState<boolean>(false);
     const [currentUserName, setCurrentUserName] = useState<string>("Unknown");
     const [version, setVersion] = useState<string>("dev");
-    const [demoMode, setDemoMode] = useState<boolean>(false);
+    const [emailDisplayPermission, setEmailDisplayPermission] = useState<boolean>(false);
+    let demoMode = false;
 
     // WebSocket connection
     const { lastMessage, sendMessage, status, connectionId } = useWebSocket();
@@ -358,12 +345,12 @@ const Home = () => {
     // Component-specific helper functions
     const forceRender = useCallback(() => setForceRenderValue(v => v + 1), []);
 
-    // Helper function to mask email in demo mode
-    const maskEmail = (email: string, demoModeValue: boolean = demoMode): string => {
-        console.log('maskEmail called with:', email, 'demoMode:', demoModeValue);
-        if (demoModeValue && email) {
+    // Helper function to mask email based on email display permission
+    const maskEmail = (email: string, emailDisplayValue: boolean = emailDisplayPermission): string => {
+        console.log('maskEmail called with:', email, 'emailDisplay:', emailDisplayValue);
+        if (!emailDisplayValue && email) {
             console.log('Masking email:', email);
-            return 'xxxxxxxxxx';
+            return '**********';
         }
         return email;
     };
@@ -602,8 +589,12 @@ const Home = () => {
             setSelectedStudent(student || null);
             setShowHistoryModal(true);
         } else if (field === 'email') {
-            navigator.clipboard.writeText(rowData.email);
-            toast.info(`Copied ${rowData.email} to the clipboard`, { autoClose: 3000 });
+            if (emailDisplayPermission) {
+                navigator.clipboard.writeText(rowData.email);
+                toast.info(`Copied ${rowData.email} to the clipboard`, { autoClose: 3000 });
+            } else {
+                toast.info('Email copy disabled', { autoClose: 2000 });
+            }
         } else if (field === 'owyaa') {
             handleOWYAA(rowData.id, rowData.name);
         }
@@ -1307,7 +1298,7 @@ const Home = () => {
         columnMetaData: Record<string, any>,
         currentEvent: Event,
         allPools: Pool[],
-        demoModeValue: boolean = demoMode
+        emailDisplayValue: boolean = emailDisplayPermission
     ): Record<string, any> | null {
         const rowValues: Record<string, any> = {};
         for (let i = 0; i < columnLabels.length; i++) {
@@ -1326,7 +1317,7 @@ const Home = () => {
                 } else if (field === 'last') {
                     rowValues[field] = student.last;
                 } else if (field === 'email') {
-                    rowValues[field] = maskEmail(student.email, demoModeValue);
+                    rowValues[field] = maskEmail(student.email, emailDisplayValue);
                 } else if (field === 'joined') {
                     rowValues[field] = (typeof currentEvent.aid === 'string' && student.programs?.[currentEvent.aid]) ? student.programs[currentEvent.aid].join ?? false : false;
                 } else if (field === 'accepted') {
@@ -1635,7 +1626,7 @@ const Home = () => {
         if (evShadow) {
             console.log('Processing', filteredStudents.length, 'filtered students');
             for (const student of filteredStudents) {
-                const row = getRowValuesForStudent(student, columnLabels, columnMetaData, evShadow, allPools, demoMode);
+                const row = getRowValuesForStudent(student, columnLabels, columnMetaData, evShadow, allPools, emailDisplayPermission);
                 if (row !== null) {
                     rowValues.push(row);
                 }
@@ -1770,7 +1761,7 @@ const Home = () => {
         if (currentEvent) {
             console.log('Processing', filteredStudents.length, 'filtered students');
             for (const student of filteredStudents) {
-                const row = getRowValuesForStudent(student, columnLabels, columnMetaData, currentEvent, pools, demoMode);
+                const row = getRowValuesForStudent(student, columnLabels, columnMetaData, currentEvent, pools, emailDisplayPermission);
                 if (row !== null) {
                     rowValues.push(row);
                 }
@@ -1793,6 +1784,7 @@ const Home = () => {
 
         const loadInitialData = async () => {
             try {
+                console.log('Starting initial data load, demoMode initial value:', demoMode);
                 setLoadingProgress({ current: 0, total: 1, message: 'Starting data load...' });
 
                 // Fetch write permission
@@ -1807,14 +1799,26 @@ const Home = () => {
 
                 // Fetch demo mode config
                 const demoModeConfig = await fetchConfig('demoMode');
-                let isDemoMode = false;
                 if (demoModeConfig) {
-                    console.log('Demo mode config:', demoModeConfig);
-                    console.log('Demo mode value:', demoModeConfig.value);
-                    console.log('Demo mode value type:', typeof demoModeConfig.value);
-                    isDemoMode = demoModeConfig.value === 'true';
-                    console.log('Setting demo mode to:', isDemoMode);
-                    setDemoMode(isDemoMode);
+                    demoMode = demoModeConfig.value === 'true';
+                    console.log('Demo mode set during initial load:', demoMode);
+                } else {
+                    console.log('No demo mode config found, using default (false)');
+                }
+
+                // Fetch email display permission
+                try {
+                    const emailDisplayPermissionResult = await authGetViewsEmailDisplayPermission(pid as string, hash as string);
+                    if (emailDisplayPermissionResult && typeof emailDisplayPermissionResult === 'boolean') {
+                        console.log('Email display permission:', emailDisplayPermissionResult);
+                        setEmailDisplayPermission(emailDisplayPermissionResult);
+                    } else {
+                        console.log('Email display permission fetch redirected or failed, using default (false)');
+                        setEmailDisplayPermission(false);
+                    }
+                } catch (error) {
+                    console.error('Error fetching email display permission:', error);
+                    setEmailDisplayPermission(false);
                 }
 
                 // Calculate version
@@ -2015,7 +2019,7 @@ const Home = () => {
                     <b style={{ fontSize: '24px', marginBottom: '10px', display: 'block', color: 'white' }}>
                         {loadingProgress.message || 'Loading...'}
                     </b>
-                    <Spinner animation="border" role="status" style={{ color: 'white', width: '3rem', height: '3rem' }} />
+                    <Spinner animation="border" role="status" style={{ color: 'rgba(139, 69, 219, 0.8)', width: '3rem', height: '3rem' }} />
                 </div>
 
                 {loadingProgress.current > 0 && (
@@ -2115,7 +2119,7 @@ const Home = () => {
                     version={version}
                 />
             </Container>
-            <StudentHistoryModal show={showHistoryModal} onClose={() => setShowHistoryModal(false)} student={selectedStudent} fetchConfig={fetchConfig} allEvents={allEvents} allPools={allPools} />
+            <StudentHistoryModal show={showHistoryModal} onClose={() => setShowHistoryModal(false)} student={selectedStudent} fetchConfig={fetchConfig} allEvents={allEvents} allPools={allPools} emailDisplayPermission={emailDisplayPermission} />
         </>
     );
 };
