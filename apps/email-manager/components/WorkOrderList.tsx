@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { Table, Button, Badge, Modal, Spinner } from 'react-bootstrap'
 import { toast } from 'react-toastify'
-import { getAllTableItems, useWebSocket, getTableItem, getTableItemOrNull, updateTableItem, getAllTableItemsFiltered, sendSQSMessage } from 'sharedFrontend'
+import { getAllTableItems, useWebSocket, getTableItem, getTableItemOrNull, updateTableItem, getAllTableItemsFiltered, sendSQSMessage, putTableItem } from 'sharedFrontend'
 import { unmarshall } from '@aws-sdk/util-dynamodb'
 
 interface WorkOrder {
@@ -483,16 +483,30 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
 
     const handleUnlockWorkOrder = async (workOrderId: string) => {
         try {
-            // Unlock the work order using the API
-            await updateTableItem('work-orders', workOrderId, 'locked', false, userPid, userHash)
-            await updateTableItem('work-orders', workOrderId, 'lockedBy', undefined, userPid, userHash)
+            // Get the current work order to preserve all fields
+            const currentWorkOrder = workOrders.find(wo => wo.id === workOrderId)
+            if (!currentWorkOrder) {
+                toast.error('Work order not found')
+                return
+            }
+
+            // Create updated work order with unlocked state
+            const updatedWorkOrder = {
+                ...currentWorkOrder,
+                locked: false,
+                lockedBy: undefined,
+                updatedAt: new Date().toISOString()
+            }
+
+            // Update the work order using putTableItem
+            await putTableItem('work-orders', workOrderId, updatedWorkOrder, userPid, userHash)
 
             // Update state immediately to reflect the unlock
             setWorkOrders(prevOrders => {
                 const index = prevOrders.findIndex(wo => wo.id === workOrderId)
                 if (index === -1) return prevOrders
                 const newOrders = [...prevOrders]
-                newOrders[index] = { ...newOrders[index], locked: false, lockedBy: undefined }
+                newOrders[index] = updatedWorkOrder
                 return newOrders
             })
 
@@ -511,16 +525,23 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
 
         // Try to lock the work order before opening for edit
         try {
-            // Lock the work order using the new API
-            await updateTableItem('work-orders', workOrder.id, 'locked', true, userPid, userHash)
-            await updateTableItem('work-orders', workOrder.id, 'lockedBy', userPid, userPid, userHash)
+            // Create updated work order with locked state
+            const updatedWorkOrder = {
+                ...workOrder,
+                locked: true,
+                lockedBy: userPid,
+                updatedAt: new Date().toISOString()
+            }
+
+            // Lock the work order using putTableItem
+            await putTableItem('work-orders', workOrder.id, updatedWorkOrder, userPid, userHash)
 
             // Update state immediately to reflect the lock
             setWorkOrders(prevOrders => {
                 const index = prevOrders.findIndex(wo => wo.id === workOrder.id)
                 if (index === -1) return prevOrders
                 const newOrders = [...prevOrders]
-                newOrders[index] = { ...workOrder, locked: true, lockedBy: userPid }
+                newOrders[index] = updatedWorkOrder
                 return newOrders
             })
 

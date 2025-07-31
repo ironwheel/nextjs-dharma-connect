@@ -104,7 +104,7 @@ export default function Home() {
     return (
         <Container className="py-4 bg-dark text-light min-vh-100">
             <h1 className="mb-2 text-light fw-bold fs-2">
-                Email Work Orders
+                Email Manager
                 {isClient && (
                     <span className="ms-2 text-info fs-6 fw-normal">
                         {window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
