@@ -3,7 +3,7 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import { tables, TableConfig } from './tableConfig';
 import { websockets, WebSocketConfig, websocketGetConfig } from './websocketConfig';
 import { listAll, listAllChunked, getOne, deleteOne, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll } from './dynamoClient';
-import { verificationEmailSend, verificationEmailCallback, createToken, getViews, getViewsWritePermission, getViewsExportCSV, getViewsHistoryPermission, authGetLink, getActionsProfiles, getAuthList, getViewsProfiles, getActionsProfileForHost, getAllActionsForUser, putAuthItem } from './authUtils';
+import { verificationEmailSend, verificationEmailCallback, createToken, getViews, getViewsWritePermission, getViewsExportCSV, getViewsHistoryPermission, getViewsEmailDisplayPermission, authGetLink, getActionsProfiles, getAuthList, getViewsProfiles, getActionsProfileForHost, getAllActionsForUser, putAuthItem } from './authUtils';
 import { serialize } from 'cookie';
 import { v4 as uuidv4 } from 'uuid';
 import { sendWorkOrderMessage } from './sqsClient';
@@ -159,6 +159,9 @@ async function dispatchAuth(
       case 'viewsHistoryPermission':
         const studentHistory = await getViewsHistoryPermission(pid, host);
         return res.status(200).json({ studentHistory });
+      case 'viewsEmailDisplayPermission':
+        const emailDisplay = await getViewsEmailDisplayPermission(pid, host);
+        return res.status(200).json({ emailDisplay });
       case 'getLink':
         const { domainName, studentId } = req.body;
         if (!domainName || !studentId) {

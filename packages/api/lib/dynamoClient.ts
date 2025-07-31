@@ -179,7 +179,6 @@ export async function getOne(
       Key: { [pkName]: id },
     })
   );
-  console.log("getOne: Item size:", Item ? JSON.stringify(Item).length : 0);
   return Item;
 }
 

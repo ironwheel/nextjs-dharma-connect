@@ -20,6 +20,7 @@ import {
     authGetAuthList,
     authGetViewsProfiles,
     authPutAuthItem,
+    authGetViewsEmailDisplayPermission,
     Pool
 } from 'sharedFrontend';
 
@@ -50,6 +51,7 @@ interface AuthRecord {
         studentHistory: boolean;
         viewsProfile: string;
         writePermission: boolean;
+        emailDisplay: boolean;
     };
     'permitted-hosts': string[]; // Now just an array of host strings
 }
@@ -102,6 +104,7 @@ const Home = () => {
     const [version, setVersion] = useState<string>("dev");
     const [canWriteViews, setCanWriteViews] = useState<boolean>(true);
     const [demoMode, setDemoMode] = useState<boolean>(false);
+    const [emailDisplayPermission, setEmailDisplayPermission] = useState<boolean>(false);
 
     // Modal state
     const [showEditModal, setShowEditModal] = useState(false);
@@ -133,7 +136,8 @@ const Home = () => {
             exportCSV: false,
             studentHistory: false,
             viewsProfile: '',
-            writePermission: false
+            writePermission: false,
+            emailDisplay: false
         },
         permittedHosts: [] as string[] // Now just an array of host strings
     });
@@ -336,17 +340,17 @@ const Home = () => {
         return student ? student.email : '';
     };
 
-    // Helper function to mask email in demo mode
-    const maskEmail = (email: string, demoModeValue: boolean = demoMode): string => {
-        console.log('maskEmail called with:', email, 'demoMode:', demoModeValue);
-        if (demoModeValue && email) {
+    // Helper function to mask email based on email display permission
+    const maskEmail = (email: string, emailDisplayValue: boolean = emailDisplayPermission): string => {
+        console.log('maskEmail called with:', email, 'emailDisplay:', emailDisplayValue);
+        if (!emailDisplayValue && email) {
             console.log('Masking email:', email);
-            return 'xxxxxxxxxx';
+            return '**********';
         }
         return email;
     };
 
-    const buildColumnLabelsAndRowData = (demoModeValue: boolean = demoMode) => {
+    const buildColumnLabelsAndRowData = (emailDisplayValue: boolean = emailDisplayPermission) => {
         const columns: Column[] = [
             { field: 'rowIndex', headerName: '#', pinned: 'left', width: 75 },
             { field: 'studentName', headerName: 'Student Name', pinned: 'left', sortable: true },
@@ -391,7 +395,7 @@ const Home = () => {
 
             // Determine email and language - hide for unsubscribed students
             const isUnsubscribed = student.unsubscribe || false;
-            const email = isUnsubscribed ? '' : maskEmail(student.email || '', demoModeValue);
+            const email = isUnsubscribed ? '' : maskEmail(student.email || '', emailDisplayValue);
             const language = isUnsubscribed ? '' : (student.writtenLangPref || 'English');
 
             rowValues.push({
@@ -414,7 +418,7 @@ const Home = () => {
     // Event handlers
     const handleSearch = (searchValue: string) => {
         setSearchTerm(searchValue);
-        const [cl, rd] = buildColumnLabelsAndRowData(demoMode);
+        const [cl, rd] = buildColumnLabelsAndRowData(emailDisplayPermission);
         setColumnLabels(cl);
         setRowData(rd);
     };
@@ -459,7 +463,8 @@ const Home = () => {
                         exportCSV: rowData.authRecord?.eventDashboardConfig?.exportCSV || false,
                         studentHistory: rowData.authRecord?.eventDashboardConfig?.studentHistory || false,
                         viewsProfile: rowData.authRecord?.eventDashboardConfig?.viewsProfile || '',
-                        writePermission: rowData.authRecord?.eventDashboardConfig?.writePermission || false
+                        writePermission: rowData.authRecord?.eventDashboardConfig?.writePermission || false,
+                        emailDisplay: rowData.authRecord?.eventDashboardConfig?.emailDisplay || false
                     },
                     permittedHosts: permittedHosts
                 });
@@ -585,7 +590,7 @@ const Home = () => {
                 const updatedStudent = allStudents.find(s => s.id === studentId);
 
                 // Determine email and language - hide for unsubscribed students
-                const email = checked ? '' : maskEmail(updatedStudent?.email || '', demoMode);
+                const email = checked ? '' : maskEmail(updatedStudent?.email || '', emailDisplayPermission);
                 const language = checked ? '' : (updatedStudent?.writtenLangPref || 'English');
 
                 updatedRowData[rowIndex] = {
@@ -637,7 +642,8 @@ const Home = () => {
                     exportCSV: authRecord?.eventDashboardConfig?.exportCSV || false,
                     studentHistory: authRecord?.eventDashboardConfig?.studentHistory || false,
                     viewsProfile: authRecord?.eventDashboardConfig?.viewsProfile || '',
-                    writePermission: authRecord?.eventDashboardConfig?.writePermission || false
+                    writePermission: authRecord?.eventDashboardConfig?.writePermission || false,
+                    emailDisplay: authRecord?.eventDashboardConfig?.emailDisplay || false
                 },
                 permittedHosts: permittedHosts
             });
@@ -741,7 +747,8 @@ const Home = () => {
                 if (currentConfig.exportCSV !== newConfig.exportCSV ||
                     currentConfig.studentHistory !== newConfig.studentHistory ||
                     currentConfig.viewsProfile !== newConfig.viewsProfile ||
-                    currentConfig.writePermission !== newConfig.writePermission) {
+                    currentConfig.writePermission !== newConfig.writePermission ||
+                    currentConfig.emailDisplay !== newConfig.emailDisplay) {
                     authChanged = true;
                 }
 
@@ -966,6 +973,23 @@ const Home = () => {
                     setDemoMode(isDemoMode);
                 }
 
+                // Fetch email display permission
+                let emailDisplayPermissionResult = false;
+                try {
+                    const permissionResponse = await authGetViewsEmailDisplayPermission(pid as string, hash as string);
+                    if (permissionResponse && typeof permissionResponse === 'boolean') {
+                        emailDisplayPermissionResult = permissionResponse;
+                        console.log('Email display permission:', emailDisplayPermissionResult);
+                        setEmailDisplayPermission(emailDisplayPermissionResult);
+                    } else {
+                        console.log('Email display permission fetch redirected or failed, using default (false)');
+                        setEmailDisplayPermission(false);
+                    }
+                } catch (error) {
+                    console.error('Error fetching email display permission:', error);
+                    setEmailDisplayPermission(false);
+                }
+
                 // Calculate eligible students (all non-unsubscribed students)
                 eligibleStudents = studentsArray.filter(student => !student.unsubscribe);
                 eligibleStudents.sort(compareNames);
@@ -973,8 +997,8 @@ const Home = () => {
                 // Set current user information after students are loaded
                 fetchCurrentUser(studentsArray);
 
-                // Build initial table data
-                const [cl, rd] = buildColumnLabelsAndRowData(isDemoMode);
+                // Build initial table data using the fetched permission result directly
+                const [cl, rd] = buildColumnLabelsAndRowData(emailDisplayPermissionResult);
                 setColumnLabels(cl);
                 setRowData(rd);
 
@@ -1105,7 +1129,7 @@ const Home = () => {
             <Modal show={showEditModal} onHide={handleCancelEdit} size="lg">
                 <Modal.Header closeButton>
                     <Modal.Title>
-                        Edit Access
+                        Edit Student Profile
                     </Modal.Title>
                 </Modal.Header>
                 <Modal.Body>
@@ -1173,9 +1197,9 @@ const Home = () => {
                                         <Form.Label>Email</Form.Label>
                                         <Form.Control
                                             type="email"
-                                            value={demoMode ? 'xxxxxxxxxx' : formData.studentProfile.email}
+                                            value={!emailDisplayPermission ? '**********' : formData.studentProfile.email}
                                             onChange={(e) => {
-                                                if (!demoMode) {
+                                                if (emailDisplayPermission) {
                                                     setFormData(prev => ({
                                                         ...prev,
                                                         studentProfile: {
@@ -1185,7 +1209,7 @@ const Home = () => {
                                                     }));
                                                 }
                                             }}
-                                            disabled={demoMode}
+                                            disabled={!emailDisplayPermission}
                                             style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
                                         />
                                     </Form.Group>
@@ -1347,6 +1371,21 @@ const Home = () => {
                                             eventDashboardConfig: {
                                                 ...prev.eventDashboardConfig,
                                                 studentHistory: e.target.checked
+                                            }
+                                        }))}
+                                        disabled={!formData.permittedHosts.includes('event-dashboard.slsupport.link')}
+                                    />
+                                </Col>
+                                <Col md={3}>
+                                    <Form.Check
+                                        type="checkbox"
+                                        label="Email Display"
+                                        checked={formData.eventDashboardConfig.emailDisplay}
+                                        onChange={(e) => setFormData(prev => ({
+                                            ...prev,
+                                            eventDashboardConfig: {
+                                                ...prev.eventDashboardConfig,
+                                                emailDisplay: e.target.checked
                                             }
                                         }))}
                                         disabled={!formData.permittedHosts.includes('event-dashboard.slsupport.link')}

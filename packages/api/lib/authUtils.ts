@@ -823,6 +823,18 @@ export async function getViewsHistoryPermission(pid: string, host: string): Prom
     return !!data.eventDashboardConfig?.studentHistory;
 }
 
+export async function getViewsEmailDisplayPermission(pid: string, host: string): Promise<boolean> {
+    let tableCfg = tableGetConfig('auth');
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    if (!data) {
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        if (!data) {
+            throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
+        }
+    }
+    return !!data.eventDashboardConfig?.emailDisplay;
+}
+
 /**
  * Generates an access link for a student to a specific domain.
  * @async
