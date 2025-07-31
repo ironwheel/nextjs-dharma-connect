@@ -30,7 +30,7 @@ Dharma Connect is a comprehensive monorepo designed to manage event registration
 2. **Install dependencies**:
    - For the Admin Dashboard, Student Dashboard, and Email Manager:
      ```bash
-     pnpm --filter admin-dashboard install
+     pnpm --filter event-dashboard install
      pnpm --filter student-dashboard install
      pnpm --filter email-manager install     
      ```
@@ -46,7 +46,7 @@ Dharma Connect is a comprehensive monorepo designed to manage event registration
 4. **Run the applications**:
    - Admin Dashboard:
      ```bash
-     pnpm --filter admin-dashboard run dev
+     pnpm --filter event-dashboard run dev
      ```
    - Student Dashboard:
      ```bash

@@ -1,4 +1,4 @@
-// admin-dashboard/pages/login/callback.tsx
+// event-dashboard/pages/login/callback.tsx
 import React from 'react';
 import { AuthVerificationCallback } from 'sharedFrontend';
 import { useRouter } from 'next/router';

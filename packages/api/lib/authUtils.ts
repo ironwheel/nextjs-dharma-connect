@@ -756,7 +756,7 @@ export async function getViews(pid: string, host: string): Promise<string[]> {
         }
     }
 
-    const viewsProfile = data.adminDashboardConfig?.viewsProfile;
+    const viewsProfile = data.eventDashboardConfig?.viewsProfile;
     if (!viewsProfile) {
         throw new Error('AUTH_VIEWS_NO_PROFILE');
     }
@@ -796,7 +796,7 @@ export async function getViewsWritePermission(pid: string, host: string): Promis
             throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
         }
     }
-    return !!data.adminDashboardConfig?.writePermission;
+    return !!data.eventDashboardConfig?.writePermission;
 }
 
 export async function getViewsExportCSV(pid: string, host: string): Promise<boolean> {
@@ -808,7 +808,7 @@ export async function getViewsExportCSV(pid: string, host: string): Promise<bool
             throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
         }
     }
-    return !!data.adminDashboardConfig?.exportCSV;
+    return !!data.eventDashboardConfig?.exportCSV;
 }
 
 export async function getViewsHistoryPermission(pid: string, host: string): Promise<boolean> {
@@ -820,7 +820,7 @@ export async function getViewsHistoryPermission(pid: string, host: string): Prom
             throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
         }
     }
-    return !!data.adminDashboardConfig?.studentHistory;
+    return !!data.eventDashboardConfig?.studentHistory;
 }
 
 /**

@@ -113,6 +113,34 @@ function fromDynamo(item: any): any {
 // StudentHistoryModal component
 const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, allPools }) => {
     const [copying, setCopying] = React.useState(false);
+    const [demoMode, setDemoMode] = React.useState(false);
+
+    // Helper function to mask email in demo mode
+    const maskEmail = (email: string, demoModeValue: boolean = demoMode): string => {
+        if (demoModeValue && email) {
+            return 'xxxxxxxxxx';
+        }
+        return email;
+    };
+
+    // Fetch demo mode config when modal opens
+    React.useEffect(() => {
+        if (show && fetchConfig) {
+            const fetchDemoMode = async () => {
+                try {
+                    const demoModeConfig = await fetchConfig('demoMode');
+                    if (demoModeConfig) {
+                        const isDemoMode = demoModeConfig.value === 'true';
+                        setDemoMode(isDemoMode);
+                    }
+                } catch (error) {
+                    console.error('Error fetching demo mode config:', error);
+                }
+            };
+            fetchDemoMode();
+        }
+    }, [show, fetchConfig]);
+
     if (!student) return null;
     // Define SubEvent type
     type SubEvent = {
@@ -234,7 +262,7 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
                         title="Click to copy email"
                         onClick={() => handleCopy(student.email, 'email')}
                     >
-                        {student.email}
+                        {maskEmail(student.email)}
                     </span>
                     <br />
                     <b>Country:</b> {student.country || 'Unknown'} <br />
@@ -297,7 +325,7 @@ const Home = () => {
     const [loadingProgress, setLoadingProgress] = useState({ current: 0, total: 0, message: '' });
     const [name, setName] = useState("Unknown");
     const [forceRenderValue, setForceRenderValue] = useState(0);
-    const [currentEventAid, setCurrentEventAid] = useState('admin-dashboard');
+    const [currentEventAid, setCurrentEventAid] = useState('event-dashboard');
     const [errMsg, setErrMsg] = useState<string | null>(null);
     const [evShadow, setEvShadow] = useState<Event | null>(null);
     const [month, setMonth] = useState("May");
@@ -322,12 +350,23 @@ const Home = () => {
     const [canViewStudentHistory, setCanViewStudentHistory] = useState<boolean>(false);
     const [currentUserName, setCurrentUserName] = useState<string>("Unknown");
     const [version, setVersion] = useState<string>("dev");
+    const [demoMode, setDemoMode] = useState<boolean>(false);
 
     // WebSocket connection
     const { lastMessage, sendMessage, status, connectionId } = useWebSocket();
 
     // Component-specific helper functions
     const forceRender = useCallback(() => setForceRenderValue(v => v + 1), []);
+
+    // Helper function to mask email in demo mode
+    const maskEmail = (email: string, demoModeValue: boolean = demoMode): string => {
+        console.log('maskEmail called with:', email, 'demoMode:', demoModeValue);
+        if (demoModeValue && email) {
+            console.log('Masking email:', email);
+            return 'xxxxxxxxxx';
+        }
+        return email;
+    };
 
     // API functions using sharedFrontend
     const fetchStudents = async () => {
@@ -714,7 +753,7 @@ const Home = () => {
         const date = new Date().toISOString().split('T')[0];
         const eventName = evShadow?.name || 'unknown-event';
         const viewName = view || 'unknown-view';
-        const filename = `admin-dashboard-${eventName}-${viewName}-${date}.csv`;
+        const filename = `event-dashboard-${eventName}-${viewName}-${date}.csv`;
 
         link.download = filename;
         document.body.appendChild(link);
@@ -1267,7 +1306,8 @@ const Home = () => {
         columnLabels: Column[],
         columnMetaData: Record<string, any>,
         currentEvent: Event,
-        allPools: Pool[]
+        allPools: Pool[],
+        demoModeValue: boolean = demoMode
     ): Record<string, any> | null {
         const rowValues: Record<string, any> = {};
         for (let i = 0; i < columnLabels.length; i++) {
@@ -1286,7 +1326,7 @@ const Home = () => {
                 } else if (field === 'last') {
                     rowValues[field] = student.last;
                 } else if (field === 'email') {
-                    rowValues[field] = student.email;
+                    rowValues[field] = maskEmail(student.email, demoModeValue);
                 } else if (field === 'joined') {
                     rowValues[field] = (typeof currentEvent.aid === 'string' && student.programs?.[currentEvent.aid]) ? student.programs[currentEvent.aid].join ?? false : false;
                 } else if (field === 'accepted') {
@@ -1595,7 +1635,7 @@ const Home = () => {
         if (evShadow) {
             console.log('Processing', filteredStudents.length, 'filtered students');
             for (const student of filteredStudents) {
-                const row = getRowValuesForStudent(student, columnLabels, columnMetaData, evShadow, allPools);
+                const row = getRowValuesForStudent(student, columnLabels, columnMetaData, evShadow, allPools, demoMode);
                 if (row !== null) {
                     rowValues.push(row);
                 }
@@ -1730,7 +1770,7 @@ const Home = () => {
         if (currentEvent) {
             console.log('Processing', filteredStudents.length, 'filtered students');
             for (const student of filteredStudents) {
-                const row = getRowValuesForStudent(student, columnLabels, columnMetaData, currentEvent, pools);
+                const row = getRowValuesForStudent(student, columnLabels, columnMetaData, currentEvent, pools, demoMode);
                 if (row !== null) {
                     rowValues.push(row);
                 }
@@ -1765,6 +1805,18 @@ const Home = () => {
                 const historyPermission = await authGetViewsHistoryPermission(pid as string, hash as string);
                 setCanViewStudentHistory(historyPermission === true);
 
+                // Fetch demo mode config
+                const demoModeConfig = await fetchConfig('demoMode');
+                let isDemoMode = false;
+                if (demoModeConfig) {
+                    console.log('Demo mode config:', demoModeConfig);
+                    console.log('Demo mode value:', demoModeConfig.value);
+                    console.log('Demo mode value type:', typeof demoModeConfig.value);
+                    isDemoMode = demoModeConfig.value === 'true';
+                    console.log('Setting demo mode to:', isDemoMode);
+                    setDemoMode(isDemoMode);
+                }
+
                 // Calculate version
                 calculateVersion();
 
@@ -1791,8 +1843,8 @@ const Home = () => {
                 fetchCurrentUser(studentsArray);
 
                 // Set current event
-                const aidData = await fetchConfig("adminDashboardLandingAID");
-                const seData = await fetchConfig("adminDashboardLandingSubEvent");
+                const aidData = await fetchConfig("eventDashboardLandingAID");
+                const seData = await fetchConfig("eventDashboardLandingSubEvent");
 
                 let currentEventToUse: Event | null = null;
                 if (aidData && seData && aidData.value && seData.value && Array.isArray(filteredEvents)) {
@@ -1957,6 +2009,9 @@ const Home = () => {
         return (
             <div className="loading-container" style={{ marginTop: '70px', minHeight: '400px', flexDirection: 'column', justifyContent: 'flex-start', paddingTop: '100px' }}>
                 <div style={{ textAlign: 'center', marginBottom: '40px' }}>
+                    <h1 style={{ fontSize: '32px', marginBottom: '20px', display: 'block', color: 'white', fontWeight: 'bold' }}>
+                        Event Dashboard
+                    </h1>
                     <b style={{ fontSize: '24px', marginBottom: '10px', display: 'block', color: 'white' }}>
                         {loadingProgress.message || 'Loading...'}
                     </b>

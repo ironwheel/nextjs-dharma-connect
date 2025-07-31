@@ -39,12 +39,13 @@ interface Student {
     spokenLangPref?: string;
     writtenLangPref?: string;
     unsubscribe?: boolean;
+    owyaaLease?: string;
     [key: string]: any;
 }
 
 interface AuthRecord {
     id: string;
-    adminDashboardConfig: {
+    eventDashboardConfig: {
         exportCSV: boolean;
         studentHistory: boolean;
         viewsProfile: string;
@@ -72,8 +73,7 @@ let allPools: Pool[] = [];
 let eligibleStudents: Student[] = [];
 
 let allViewsProfiles: ViewsProfile[] = [];
-let accessManagerAppList: string[] = [];
-let accessManagerPool: string = '';
+let studentManagerAppList: string[] = [];
 
 // Language options for the dropdown
 const LANGUAGE_OPTIONS = [
@@ -107,6 +107,7 @@ const Home = () => {
     const [showEditModal, setShowEditModal] = useState(false);
     const [selectedAuthRecord, setSelectedAuthRecord] = useState<AuthRecord | null>(null);
     const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+    const [originalStudent, setOriginalStudent] = useState<Student | null>(null);
 
     // Form state for add/edit
     const [formData, setFormData] = useState({
@@ -128,7 +129,7 @@ const Home = () => {
             spokenLangPref: ''
         },
         // Auth fields (auth table)
-        adminDashboardConfig: {
+        eventDashboardConfig: {
             exportCSV: false,
             studentHistory: false,
             viewsProfile: '',
@@ -423,7 +424,6 @@ const Home = () => {
     };
 
     const handleCellClicked = (field: string, rowData: any) => {
-        console.log('handleCellClicked called:', field, rowData);
         if (field === 'studentName') {
             const student = allStudents.find(s => s.id === rowData.studentId);
             if (student) {
@@ -455,11 +455,11 @@ const Home = () => {
                         writtenLangPref: student?.writtenLangPref || 'English',
                         spokenLangPref: student?.spokenLangPref || 'English'
                     },
-                    adminDashboardConfig: {
-                        exportCSV: rowData.authRecord?.adminDashboardConfig?.exportCSV || false,
-                        studentHistory: rowData.authRecord?.adminDashboardConfig?.studentHistory || false,
-                        viewsProfile: rowData.authRecord?.adminDashboardConfig?.viewsProfile || '',
-                        writePermission: rowData.authRecord?.adminDashboardConfig?.writePermission || false
+                    eventDashboardConfig: {
+                        exportCSV: rowData.authRecord?.eventDashboardConfig?.exportCSV || false,
+                        studentHistory: rowData.authRecord?.eventDashboardConfig?.studentHistory || false,
+                        viewsProfile: rowData.authRecord?.eventDashboardConfig?.viewsProfile || '',
+                        writePermission: rowData.authRecord?.eventDashboardConfig?.writePermission || false
                     },
                     permittedHosts: permittedHosts
                 });
@@ -478,7 +478,7 @@ const Home = () => {
                     const [firstName, lastName] = rowData.studentName.split(' ');
                     const fallbackStudent = { first: firstName, last: lastName || '' };
                     const appName = rowData.appName;
-                    const fullDomain = accessManagerAppList.find(app =>
+                    const fullDomain = studentManagerAppList.find(app =>
                         formatDomainForDisplay(app) === appName
                     );
 
@@ -495,8 +495,8 @@ const Home = () => {
             if (student && !student.unsubscribe) {
                 // Convert display name back to full domain name
                 const appName = rowData.appName;
-                console.log('Looking for app:', appName, 'in list:', accessManagerAppList);
-                const fullDomain = accessManagerAppList.find(app =>
+                console.log('Looking for app:', appName, 'in list:', studentManagerAppList);
+                const fullDomain = studentManagerAppList.find(app =>
                     formatDomainForDisplay(app) === appName
                 );
 
@@ -513,7 +513,7 @@ const Home = () => {
                     const [firstName, lastName] = rowData.studentName.split(' ');
                     const fallbackStudent = { first: firstName, last: lastName || '' };
                     const appName = rowData.appName;
-                    const fullDomain = accessManagerAppList.find(app =>
+                    const fullDomain = studentManagerAppList.find(app =>
                         formatDomainForDisplay(app) === appName
                     );
 
@@ -615,6 +615,7 @@ const Home = () => {
                 : [];
 
             setSelectedStudent(student);
+            setOriginalStudent({ ...student }); // Store a copy of the original state
             setSelectedAuthRecord(authRecord);
             setFormData({
                 studentId: authRecord.id,
@@ -632,11 +633,11 @@ const Home = () => {
                     writtenLangPref: student?.writtenLangPref || 'English',
                     spokenLangPref: student?.spokenLangPref || 'English'
                 },
-                adminDashboardConfig: {
-                    exportCSV: authRecord?.adminDashboardConfig?.exportCSV || false,
-                    studentHistory: authRecord?.adminDashboardConfig?.studentHistory || false,
-                    viewsProfile: authRecord?.adminDashboardConfig?.viewsProfile || '',
-                    writePermission: authRecord?.adminDashboardConfig?.writePermission || false
+                eventDashboardConfig: {
+                    exportCSV: authRecord?.eventDashboardConfig?.exportCSV || false,
+                    studentHistory: authRecord?.eventDashboardConfig?.studentHistory || false,
+                    viewsProfile: authRecord?.eventDashboardConfig?.viewsProfile || '',
+                    writePermission: authRecord?.eventDashboardConfig?.writePermission || false
                 },
                 permittedHosts: permittedHosts
             });
@@ -708,26 +709,77 @@ const Home = () => {
                 }
             }
 
-            // Update auth record
+            // Save OWYAA state if it has changed
+            if (selectedStudent) {
+                const currentStudent = allStudents.find(s => s.id === formData.studentId);
+                if (currentStudent && currentStudent.owyaaLease !== selectedStudent.owyaaLease) {
+                    await updateStudentField(formData.studentId, 'owyaaLease', selectedStudent.owyaaLease || '');
+
+                    // Update local student data
+                    const studentIndex = allStudents.findIndex(s => s.id === formData.studentId);
+                    if (studentIndex !== -1) {
+                        allStudents[studentIndex] = { ...allStudents[studentIndex], owyaaLease: selectedStudent.owyaaLease };
+                    }
+                }
+            }
+
+            // Check if auth fields have changed
+            const currentAuthRecord = allAuthRecords.find(ar => ar.id === formData.studentId);
             const authRecord: AuthRecord = {
                 id: formData.studentId,
-                adminDashboardConfig: formData.adminDashboardConfig,
+                eventDashboardConfig: formData.eventDashboardConfig,
                 'permitted-hosts': formData.permittedHosts
             };
 
-            await authPutAuthItem(authRecord, pid as string, hash as string);
-
-            // Update the local copy of allAuthRecords
-            const existingIndex = allAuthRecords.findIndex(ar => ar.id === formData.studentId);
-            if (existingIndex >= 0) {
-                allAuthRecords[existingIndex] = authRecord;
+            let authChanged = false;
+            if (!currentAuthRecord) {
+                authChanged = true;
             } else {
-                allAuthRecords.push(authRecord);
+                // Compare eventDashboardConfig
+                const currentConfig = currentAuthRecord.eventDashboardConfig;
+                const newConfig = formData.eventDashboardConfig;
+                if (currentConfig.exportCSV !== newConfig.exportCSV ||
+                    currentConfig.studentHistory !== newConfig.studentHistory ||
+                    currentConfig.viewsProfile !== newConfig.viewsProfile ||
+                    currentConfig.writePermission !== newConfig.writePermission) {
+                    authChanged = true;
+                }
+
+                // Compare permitted hosts
+                const currentHosts = currentAuthRecord['permitted-hosts'] || [];
+                const newHosts = formData.permittedHosts;
+                if (currentHosts.length !== newHosts.length ||
+                    !currentHosts.every(host => newHosts.includes(host)) ||
+                    !newHosts.every(host => currentHosts.includes(host))) {
+                    authChanged = true;
+                }
             }
 
-            const successMessage = Object.keys(studentChanges).length > 0
-                ? 'Student profile and auth record saved successfully'
-                : 'Auth record saved successfully';
+            // Only update auth record if it has changed
+            if (authChanged) {
+                await authPutAuthItem(authRecord, pid as string, hash as string);
+
+                // Update the local copy of allAuthRecords
+                const existingIndex = allAuthRecords.findIndex(ar => ar.id === formData.studentId);
+                if (existingIndex >= 0) {
+                    allAuthRecords[existingIndex] = authRecord;
+                } else {
+                    allAuthRecords.push(authRecord);
+                }
+            }
+
+            // Determine success message based on what was actually saved
+            const studentChanged = Object.keys(studentChanges).length > 0 || (selectedStudent && allStudents.find(s => s.id === formData.studentId)?.owyaaLease !== selectedStudent.owyaaLease);
+            let successMessage = '';
+            if (studentChanged && authChanged) {
+                successMessage = 'Student profile and auth record saved successfully';
+            } else if (studentChanged) {
+                successMessage = 'Student profile saved successfully';
+            } else if (authChanged) {
+                successMessage = 'Auth record saved successfully';
+            } else {
+                successMessage = 'No changes to save';
+            }
             toast.success(successMessage);
 
             setShowEditModal(false);
@@ -749,6 +801,114 @@ const Home = () => {
                 ? prev.permittedHosts.filter(h => h !== host)
                 : [...prev.permittedHosts, host]
         }));
+    };
+
+    const handleCancelEdit = () => {
+        // Reset selectedStudent to original state
+        if (originalStudent) {
+            setSelectedStudent({ ...originalStudent });
+
+            // Also reset the allStudents array to the original state
+            const studentIndex = allStudents.findIndex(s => s.id === originalStudent.id);
+            if (studentIndex !== -1) {
+                const updatedStudents = [...allStudents];
+                updatedStudents[studentIndex] = { ...originalStudent };
+                allStudents = updatedStudents;
+            }
+        }
+        setShowEditModal(false);
+    };
+
+    // OWYAA functionality
+    const handleOWYAA = async (studentId: string, studentName: string) => {
+        if (!Array.isArray(allStudents)) {
+            console.error('allStudents is not an array');
+            return;
+        }
+
+        const studentIndex = allStudents.findIndex(s => s.id === studentId);
+        if (studentIndex === -1) return;
+
+        const student = allStudents[studentIndex];
+        const hasLease = student.owyaaLease;
+
+        if (!hasLease) {
+            const leaseTimestamp = new Date().toISOString();
+            const success = await updateStudentField(studentId, 'owyaaLease', leaseTimestamp);
+            if (success) {
+                const updatedStudents = [...allStudents];
+                updatedStudents[studentIndex] = { ...student, owyaaLease: leaseTimestamp };
+                allStudents = updatedStudents;
+                toast.info(`OWYAA Enabled for ${studentName} for 90 days`, { autoClose: 3000 });
+            }
+        } else {
+            const success = await updateStudentField(studentId, 'owyaaLease', '');
+            if (success) {
+                const updatedStudents = [...allStudents];
+                const updatedStudent = { ...student };
+                delete updatedStudent.owyaaLease;
+                updatedStudents[studentIndex] = updatedStudent;
+                allStudents = updatedStudents;
+                toast.info(`OWYAA DISABLED for ${studentName}`, { autoClose: 3000 });
+            }
+        }
+
+        // Refresh table data
+        const [cl, rd] = buildColumnLabelsAndRowData(demoMode);
+        setColumnLabels(cl);
+        setRowData(rd);
+    };
+
+    // OWYAA handler for edit dialog - updates local state only
+    const handleOWYAAEditDialog = async (studentId: string, studentName: string) => {
+        if (!Array.isArray(allStudents)) {
+            console.error('allStudents is not an array');
+            return;
+        }
+
+        const studentIndex = allStudents.findIndex(s => s.id === studentId);
+        if (studentIndex === -1) return;
+
+        const student = allStudents[studentIndex];
+        const hasLease = student.owyaaLease;
+
+        if (!hasLease) {
+            const leaseTimestamp = new Date().toISOString();
+            // Update local state only - no API call
+            const updatedStudents = [...allStudents];
+            updatedStudents[studentIndex] = { ...student, owyaaLease: leaseTimestamp };
+            allStudents = updatedStudents;
+
+            // Update the selectedStudent state to reflect the change in the dialog
+            setSelectedStudent({ ...student, owyaaLease: leaseTimestamp });
+        } else {
+            // Update local state only - no API call
+            const updatedStudents = [...allStudents];
+            const updatedStudent = { ...student };
+            delete updatedStudent.owyaaLease;
+            updatedStudents[studentIndex] = updatedStudent;
+            allStudents = updatedStudents;
+
+            // Update the selectedStudent state to reflect the change in the dialog
+            setSelectedStudent(updatedStudent);
+        }
+    };
+
+    const getOWYAAStatus = (student: Student): string => {
+        if (!student.owyaaLease) {
+            return 'OWYAA Disabled';
+        }
+
+        const diffTime = (datetime: string) => {
+            const leaseTime = new Date(datetime).getTime();
+            const now = new Date().getTime();
+            if (isNaN(leaseTime)) return 9999;
+            return Math.floor(Math.abs(now - leaseTime) / 1000 / 60 / (60 * 24));
+        };
+
+        const owyaaDays = diffTime(student.owyaaLease);
+        const daysLeft = Math.max(0, 90 - Math.min(owyaaDays, 90));
+        return `OWYAA Active - ${daysLeft} days remaining`;
     };
 
     // Main initialization effect
@@ -788,15 +948,11 @@ const Home = () => {
                 console.log('Data loaded - Students:', studentsArray.length, 'Auth Records:', authRecordsArray.length);
 
                 // Fetch config values
-                const appListConfig = await fetchConfig('accessManagerAppList');
-                const poolConfig = await fetchConfig('accessManagerPool');
+                const appListConfig = await fetchConfig('studentManagerAppList');
                 const demoModeConfig = await fetchConfig('demoMode');
 
                 if (appListConfig) {
-                    accessManagerAppList = Array.isArray(appListConfig.value) ? appListConfig.value : [];
-                }
-                if (poolConfig) {
-                    accessManagerPool = poolConfig.value || '';
+                    studentManagerAppList = Array.isArray(appListConfig.value) ? appListConfig.value : [];
                 }
 
                 // Calculate demo mode value
@@ -810,17 +966,9 @@ const Home = () => {
                     setDemoMode(isDemoMode);
                 }
 
-                // Calculate eligible students
-                if (accessManagerPool && poolsArray.length > 0) {
-                    eligibleStudents = studentsArray.filter(student => {
-                        if (student.unsubscribe) return false;
-                        return checkEligibility(accessManagerPool, student, 'student-manager', poolsArray);
-                    });
-                    eligibleStudents.sort(compareNames);
-                } else {
-                    eligibleStudents = studentsArray.filter(student => !student.unsubscribe);
-                    eligibleStudents.sort(compareNames);
-                }
+                // Calculate eligible students (all non-unsubscribed students)
+                eligibleStudents = studentsArray.filter(student => !student.unsubscribe);
+                eligibleStudents.sort(compareNames);
 
                 // Set current user information after students are loaded
                 fetchCurrentUser(studentsArray);
@@ -954,7 +1102,7 @@ const Home = () => {
             </Container>
 
             {/* Edit Modal */}
-            <Modal show={showEditModal} onHide={() => { setShowEditModal(false); }} size="lg">
+            <Modal show={showEditModal} onHide={handleCancelEdit} size="lg">
                 <Modal.Header closeButton>
                     <Modal.Title>
                         Edit Access
@@ -1091,6 +1239,34 @@ const Home = () => {
                             </Row>
                         </div>
 
+                        {/* OWYAA Section - Always visible */}
+                        {selectedStudent && (
+                            <div style={{
+                                border: '1px solid #555',
+                                borderRadius: '8px',
+                                padding: '20px',
+                                marginBottom: '30px',
+                                backgroundColor: '#1a1a1a'
+                            }}>
+                                <Row>
+                                    <Col md={8}>
+                                        <div style={{ marginBottom: '10px' }}>
+                                            <strong>Status:</strong> {getOWYAAStatus(selectedStudent)}
+                                        </div>
+                                    </Col>
+                                    <Col md={4}>
+                                        <Button
+                                            variant={selectedStudent.owyaaLease ? "danger" : "success"}
+                                            size="sm"
+                                            onClick={() => handleOWYAAEditDialog(selectedStudent.id, `${selectedStudent.first} ${selectedStudent.last}`)}
+                                        >
+                                            {selectedStudent.owyaaLease ? "Disable OWYAA" : "Enable OWYAA"}
+                                        </Button>
+                                    </Col>
+                                </Row>
+                            </div>
+                        )}
+
                         <div style={{
                             border: '1px solid #555',
                             borderRadius: '8px',
@@ -1098,23 +1274,23 @@ const Home = () => {
                             marginBottom: '30px',
                             backgroundColor: '#1a1a1a'
                         }}>
-                            <h5 style={{ marginBottom: '20px' }}>Admin Dashboard Configuration</h5>
+                            <h5 style={{ marginBottom: '20px' }}>Event Dashboard Configuration</h5>
                             <Row>
                                 <Col md={6}>
                                     <Form.Group className="mb-3">
                                         <Form.Label>Views Profile</Form.Label>
                                         <Form.Select
-                                            value={formData.adminDashboardConfig.viewsProfile}
+                                            value={formData.eventDashboardConfig.viewsProfile}
                                             onChange={(e) => setFormData(prev => ({
                                                 ...prev,
-                                                adminDashboardConfig: {
-                                                    ...prev.adminDashboardConfig,
+                                                eventDashboardConfig: {
+                                                    ...prev.eventDashboardConfig,
                                                     viewsProfile: e.target.value
                                                 }
                                             }))}
-                                            disabled={!formData.permittedHosts.includes('admin-dashboard.slsupport.link')}
+                                            disabled={!formData.permittedHosts.includes('event-dashboard.slsupport.link')}
                                             style={{
-                                                backgroundColor: formData.permittedHosts.includes('admin-dashboard.slsupport.link') ? '#2b2b2b' : '#1a1a1a',
+                                                backgroundColor: formData.permittedHosts.includes('event-dashboard.slsupport.link') ? '#2b2b2b' : '#1a1a1a',
                                                 color: 'white',
                                                 border: '1px solid #555'
                                             }}
@@ -1135,45 +1311,45 @@ const Home = () => {
                                     <Form.Check
                                         type="checkbox"
                                         label="Write Permission"
-                                        checked={formData.adminDashboardConfig.writePermission}
+                                        checked={formData.eventDashboardConfig.writePermission}
                                         onChange={(e) => setFormData(prev => ({
                                             ...prev,
-                                            adminDashboardConfig: {
-                                                ...prev.adminDashboardConfig,
+                                            eventDashboardConfig: {
+                                                ...prev.eventDashboardConfig,
                                                 writePermission: e.target.checked
                                             }
                                         }))}
-                                        disabled={!formData.permittedHosts.includes('admin-dashboard.slsupport.link')}
+                                        disabled={!formData.permittedHosts.includes('event-dashboard.slsupport.link')}
                                     />
                                 </Col>
                                 <Col md={3}>
                                     <Form.Check
                                         type="checkbox"
                                         label="Export CSV"
-                                        checked={formData.adminDashboardConfig.exportCSV}
+                                        checked={formData.eventDashboardConfig.exportCSV}
                                         onChange={(e) => setFormData(prev => ({
                                             ...prev,
-                                            adminDashboardConfig: {
-                                                ...prev.adminDashboardConfig,
+                                            eventDashboardConfig: {
+                                                ...prev.eventDashboardConfig,
                                                 exportCSV: e.target.checked
                                             }
                                         }))}
-                                        disabled={!formData.permittedHosts.includes('admin-dashboard.slsupport.link')}
+                                        disabled={!formData.permittedHosts.includes('event-dashboard.slsupport.link')}
                                     />
                                 </Col>
                                 <Col md={3}>
                                     <Form.Check
                                         type="checkbox"
                                         label="Student History"
-                                        checked={formData.adminDashboardConfig.studentHistory}
+                                        checked={formData.eventDashboardConfig.studentHistory}
                                         onChange={(e) => setFormData(prev => ({
                                             ...prev,
-                                            adminDashboardConfig: {
-                                                ...prev.adminDashboardConfig,
+                                            eventDashboardConfig: {
+                                                ...prev.eventDashboardConfig,
                                                 studentHistory: e.target.checked
                                             }
                                         }))}
-                                        disabled={!formData.permittedHosts.includes('admin-dashboard.slsupport.link')}
+                                        disabled={!formData.permittedHosts.includes('event-dashboard.slsupport.link')}
                                     />
                                 </Col>
                             </Row>
@@ -1187,7 +1363,7 @@ const Home = () => {
                         }}>
                             <h5 style={{ marginBottom: '20px' }}>Permitted Apps</h5>
                             <Row>
-                                {accessManagerAppList.map(app => (
+                                {studentManagerAppList.map(app => (
                                     <Col md={6} key={app} className="mb-2">
                                         <Form.Check
                                             type="checkbox"
@@ -1202,7 +1378,7 @@ const Home = () => {
                     </Form >
                 </Modal.Body >
                 <Modal.Footer style={{ borderTop: 'none' }}>
-                    <Button variant="secondary" onClick={() => { setShowEditModal(false); }}>
+                    <Button variant="secondary" onClick={handleCancelEdit}>
                         Cancel
                     </Button>
                     <Button variant="warning" onClick={handleSaveAuthRecord}>

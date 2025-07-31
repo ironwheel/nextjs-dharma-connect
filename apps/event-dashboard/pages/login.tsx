@@ -1,5 +1,5 @@
-// --- admin-dashboard/login.tsx ---
-// This is the application-specific login file for admin-dashboard.
+// --- event-dashboard/login.tsx ---
+// This is the application-specific login file for event-dashboard.
 // It imports the shared AuthVerification component.
 
 import React from 'react';

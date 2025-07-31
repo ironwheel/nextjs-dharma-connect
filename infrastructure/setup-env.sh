@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Script to set up environment variables for the admin-dashboard
-echo "🔧 Setting up environment variables for admin-dashboard..."
+# Script to set up environment variables for the event-dashboard
+echo "🔧 Setting up environment variables for event-dashboard..."
 
 # WebSocket API URL from the CDK deployment
 export AWS_WEBSOCKET_API_URL="wss://3zvne1dk16.execute-api.us-east-1.amazonaws.com/prod"
@@ -9,8 +9,8 @@ export AWS_WEBSOCKET_API_URL="wss://3zvne1dk16.execute-api.us-east-1.amazonaws.c
 echo "✅ Environment variables set:"
 echo "   AWS_WEBSOCKET_API_URL=$AWS_WEBSOCKET_API_URL"
 echo ""
-echo "📋 To use these in your admin-dashboard, add to your .env file:"
+echo "📋 To use these in your event-dashboard, add to your .env file:"
 echo "   AWS_WEBSOCKET_API_URL=$AWS_WEBSOCKET_API_URL"
 echo ""
-echo "🚀 You can now test the WebSocket connection from the admin-dashboard!"
+echo "🚀 You can now test the WebSocket connection from the event-dashboard!"
 echo "   The Dharma Connect Lambda function will automatically handle both work-orders and students resources." 
