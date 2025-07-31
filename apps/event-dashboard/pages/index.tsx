@@ -347,9 +347,7 @@ const Home = () => {
 
     // Helper function to mask email based on email display permission
     const maskEmail = (email: string, emailDisplayValue: boolean = emailDisplayPermission): string => {
-        console.log('maskEmail called with:', email, 'emailDisplay:', emailDisplayValue);
         if (!emailDisplayValue && email) {
-            console.log('Masking email:', email);
             return '**********';
         }
         return email;
