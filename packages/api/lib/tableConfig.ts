@@ -4,13 +4,13 @@ export interface TableConfig {
   envVar: string;
   pk: string;
   sk: string;
-  ops: Array<'get' | 'list' | 'delete' | 'put' | 'count'>;
+  ops: Array<'get' | 'list' | 'delete' | 'put' | 'count' | 'update'>;
 }
 
 export const tables: TableConfig[] = [
   { resource: 'dryrun-recipients', envVar: 'DYNAMODB_TABLE_DRYRUN_RECIPIENTS', pk: 'campaignString', sk: '', ops: ['get', 'list'] },
   { resource: 'send-recipients', envVar: 'DYNAMODB_TABLE_SEND_RECIPIENTS', pk: 'campaignString', sk: '', ops: ['get', 'list'] },
-  { resource: 'work-orders', envVar: 'DYNAMODB_TABLE_WORK_ORDERS', pk: 'id', sk: '', ops: ['get', 'list', 'put', 'delete'] },
+  { resource: 'work-orders', envVar: 'DYNAMODB_TABLE_WORK_ORDERS', pk: 'id', sk: '', ops: ['get', 'list', 'put', 'delete', 'update'] },
   { resource: 'work-order-audit-logs', envVar: 'DYNAMODB_TABLE_WORK_ORDER_AUDIT_LOGS', pk: 'workOrderId', sk: 'timestamp', ops: ['get', 'list', 'put'] },
   { resource: 'students', envVar: 'DYNAMODB_TABLE_PARTICIPANTS', pk: 'id', sk: '', ops: ['get', 'put', 'list', 'count'] },
   { resource: 'prompts', envVar: 'DYNAMODB_TABLE_PROMPTS', pk: 'prompt', sk: '', ops: ['get', 'list'] },

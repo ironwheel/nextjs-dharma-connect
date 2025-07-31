@@ -658,7 +658,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash 
                                     value={st.stage}
                                     disabled={isStageUsed}
                                 >
-                                    {st.order ? `[${st.order}] ` : ''}{st.stage} - {st.description}
+                                    {st.stage} - {st.description}
                                     {isStageUsed ? ' (Already used)' : ''}
                                 </option>
                             )
