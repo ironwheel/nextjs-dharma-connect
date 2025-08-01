@@ -67,6 +67,10 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
           // console.log("SETTING COOKIE:", cookieStr);
           res.setHeader('Set-Cookie', cookieStr);
         }
+        if (checkResult.status === 'already-authenticated') {
+          res.status(204).json({});
+          return;
+        }
         if (checkResult.status !== 'authenticated') {
           res.status(401).json({ error: 'Unauthorized' });
           return;
