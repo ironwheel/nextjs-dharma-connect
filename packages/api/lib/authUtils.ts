@@ -759,8 +759,6 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     let tableCfg = tableGetConfig('auth');
     let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
 
-    // console.log("checkAccess: getOne(auth)data:", data);
-
     let permittedHosts: PermittedHost[] = [];
     if (!data) {
         data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
@@ -777,9 +775,12 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     // Get all actions for all apps the user has access to (design improvement)
     const allActionsList = await getAllActionsForUser(permittedHosts);
 
+    // Add verification actions to the allowed actions list
+    const allActionsWithVerification = [...allActionsList, ...verificationActionList];
+
     // Check if the requested operation is allowed
-    if (!allActionsList.includes(operation)) {
-        console.log("checkAccess: operation not allowed:", operation, "allowed actions:", allActionsList);
+    if (!allActionsWithVerification.includes(operation)) {
+        console.log("checkAccess: operation not allowed:", operation, "allowed actions:", allActionsWithVerification);
         throw new Error(`AUTH_OPERATION_NOT_ALLOWED: Operation '${operation}' is not permitted for user across all apps`);
     }
 
@@ -787,16 +788,12 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     // and has a TTL of AUTH_SESSION_TTL_SECONDS
     // Sessions records use a primary key of pid-deviceFingerprint
     tableCfg = tableGetConfig('sessions');
-    // console.log("checkAccess: getOneWithSort(sessions) pid:", pid, "deviceFingerprint:", deviceFingerprint);
     const session = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
-    // console.log("checkAccess: getOneWithSort(sessions) session:", session);
     // If session found, generate fresh access token if the session isn't expired
     if (session) {
         if (session.ttl <= Date.now()) {
             // Session is expired, delete it and fall through to the verification process
-            // console.log("checkAccess: session is expired, deleting it");
             await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, session.id, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
-            // console.log("checkAccess: session deleted");
         } else {
             // Session is valid, generate fresh access token with all actions
             const allActionsList = await getAllActionsForUser(permittedHosts);
