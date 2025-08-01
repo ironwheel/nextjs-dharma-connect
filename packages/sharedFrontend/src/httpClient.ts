@@ -91,9 +91,10 @@ async function apiFetch(
     throw error;
   }
 
-  // Handle empty response (e.g., 204 No Content)
+  // Handle 204 No Content by redirecting to the root page
   if (res.status === 204) {
-    return null;
+    Router.replace(`/?pid=${pid}&hash=${hash}`);
+    return Promise.resolve({ redirected: true });
   }
   const text = await res.text();
   if (!text) {

@@ -259,13 +259,81 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4 font-inter">
-            <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full text-center">
-                <h1 className="text-3xl font-bold text-gray-800 mb-6">Identity Verification</h1>
+        <div
+            className="min-h-screen flex items-center justify-center bg-gray-100 p-4 font-inter"
+            style={{
+                fontFamily: 'Inter, system-ui, sans-serif',
+                backgroundColor: '#f3f4f6',
+                minHeight: '100vh',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '1rem'
+            }}
+        >
+            <style dangerouslySetInnerHTML={{
+                __html: `
+                    .auth-verification-input {
+                        background-color: #ffffff !important;
+                        color: #000000 !important;
+                        border-color: #d1d5db !important;
+                        caret-color: #000000 !important;
+                        -webkit-text-fill-color: #000000 !important;
+                        -webkit-appearance: none !important;
+                        -moz-appearance: textfield !important;
+                        background: #ffffff !important;
+                        background-image: none !important;
+                        background-clip: padding-box !important;
+                        border: 2px solid #d1d5db !important;
+                        border-radius: 0.5rem !important;
+                        box-shadow: none !important;
+                        outline: none !important;
+                        text-align: center !important;
+                        font-size: 1.25rem !important;
+                        font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace !important;
+                        font-weight: 400 !important;
+                        line-height: 1.5 !important;
+                        padding: 0.5rem !important;
+                        width: 3rem !important;
+                        height: 3rem !important;
+                        min-width: 3rem !important;
+                        min-height: 3rem !important;
+                        max-width: 3rem !important;
+                        max-height: 3rem !important;
+                    }
+                    
+                    .auth-verification-input:focus {
+                        background-color: #ffffff !important;
+                        color: #000000 !important;
+                        border-color: #6366f1 !important;
+                        -webkit-text-fill-color: #000000 !important;
+                        box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2) !important;
+                    }
+                    
+                    .auth-verification-input:disabled {
+                        background-color: #f3f4f6 !important;
+                        color: #6b7280 !important;
+                        -webkit-text-fill-color: #6b7280 !important;
+                    }
+                `
+            }} />
+            <div
+                className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full text-center"
+                style={{
+                    backgroundColor: '#ffffff',
+                    padding: '2rem',
+                    borderRadius: '0.75rem',
+                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+                    maxWidth: '28rem',
+                    width: '100%',
+                    textAlign: 'center'
+                }}
+            >
+                <h1 className="text-3xl font-bold text-gray-800 mb-6" style={{ color: '#1f2937', fontWeight: 'bold' }}>Identity Verification</h1>
 
                 {!isSent && !isRedirecting && (
                     <>
-                        <p className="text-gray-600 mb-6">
+                        <p className="text-gray-600 mb-6" style={{ color: '#4b5563' }}>
                             To securely log in, we need to verify your identity. Please click the button below to send a verification email to your registered address.
                             You will receive an email containing a 6-digit code to complete your login.
                         </p>
@@ -281,6 +349,19 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
                                     : 'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 shadow-md hover:shadow-lg'
                                 }
                             `}
+                            style={{
+                                width: '100%',
+                                padding: '0.75rem 1.5rem',
+                                borderRadius: '0.5rem',
+                                color: '#ffffff',
+                                fontWeight: '600',
+                                fontSize: '1.125rem',
+                                transition: 'all 0.3s ease-in-out',
+                                backgroundColor: isSending || !pid || !hash ? '#a5b4fc' : '#4f46e5',
+                                cursor: isSending || !pid || !hash ? 'not-allowed' : 'pointer',
+                                border: 'none',
+                                outline: 'none'
+                            }}
                         >
                             {isSending ? 'Sending Email...' : 'Send Verification Email'}
                         </button>
@@ -290,22 +371,44 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
                 {isSent && (
                     <>
                         {!isRedirecting && (
-                            <div className="mt-6 p-4 bg-green-100 text-green-700 rounded-lg shadow-inner mb-6">
-                                <p className="font-semibold">Email Sent Successfully!</p>
-                                <p className="text-sm mt-1">Please check your inbox for the 6-digit code.</p>
+                            <div
+                                className="mt-6 p-4 bg-green-100 text-green-700 rounded-lg shadow-inner mb-6"
+                                style={{
+                                    marginTop: '1.5rem',
+                                    padding: '1rem',
+                                    backgroundColor: '#dcfce7',
+                                    color: '#15803d',
+                                    borderRadius: '0.5rem',
+                                    boxShadow: 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.06)',
+                                    marginBottom: '1.5rem'
+                                }}
+                            >
+                                <p className="font-semibold" style={{ fontWeight: '600' }}>Email Sent Successfully!</p>
+                                <p className="text-sm mt-1" style={{ fontSize: '0.875rem', marginTop: '0.25rem' }}>Please check your inbox for the 6-digit code.</p>
                             </div>
                         )}
 
                         {isRedirecting && (
-                            <div className="mt-6 p-4 bg-blue-100 text-blue-700 rounded-lg shadow-inner mb-6">
-                                <div className="flex items-center justify-center">
-                                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-3"></div>
-                                    <p className="font-semibold">Verification successful! Redirecting...</p>
+                            <div
+                                className="mt-6 p-4 bg-blue-100 text-blue-700 rounded-lg shadow-inner mb-6"
+                                style={{
+                                    marginTop: '1.5rem',
+                                    padding: '1rem',
+                                    backgroundColor: '#dbeafe',
+                                    color: '#1d4ed8',
+                                    borderRadius: '0.5rem',
+                                    boxShadow: 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.06)',
+                                    marginBottom: '1.5rem'
+                                }}
+                            >
+                                <div className="flex items-center justify-center" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-3" style={{ animation: 'spin 1s linear infinite', borderRadius: '50%', height: '1.5rem', width: '1.5rem', borderBottom: '2px solid #2563eb', marginRight: '0.75rem' }}></div>
+                                    <p className="font-semibold" style={{ fontWeight: '600' }}>Verification successful! Redirecting...</p>
                                 </div>
                             </div>
                         )}
 
-                        <p className="text-gray-600 mb-6">
+                        <p className="text-gray-600 mb-6" style={{ color: '#4b5563' }}>
                             Enter the 6-digit code from your email to complete verification:
                         </p>
 
@@ -325,7 +428,35 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
                                     onChange={(e) => handleCodeChange(index, e.target.value)}
                                     onKeyDown={(e) => handleKeyDown(index, e)}
                                     onPaste={handlePaste}
-                                    className="w-12 h-12 text-center text-xl font-mono border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                                    className="auth-verification-input w-12 h-12 text-center text-xl font-mono border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                                    style={{
+                                        backgroundColor: '#ffffff !important',
+                                        color: '#000000 !important',
+                                        borderColor: '#d1d5db !important',
+                                        caretColor: '#000000 !important',
+                                        WebkitTextFillColor: '#000000 !important',
+                                        WebkitAppearance: 'none',
+                                        MozAppearance: 'textfield',
+                                        background: '#ffffff !important',
+                                        backgroundImage: 'none !important',
+                                        backgroundClip: 'padding-box !important',
+                                        border: '2px solid #d1d5db !important',
+                                        borderRadius: '0.5rem !important',
+                                        boxShadow: 'none !important',
+                                        outline: 'none !important',
+                                        textAlign: 'center',
+                                        fontSize: '1.25rem !important',
+                                        fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace !important',
+                                        fontWeight: '400 !important',
+                                        lineHeight: '1.5 !important',
+                                        padding: '0.5rem !important',
+                                        width: '3rem !important',
+                                        height: '3rem !important',
+                                        minWidth: '3rem !important',
+                                        minHeight: '3rem !important',
+                                        maxWidth: '3rem !important',
+                                        maxHeight: '3rem !important'
+                                    }}
                                     disabled={isVerifying || isRedirecting}
                                 />
                             ))}
@@ -343,6 +474,20 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
                                     : 'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 shadow-md hover:shadow-lg'
                                 }
                             `}
+                            style={{
+                                width: '100%',
+                                padding: '0.75rem 1.5rem',
+                                borderRadius: '0.5rem',
+                                color: '#ffffff',
+                                fontWeight: '600',
+                                fontSize: '1.125rem',
+                                marginBottom: '1rem',
+                                transition: 'all 0.3s ease-in-out',
+                                backgroundColor: isVerifying || isRedirecting || code.join('').length !== 6 ? '#a5b4fc' : '#4f46e5',
+                                cursor: isVerifying || isRedirecting || code.join('').length !== 6 ? 'not-allowed' : 'pointer',
+                                border: 'none',
+                                outline: 'none'
+                            }}
                         >
                             {isVerifying ? 'Verifying...' : isRedirecting ? 'Redirecting...' : 'Verify Code'}
                         </button>
@@ -352,14 +497,35 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
                             onClick={resendCode}
                             disabled={isResending || isRedirecting}
                             className="w-full px-6 py-2 text-indigo-600 hover:text-indigo-800 font-medium transition-colors duration-200"
+                            style={{
+                                width: '100%',
+                                padding: '0.5rem 1.5rem',
+                                color: '#4f46e5',
+                                fontWeight: '500',
+                                transition: 'color 0.2s',
+                                backgroundColor: 'transparent',
+                                border: 'none',
+                                outline: 'none',
+                                cursor: isResending || isRedirecting ? 'not-allowed' : 'pointer'
+                            }}
                         >
                             {isResending ? 'Sending...' : isRedirecting ? 'Redirecting...' : 'Resend Code'}
                         </button>
 
                         {/* Show send button again after 3 failed attempts */}
                         {attempts >= 3 && !isRedirecting && (
-                            <div className="mt-6 p-4 bg-yellow-100 text-yellow-700 rounded-lg shadow-inner">
-                                <p className="font-semibold mb-2">Too many failed attempts</p>
+                            <div
+                                className="mt-6 p-4 bg-yellow-100 text-yellow-700 rounded-lg shadow-inner"
+                                style={{
+                                    marginTop: '1.5rem',
+                                    padding: '1rem',
+                                    backgroundColor: '#fef3c7',
+                                    color: '#a16207',
+                                    borderRadius: '0.5rem',
+                                    boxShadow: 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.06)'
+                                }}
+                            >
+                                <p className="font-semibold mb-2" style={{ fontWeight: '600', marginBottom: '0.5rem' }}>Too many failed attempts</p>
                                 <button
                                     onClick={() => {
                                         setIsSent(false);
@@ -367,6 +533,16 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
                                         setCode(['', '', '', '', '', '']);
                                     }}
                                     className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors duration-200"
+                                    style={{
+                                        padding: '0.5rem 1rem',
+                                        backgroundColor: '#d97706',
+                                        color: '#ffffff',
+                                        borderRadius: '0.5rem',
+                                        transition: 'background-color 0.2s',
+                                        border: 'none',
+                                        outline: 'none',
+                                        cursor: 'pointer'
+                                    }}
                                 >
                                     Send New Verification Email
                                 </button>
@@ -376,16 +552,36 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
                 )}
 
                 {error && (
-                    <div className="mt-6 p-4 bg-red-100 text-red-700 rounded-lg shadow-inner">
-                        <p className="font-semibold">Error:</p>
-                        <p className="text-sm mt-1">{error}</p>
+                    <div
+                        className="mt-6 p-4 bg-red-100 text-red-700 rounded-lg shadow-inner"
+                        style={{
+                            marginTop: '1.5rem',
+                            padding: '1rem',
+                            backgroundColor: '#fee2e2',
+                            color: '#b91c1c',
+                            borderRadius: '0.5rem',
+                            boxShadow: 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.06)'
+                        }}
+                    >
+                        <p className="font-semibold" style={{ fontWeight: '600' }}>Error:</p>
+                        <p className="text-sm mt-1" style={{ fontSize: '0.875rem', marginTop: '0.25rem' }}>{error}</p>
                     </div>
                 )}
 
                 {(!pid || !hash) && !isSent && !isSending && (
-                    <div className="mt-6 p-4 bg-yellow-100 text-yellow-700 rounded-lg shadow-inner">
-                        <p className="font-semibold">Information Missing:</p>
-                        <p className="text-sm mt-1">Unable to proceed. Required identity information (PID or Hash) is missing. Please ensure you've accessed this page correctly.</p>
+                    <div
+                        className="mt-6 p-4 bg-yellow-100 text-yellow-700 rounded-lg shadow-inner"
+                        style={{
+                            marginTop: '1.5rem',
+                            padding: '1rem',
+                            backgroundColor: '#fef3c7',
+                            color: '#a16207',
+                            borderRadius: '0.5rem',
+                            boxShadow: 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.06)'
+                        }}
+                    >
+                        <p className="font-semibold" style={{ fontWeight: '600' }}>Information Missing:</p>
+                        <p className="text-sm mt-1" style={{ fontSize: '0.875rem', marginTop: '0.25rem' }}>Unable to proceed. Required identity information (PID or Hash) is missing. Please ensure you've accessed this page correctly.</p>
                     </div>
                 )}
             </div>

@@ -14,6 +14,21 @@ import crypto from 'crypto';
 // Add this type at the top of the file, after imports
 type PermittedHost = string; // Now just a string representing the host
 
+// Verification result enumeration
+export enum VerifyResult {
+    VERIFY_OK = 'VERIFY_OK',
+    VERIFY_ERR_INVALID_SIGNATURE = 'VERIFY_ERR_INVALID_SIGNATURE',
+    VERIFY_ERR_EXPIRED = 'VERIFY_ERR_EXPIRED',
+    VERIFY_ERR_ISSUER_MISMATCH = 'VERIFY_ERR_ISSUER_MISMATCH',
+    VERIFY_ERR_VERSION_MISMATCH = 'VERIFY_ERR_VERSION_MISMATCH',
+    VERIFY_ERR_TYPE_MISMATCH = 'VERIFY_ERR_TYPE_MISMATCH',
+    VERIFY_ERR_FINGERPRINT_MISMATCH = 'VERIFY_ERR_FINGERPRINT_MISMATCH',
+    VERIFY_ERR_PID_MISMATCH = 'VERIFY_ERR_PID_MISMATCH',
+    VERIFY_ERR_CONFIG_ERROR = 'VERIFY_ERR_CONFIG_ERROR',
+    VERIFY_ERR_OPERATION_NOT_FOUND = 'VERIFY_ERR_OPERATION_NOT_FOUND',
+    VERIFY_ERR_UNKNOWN = 'VERIFY_ERR_UNKNOWN'
+}
+
 // JWT Configuration (Constants)
 export const JWT_ISSUER = process.env.JWT_ISSUER_NAME;
 export const JWT_TOKEN_TYPE_ACCESS = 'access';
@@ -176,10 +191,10 @@ export function createToken(pid: string, clientFingerprint: string, actionList: 
  * @param {string} clientFingerprint - The client's browser fingerprint (can be null/undefined).
  * @param {string} operation - Operation this token would like to be used for.
  * @param {string} token - The JWT to verify.
- * @returns {Boolean} true if verified, false if not
+ * @returns {VerifyResult} The verification result.
  * @throws {Error} Throws errors related to bad configuration
  */
-export function verifyToken(token: string, pid: string, clientFingerprint: string, operation: string): boolean {
+export function verifyToken(token: string, pid: string, clientFingerprint: string, operation: string): VerifyResult {
     if (!RSA_PUBLIC_KEY_B64) throw new Error(TOKEN_ERROR_CODES.CONFIG_ERROR + ': Missing API_RSA_PUBLIC');
     const publicKey = Buffer.from(RSA_PUBLIC_KEY_B64, 'base64').toString('utf-8');
     if (!publicKey) throw new Error(TOKEN_ERROR_CODES.CONFIG_ERROR + ': Invalid API_RSA_PUBLIC');
@@ -191,48 +206,42 @@ export function verifyToken(token: string, pid: string, clientFingerprint: strin
     } catch (err: any) {
         if (err instanceof jwt.TokenExpiredError) {
             console.log("TOKEN ERR: expired");
-            return false;
+            return VerifyResult.VERIFY_ERR_EXPIRED;
         } else if (err instanceof jwt.JsonWebTokenError) {
             console.log("TOKEN ERR: invalid signature");
-            return false;
+            return VerifyResult.VERIFY_ERR_INVALID_SIGNATURE;
         } else {
             console.log("TOKEN ERR: unknown");
-            return false;
+            return VerifyResult.VERIFY_ERR_UNKNOWN;
         }
     }
 
     // Check claims
     if (decoded.issuer !== JWT_ISSUER) {
         console.log("TOKEN ERR: issuer mismatch");
-        return false;
+        return VerifyResult.VERIFY_ERR_ISSUER_MISMATCH;
     }
     if (decoded.version !== JWT_VERSION) {
         console.log("TOKEN ERR: version mismatch");
-        return false;
+        return VerifyResult.VERIFY_ERR_VERSION_MISMATCH;
     }
     if (decoded.type !== JWT_TOKEN_TYPE_ACCESS) {
         console.log("TOKEN ERR: type mismatch");
-        return false;
+        return VerifyResult.VERIFY_ERR_TYPE_MISMATCH;
     }
     if (clientFingerprint && decoded.fingerprint && clientFingerprint !== decoded.fingerprint) {
         console.log("TOKEN ERR: fingerprint mismatch:", clientFingerprint, decoded.fingerprint);
-        return false;
+        return VerifyResult.VERIFY_ERR_FINGERPRINT_MISMATCH;
     }
     if (pid != decoded.pid && pid !== ADMIN_BYPASS_PID) {
         console.log("TOKEN ERR: pid mismatch");
-        return false;
+        return VerifyResult.VERIFY_ERR_PID_MISMATCH;
     }
-
-    // Debug: Log the decoded token structure
-    //console.log("verifyToken: decoded token:", decoded);
-    //console.log("verifyToken: decoded.actions type:", typeof decoded.actions);
-    //console.log("verifyToken: decoded.actions value:", decoded.actions);
-    //console.log("verifyToken: operation:", operation);
 
     // Ensure actions is an array before calling includes
     if (!decoded.actions) {
         console.log("TOKEN ERR: actions field missing");
-        return false;
+        return VerifyResult.VERIFY_ERR_OPERATION_NOT_FOUND;
     }
 
     let actionsArray: string[];
@@ -243,18 +252,20 @@ export function verifyToken(token: string, pid: string, clientFingerprint: strin
             actionsArray = JSON.parse(decoded.actions);
         } catch (e) {
             console.log("TOKEN ERR: actions is string but not valid JSON:", decoded.actions);
-            return false;
+            return VerifyResult.VERIFY_ERR_CONFIG_ERROR;
         }
     } else {
         console.log("TOKEN ERR: actions is not array or string:", typeof decoded.actions, decoded.actions);
-        return false;
+        return VerifyResult.VERIFY_ERR_CONFIG_ERROR;
     }
 
     if (!actionsArray.includes(operation)) {
+        // if the token is ok so far, but the operation is not allowed and is
+        // one of the verification ops, redirect to login 
         console.log("TOKEN ERR: operation not allowed:", operation, actionsArray);
-        return false;
+        return VerifyResult.VERIFY_ERR_OPERATION_NOT_FOUND;
     }
-    return true;
+    return VerifyResult.VERIFY_OK;
 }
 
 /**
@@ -318,13 +329,13 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
     // Check for rate limiting - look for recent verification emails sent
     tableCfg = tableGetConfig('verification-tokens');
     const recentEmails = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
-    const recentVerificationEmails = recentEmails.filter((token: any) => 
-        token.pid === pid && 
-        token.deviceFingerprint === deviceFingerprint && 
-        !token.failedAttempt && 
+    const recentVerificationEmails = recentEmails.filter((token: any) =>
+        token.pid === pid &&
+        token.deviceFingerprint === deviceFingerprint &&
+        !token.failedAttempt &&
         token.createdAt > Date.now() - (2 * 60 * 1000) // Last 2 minutes
     );
-    
+
     if (recentVerificationEmails.length >= 3) {
         throw new Error('AUTH_RATE_LIMIT_EXCEEDED');
     }
@@ -500,13 +511,13 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
     // Check for rate limiting - look for recent failed attempts
     tableCfg = tableGetConfig('verification-tokens');
     const recentFailedAttempts = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
-    const failedAttempts = recentFailedAttempts.filter((token: any) => 
-        token.pid === pid && 
-        token.deviceFingerprint === deviceFingerprint && 
-        token.failedAttempt && 
+    const failedAttempts = recentFailedAttempts.filter((token: any) =>
+        token.pid === pid &&
+        token.deviceFingerprint === deviceFingerprint &&
+        token.failedAttempt &&
         token.createdAt > Date.now() - (5 * 60 * 1000) // Last 5 minutes
     );
-    
+
     if (failedAttempts.length >= 5) {
         throw new Error('AUTH_RATE_LIMIT_EXCEEDED');
     }
@@ -677,14 +688,16 @@ export function generateAuthHash(guid: string, secretKeyHex: string): string {
  */
 export async function checkAccess(pid: string, hash: string, host: string, deviceFingerprint: string, operation: string, token?: string): Promise<any> {
 
-    // console.log("ACTUAL checkAccess(", pid, hash, host, deviceFingerprint, operation, token);
+    // Verification action list
+    const verificationActionList = [
+        'POST/auth/verificationEmailSend',
+        'POST/auth/verificationEmailCallback',
+    ];
 
     // Validate inputs
     if (!pid || !hash || !host || !deviceFingerprint || !operation) {
         throw new Error('checkAccess(): Missing required parameters');
     }
-
-    // console.log("ACTUAL checkAccess() ARG CHECK OK")
 
     // Parse and validate APP_ACCESS_JSON
     const accessJson = process.env.APP_ACCESS_JSON;
@@ -701,8 +714,6 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
         throw new Error('APP_ACCESS_JSON is not valid JSON');
     }
 
-    //console.log("ACTUAL checkAccess() accessList:", accessList);
-
     // Find HOST configuration
     const entry = accessList.find((e: any) => e.host === host);
     if (!entry) throw new Error('UNKNOWN_HOST');
@@ -716,11 +727,9 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
         if (expectedHash !== hash) throw new Error('AUTHUSER_ACCESS_NOT_ALLOWED_BAD_HASH');
     }
 
-    let tokenExistsAndVerified = false;
+    let tokenVerificationResult = VerifyResult.VERIFY_ERR_UNKNOWN;
     if (token) {
-        // console.log("checkAccess: verifyToken(token, pid, deviceFingerprint, operation):", token, pid, deviceFingerprint, operation);
-        tokenExistsAndVerified = verifyToken(token, pid, deviceFingerprint, operation);
-        // console.log("checkAccess: verifyToken(token, pid, deviceFingerprint, operation) result:", tokenExistsAndVerified);
+        tokenVerificationResult = verifyToken(token, pid, deviceFingerprint, operation);
     } else {
         console.log("checkAccess: no token provided");
     }
@@ -728,16 +737,23 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     // The verify token function which includes operation permission along with
     // the the pre-check of the hash means we're good to go
     // We don't need to return the token because the client already has it
-    if (tokenExistsAndVerified) {
-        // console.log("checkAccess: tokenExistsAndVerified");
+    if (tokenVerificationResult === VerifyResult.VERIFY_OK) {
         return {
             status: 'authenticated'
         };
     }
 
+    // Check if token is valid but operation not found, and if it's a verification operation
+    if (tokenVerificationResult === VerifyResult.VERIFY_ERR_OPERATION_NOT_FOUND && verificationActionList.includes(operation)) {
+        // Token is valid but operation not found, and this is a verification operation
+        // This means the user is already authenticated and trying to perform verification
+        return {
+            status: 'already-authenticated'
+        };
+    }
+
     // We either don't have a token or the token is not verified
     // Attempt to refresh the token
-    // console.log("checkAccess: don't have a token or the token is not verified");
 
     // Does this user have access?
     let tableCfg = tableGetConfig('auth');
@@ -753,17 +769,13 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     permittedHosts = data['permitted-hosts'] || [];
 
     // Does this user have access to this host?
-    // console.log("checkAccess: permittedHosts:", permittedHosts);
     const hasPermission = permittedHosts.includes(host);
-    // console.log("checkAccess: hasPermission:", hasPermission);
     if (!hasPermission) {
         throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
     }
 
     // Get all actions for all apps the user has access to (design improvement)
-    console.log("checkAccess: getting all actions for user across all permitted hosts");
     const allActionsList = await getAllActionsForUser(permittedHosts);
-    console.log("checkAccess: allActionsList:", allActionsList);
 
     // Check if the requested operation is allowed
     if (!allActionsList.includes(operation)) {
@@ -809,13 +821,8 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     const currentVerificationTokens = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
     for (const token of currentVerificationTokens) {
         await deleteOne(tableCfg.tableName, tableCfg.pk, token.verificationTokenId, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
-        // console.log("checkAccess: deleted verification token:", token.verificationTokenId);
     }
 
-    const verificationActionList = [
-        'POST/auth/verificationEmailSend',
-        'POST/auth/verificationEmailCallback',
-    ];
     const verificationAccessToken = createToken(pid, deviceFingerprint, verificationActionList);
     return {
         status: 'needs-verification',
