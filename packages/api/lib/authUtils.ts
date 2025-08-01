@@ -315,6 +315,20 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
     const hasPermission = permittedHosts.includes(host);
     if (!hasPermission) throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
 
+    // Check for rate limiting - look for recent verification emails sent
+    tableCfg = tableGetConfig('verification-tokens');
+    const recentEmails = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    const recentVerificationEmails = recentEmails.filter((token: any) => 
+        token.pid === pid && 
+        token.deviceFingerprint === deviceFingerprint && 
+        !token.failedAttempt && 
+        token.createdAt > Date.now() - (2 * 60 * 1000) // Last 2 minutes
+    );
+    
+    if (recentVerificationEmails.length >= 3) {
+        throw new Error('AUTH_RATE_LIMIT_EXCEEDED');
+    }
+
     // User has access to this HOST - send the verification email   
 
     let hostNameWithProtocol = '';
@@ -364,7 +378,8 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
         }
     }
 
-    const verificationTokenId = crypto.randomUUID();
+    const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
+    const verificationTokenId = generateOTP();
     tableCfg = tableGetConfig('verification-tokens');
 
     try {
@@ -382,15 +397,10 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
         throw new Error('AUTH_VERIFICATION_TOKEN_CREATION_FAILED');
     }
 
-    let verificationCallbackUrl = `${hostNameWithProtocol}/login/callback/?pid=${pid}&hash=${hash}&tokenid=${verificationTokenId}&targetWindow=emailVerificationWindow`;
-    // console.log("verificationEmailSend: hostNameWithProtocol:", hostNameWithProtocol);
-    // console.log("verificationEmailSend: verificationTokenId:", verificationTokenId);
-    // console.log("verificationEmailSend: verificationCallbackUrl:", verificationCallbackUrl);
-
-    let emailBody = getConfirmPrompt('email', language)
+    let emailBody = getConfirmPrompt('codeEmail', language)
         .replace(/\|\|name\|\|/g, `${participantData.first} ${participantData.last}`)
         .replace(/\|\|location\|\|/g, location)
-        .replace(/\|\|url\|\|/g, verificationCallbackUrl);
+        .replace(/\|\|code\|\|/g, verificationTokenId);
 
     const transporter = nodemailer.createTransport({
         service: 'gmail',
@@ -438,7 +448,12 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
 
     // Validate inputs
     if (!pid || !hash || !host || !deviceFingerprint) {
-        throw new Error('verificationEmailSend(): Missing required parameters');
+        throw new Error('verificationEmailCallback(): Missing required parameters');
+    }
+
+    // Validate verification token format (should be 6 digits)
+    if (!verificationTokenId || !/^\d{6}$/.test(verificationTokenId)) {
+        throw new Error('AUTH_VERIFICATION_TOKEN_INVALID_FORMAT');
     }
 
     // Parse and validate APP_ACCESS_JSON
@@ -482,19 +497,97 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
     }
     const actionsProfile = await getActionsProfileForHost(host);
 
-    // User has access to this host, so if we can find the verification record we're good to go
+    // Check for rate limiting - look for recent failed attempts
     tableCfg = tableGetConfig('verification-tokens');
+    const recentFailedAttempts = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    const failedAttempts = recentFailedAttempts.filter((token: any) => 
+        token.pid === pid && 
+        token.deviceFingerprint === deviceFingerprint && 
+        token.failedAttempt && 
+        token.createdAt > Date.now() - (5 * 60 * 1000) // Last 5 minutes
+    );
+    
+    if (failedAttempts.length >= 5) {
+        throw new Error('AUTH_RATE_LIMIT_EXCEEDED');
+    }
 
+    // User has access to this host, so if we can find the verification record we're good to go
     const verificationToken = await getOne(tableCfg.tableName, tableCfg.pk, verificationTokenId, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
 
-    if (!verificationToken) throw new Error('AUTH_VERIFICATION_TOKEN_NOT_FOUND');
+    if (!verificationToken) {
+        // Record failed attempt
+        try {
+            await putOne(tableCfg.tableName, {
+                verificationTokenId: `failed_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                pid: pid,
+                hash: hash,
+                host: host,
+                deviceFingerprint: deviceFingerprint,
+                failedAttempt: true,
+                createdAt: Date.now(),
+                ttl: Date.now() + (10 * 60 * 1000) // 10 minutes TTL for failed attempts
+            }, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        } catch (e) {
+            console.error("verificationEmailCallback: Failed to record failed attempt:", e);
+        }
+        throw new Error('AUTH_VERIFICATION_TOKEN_NOT_FOUND');
+    }
 
-    if (verificationToken.hash !== hash) throw new Error('AUTH_VERIFICATION_TOKEN_HASH_MISMATCH');
+    if (verificationToken.hash !== hash) {
+        // Record failed attempt
+        try {
+            await putOne(tableCfg.tableName, {
+                verificationTokenId: `failed_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                pid: pid,
+                hash: hash,
+                host: host,
+                deviceFingerprint: deviceFingerprint,
+                failedAttempt: true,
+                createdAt: Date.now(),
+                ttl: Date.now() + (10 * 60 * 1000) // 10 minutes TTL for failed attempts
+            }, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        } catch (e) {
+            console.error("verificationEmailCallback: Failed to record failed attempt:", e);
+        }
+        throw new Error('AUTH_VERIFICATION_TOKEN_HASH_MISMATCH');
+    }
 
-    if (verificationToken.host !== host) throw new Error('AUTH_VERIFICATION_TOKEN_HOST_MISMATCH');
+    if (verificationToken.host !== host) {
+        // Record failed attempt
+        try {
+            await putOne(tableCfg.tableName, {
+                verificationTokenId: `failed_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                pid: pid,
+                hash: hash,
+                host: host,
+                deviceFingerprint: deviceFingerprint,
+                failedAttempt: true,
+                createdAt: Date.now(),
+                ttl: Date.now() + (10 * 60 * 1000) // 10 minutes TTL for failed attempts
+            }, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        } catch (e) {
+            console.error("verificationEmailCallback: Failed to record failed attempt:", e);
+        }
+        throw new Error('AUTH_VERIFICATION_TOKEN_HOST_MISMATCH');
+    }
 
     if (verificationToken.deviceFingerprint !== deviceFingerprint) {
         console.log("verificationEmailCallback: deviceFingerprint mismatch:", verificationToken.deviceFingerprint, deviceFingerprint);
+        // Record failed attempt
+        try {
+            await putOne(tableCfg.tableName, {
+                verificationTokenId: `failed_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                pid: pid,
+                hash: hash,
+                host: host,
+                deviceFingerprint: deviceFingerprint,
+                failedAttempt: true,
+                createdAt: Date.now(),
+                ttl: Date.now() + (10 * 60 * 1000) // 10 minutes TTL for failed attempts
+            }, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        } catch (e) {
+            console.error("verificationEmailCallback: Failed to record failed attempt:", e);
+        }
         throw new Error('AUTH_VERIFICATION_TOKEN_DEVICE_FINGERPRINT_MISMATCH');
     }
 
