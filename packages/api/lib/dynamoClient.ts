@@ -107,13 +107,17 @@ export async function listAllChunked(
   scanParams: Record<string, any> = {},
   lastEvaluatedKey?: Record<string, any>,
   limit?: number,
-  identityPoolIdOverride?: string
+  identityPoolIdOverride?: string,
+  projectionExpression?: string,
+  expressionAttributeNames?: Record<string, string>
 ) {
   const client = getDocClient(identityPoolIdOverride);
   const baseParams = {
     TableName: tableName,
     ...scanParams,
-    ...(limit && { Limit: limit })
+    ...(limit && { Limit: limit }),
+    ...(projectionExpression && { ProjectionExpression: projectionExpression }),
+    ...(expressionAttributeNames && { ExpressionAttributeNames: expressionAttributeNames })
   };
 
   const response = await client.send(

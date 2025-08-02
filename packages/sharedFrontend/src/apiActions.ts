@@ -151,6 +151,68 @@ export async function getAllTableItems(
     }
 }
 
+export async function getAllTableItemsWithProjectionExpression(
+    resource: string,
+    pid: string,
+    hash: string,
+    projectionExpression: string,
+    expressionAttributeNames?: Record<string, string>,
+    onProgress?: ProgressCallback
+): Promise<any[] | RedirectedResponse> {
+    try {
+        let accumulateItems: any[] = [];
+        let lastEvaluatedKey = null;
+        let chunkCount = 0;
+        let totalChunks = 0;
+
+        do {
+            const response = await api.post(`${API_BASE_URL}/table/${resource}/chunked`, pid, hash, {
+                limit: 100,
+                lastEvaluatedKey: lastEvaluatedKey,
+                projectionExpression: projectionExpression,
+                ...(expressionAttributeNames && { expressionAttributeNames })
+            });
+
+            if (response && response.redirected) {
+                console.log(`[API] getAllTableItemsWithProjectionExpression redirected for ${resource} - authentication required`);
+                return { redirected: true };
+            }
+
+            if (response && response.items) {
+                accumulateItems = [...accumulateItems, ...response.items];
+                chunkCount++;
+
+                // Estimate total chunks based on first chunk size
+                if (chunkCount === 1 && response.items.length === 100) {
+                    // If first chunk is full, estimate there are more chunks
+                    totalChunks = Math.ceil(accumulateItems.length / 100) + 1;
+                } else if (chunkCount === 1) {
+                    // If first chunk is not full, this might be the only chunk
+                    totalChunks = 1;
+                }
+
+                if (onProgress) {
+                    onProgress(accumulateItems.length, chunkCount, totalChunks);
+                }
+            }
+
+            lastEvaluatedKey = response?.lastEvaluatedKey;
+        } while (lastEvaluatedKey);
+
+        return accumulateItems;
+    } catch (error: any) {
+        console.error(`[API] getAllTableItemsWithProjectionExpression failed for ${resource}:`, error);
+
+        // Check if this is an authentication error and return redirected response
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log(`[API] getAllTableItemsWithProjectionExpression authentication failed for ${resource} - returning redirected response`);
+            return { redirected: true };
+        }
+
+        throw new Error(error.message || 'Failed to get all table items with projection');
+    }
+}
+
 export async function sendSQSMessage(
     messageData: SQSMessageData,
     pid: string,

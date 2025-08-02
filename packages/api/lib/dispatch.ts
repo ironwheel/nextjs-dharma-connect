@@ -30,15 +30,15 @@ async function dispatchTable(
 
   // LIST CHUNKED (POST method for chunked scanning)
   if (req.method === 'POST' && !id && req.body && req.body.limit) {
-    const { limit, lastEvaluatedKey, scanParams = {} } = req.body;
-    const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit);
+    const { limit, lastEvaluatedKey, scanParams = {}, projectionExpression, expressionAttributeNames } = req.body;
+    const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit, undefined, projectionExpression, expressionAttributeNames);
     return res.status(200).json(result);
   }
 
   // LIST CHUNKED (special case when id is "chunked")
   if (req.method === 'POST' && id === 'chunked' && req.body && req.body.limit) {
-    const { limit, lastEvaluatedKey, scanParams = {} } = req.body;
-    const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit);
+    const { limit, lastEvaluatedKey, scanParams = {}, projectionExpression, expressionAttributeNames } = req.body;
+    const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit, undefined, projectionExpression, expressionAttributeNames);
     return res.status(200).json(result);
   }
 

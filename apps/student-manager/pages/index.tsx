@@ -9,6 +9,7 @@ import 'react-toastify/dist/ReactToastify.css';
 // Import sharedFrontend utilities
 import {
     getAllTableItems,
+    getAllTableItemsWithProjectionExpression,
     updateTableItem,
     getTableItemOrNull,
     putTableItem,
@@ -33,14 +34,12 @@ interface Student {
     first: string;
     last: string;
     email: string;
-    programs: Record<string, any>;
-    practice: Record<string, any>;
-    emails: Record<string, any>;
-    offeringHistory: Record<string, any>;
     spokenLangPref?: string;
     writtenLangPref?: string;
     unsubscribe?: boolean;
     owyaaLease?: string;
+    // Note: Other fields like programs, practice, emails, offeringHistory 
+    // are not loaded by the projection expression to optimize performance
     [key: string]: any;
 }
 
@@ -163,7 +162,20 @@ const Home = () => {
                 console.log('Could not get total count, will estimate:', countError);
             }
 
-            const students = await getAllTableItems('students', pid as string, hash as string, (count, chunkNumber, totalChunks) => {
+            // Use projection expression to only load the fields we need
+            // Note: 'first' and 'last' are reserved keywords in DynamoDB, so we need to use expression attribute names
+            const projectionExpression = '#id, #first, #last, #email, #unsubscribe, #writtenLangPref, #spokenLangPref, #owyaaLease';
+            const expressionAttributeNames = {
+                '#id': 'id',
+                '#first': 'first',
+                '#last': 'last',
+                '#email': 'email',
+                '#unsubscribe': 'unsubscribe',
+                '#writtenLangPref': 'writtenLangPref',
+                '#spokenLangPref': 'spokenLangPref',
+                '#owyaaLease': 'owyaaLease'
+            };
+            const students = await getAllTableItemsWithProjectionExpression('students', pid as string, hash as string, projectionExpression, expressionAttributeNames, (count, chunkNumber, totalChunks) => {
                 setLoadingProgress(prev => ({
                     ...prev,
                     current: count,
