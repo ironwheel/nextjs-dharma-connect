@@ -509,6 +509,62 @@ const Home = () => {
         }
     };
 
+    const fetchCurrentUserLastUsedConfig = async () => {
+        try {
+            if (!pid || typeof pid !== 'string') {
+                console.log('fetchCurrentUserLastUsedConfig: No pid available');
+                return null;
+            }
+
+            const studentRecord = await getTableItemOrNull('students', pid, pid, hash as string);
+
+            // Check if we got a redirected response
+            if (studentRecord && 'redirected' in studentRecord) {
+                console.log('Student record fetch redirected - authentication required');
+                return null;
+            }
+
+            return studentRecord;
+        } catch (error) {
+            console.error('Error fetching current user student record:', error);
+            return null;
+        }
+    };
+
+    const updateUserEventDashboardLastUsedConfig = async (updates: {
+        event?: string;
+        subEvent?: string;
+        view?: string;
+    }) => {
+        try {
+            if (!pid || typeof pid !== 'string') {
+                console.log('updateUserEventDashboardLastUsedConfig: No pid available');
+                return false;
+            }
+
+            // Get current student record
+            const currentStudentRecord = await fetchCurrentUserLastUsedConfig();
+            if (!currentStudentRecord) {
+                console.log('updateUserEventDashboardLastUsedConfig: Could not fetch current student record');
+                return false;
+            }
+
+            // Update the eventDashboardLastUsedConfig
+            const updatedEventDashboardLastUsedConfig = {
+                ...currentStudentRecord.eventDashboardLastUsedConfig,
+                ...updates
+            };
+
+            // Update the student record
+            await updateTableItem('students', pid, 'eventDashboardLastUsedConfig', updatedEventDashboardLastUsedConfig, pid, hash as string);
+            console.log('User eventDashboardLastUsedConfig updated successfully:', updates);
+            return true;
+        } catch (error) {
+            console.error('Error updating user eventDashboardLastUsedConfig:', error);
+            return false;
+        }
+    };
+
     const calculateVersion = () => {
         if (typeof window !== 'undefined') {
             const hostname = window.location.hostname;
@@ -861,6 +917,16 @@ const Home = () => {
             localStorage.setItem('event', JSON.stringify(updatedEvent));
             setEvShadow(updatedEvent);
 
+            // Update user's eventDashboardLastUsedConfig with the new selection
+            try {
+                await updateUserEventDashboardLastUsedConfig({
+                    event: eventAid,
+                    subEvent: subEventKey || undefined
+                });
+            } catch (error) {
+                console.error('Error updating user eventDashboardLastUsedConfig:', error);
+            }
+
             // Rebuild the data with the new event using the new function
             try {
                 const [cl, rd] = await assembleColumnLabelsAndRowDataWithData(view || 'Joined', month, year, updatedEvent, allStudents, allPools);
@@ -995,6 +1061,16 @@ const Home = () => {
                 return;
             }
             setView(viewName);
+
+            // Update user's eventDashboardLastUsedConfig with the new view selection
+            try {
+                await updateUserEventDashboardLastUsedConfig({
+                    view: viewName
+                });
+            } catch (error) {
+                console.error('Error updating user eventDashboardLastUsedConfig:', error);
+            }
+
             try {
                 const [cl, rd] = await assembleColumnLabelsAndRowData(viewName, month, year);
                 setColumnLabels(cl);
@@ -1844,27 +1920,55 @@ const Home = () => {
                 // Set current user information after students are loaded
                 fetchCurrentUser(studentsArray);
 
-                // Set current event
-                const aidData = await fetchConfig("eventDashboardLandingAID");
-                const seData = await fetchConfig("eventDashboardLandingSubEvent");
+                // Fetch current user's student record to get their preferences
+                const currentUserStudentRecord = await fetchCurrentUserLastUsedConfig();
+                const userConfig = currentUserStudentRecord?.eventDashboardLastUsedConfig;
 
+                // Set current event based on user preferences or fallback to config
                 let currentEventToUse: Event | null = null;
-                if (aidData && seData && aidData.value && seData.value && Array.isArray(filteredEvents)) {
-                    const foundEvent = filteredEvents.find(e => e.aid === aidData.value && e.subEvents && e.subEvents[seData.value]) || null;
-                    // Set the selected sub-event in the event object for reference
-                    if (foundEvent && seData.value) {
-                        foundEvent.selectedSubEvent = seData.value;
+                let initialView = 'Joined';
+
+                if (userConfig?.event && userConfig?.subEvent && Array.isArray(filteredEvents)) {
+                    // Use user's last used event and subevent
+                    const foundEvent = filteredEvents.find(e => e.aid === userConfig.event && e.subEvents && e.subEvents[userConfig.subEvent]) || null;
+                    if (foundEvent && userConfig.subEvent) {
+                        foundEvent.selectedSubEvent = userConfig.subEvent;
+                        currentEventToUse = foundEvent;
+                        setEvShadow(foundEvent);
+                        console.log('Using user preference - Event:', userConfig.event, 'SubEvent:', userConfig.subEvent);
                     }
-                    currentEventToUse = foundEvent;
-                    setEvShadow(foundEvent);
-                } else if (filteredEvents.length > 0) {
-                    // If no config found, use the first event
-                    currentEventToUse = filteredEvents[0];
-                    setEvShadow(filteredEvents[0]);
                 }
 
-                // Set initial view
-                setView('Joined');
+                if (!currentEventToUse) {
+                    // Fallback to config-based selection
+                    const aidData = await fetchConfig("eventDashboardLandingAID");
+                    const seData = await fetchConfig("eventDashboardLandingSubEvent");
+
+                    if (aidData && seData && aidData.value && seData.value && Array.isArray(filteredEvents)) {
+                        const foundEvent = filteredEvents.find(e => e.aid === aidData.value && e.subEvents && e.subEvents[seData.value]) || null;
+                        // Set the selected sub-event in the event object for reference
+                        if (foundEvent && seData.value) {
+                            foundEvent.selectedSubEvent = seData.value;
+                        }
+                        currentEventToUse = foundEvent;
+                        setEvShadow(foundEvent);
+                        console.log('Using config fallback - Event:', aidData.value, 'SubEvent:', seData.value);
+                    } else if (filteredEvents.length > 0) {
+                        // If no config found, use the first event
+                        currentEventToUse = filteredEvents[0];
+                        setEvShadow(filteredEvents[0]);
+                        console.log('Using first available event as fallback');
+                    }
+                }
+
+                // Set initial view based on user preferences or default to 'Joined'
+                if (userConfig?.view && filteredViews.includes(userConfig.view)) {
+                    initialView = userConfig.view;
+                    console.log('Using user preference - View:', userConfig.view);
+                } else {
+                    console.log('Using default view - Joined');
+                }
+                setView(initialView);
 
                 // Ensure we have the current event set before assembling data
                 if (currentEventToUse) {
@@ -1892,8 +1996,8 @@ const Home = () => {
                     const tempAllPools = filteredPools;
 
                     try {
-                        console.log('Assembling data with event:', currentEventToUse);
-                        const [cl, rd] = await assembleColumnLabelsAndRowDataWithData('Joined', month, year, tempEvShadow, tempAllStudents, tempAllPools);
+                        console.log('Assembling data with event:', currentEventToUse, 'and view:', initialView);
+                        const [cl, rd] = await assembleColumnLabelsAndRowDataWithData(initialView, month, year, tempEvShadow, tempAllStudents, tempAllPools);
                         console.log('Assembled data - columns:', cl.length, 'rows:', rd.length);
                         setColumnLabels(cl);
                         setRowData(rd);
