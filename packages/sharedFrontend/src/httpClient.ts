@@ -55,7 +55,23 @@ async function apiFetch(
   });
 
   if (res.status === 401) {
-    // Redirect to login and return a resolved promise to prevent error bubbling
+    console.log("Front end middleware detects 401, checking for expired auth flow", res.status, res.statusText);
+
+    // Try to parse the response to check if it's an expired auth flow
+    try {
+      const errorResponse = await res.json();
+      console.log("401 Error Response:", errorResponse);
+
+      // Check if this is an expired auth flow response
+      if (errorResponse.status === 'expired-auth-flow') {
+        console.log("Detected expired auth flow, returning special status");
+        return Promise.resolve({ expiredAuthFlow: true, accessToken: errorResponse.accessToken });
+      }
+    } catch (parseError) {
+      console.log("Failed to parse 401 response as JSON:", parseError);
+    }
+
+    // Default 401 handling - redirect to login
     Router.replace(`/login?pid=${pid}&hash=${hash}`);
     return Promise.resolve({ redirected: true });
   }
