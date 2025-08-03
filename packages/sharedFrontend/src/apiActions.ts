@@ -37,6 +37,7 @@ export interface RedirectedResponse {
  * - getAllTableItems: Retrieve all items (with chunked pagination)
  * - putTableItem:    Insert or update an item by id
  * - deleteTableItem: Delete an item by id
+ * - batchGetTableItems: Retrieve multiple items by their IDs
  */
 
 export async function getTableItem(
@@ -90,6 +91,38 @@ export async function getTableItemOrNull(
         }
 
         throw new Error(error.message || 'Failed to get table item');
+    }
+}
+
+export async function batchGetTableItems(
+    resource: string,
+    ids: string[],
+    pid: string,
+    hash: string
+): Promise<any[] | RedirectedResponse> {
+    try {
+        if (!Array.isArray(ids) || ids.length === 0) {
+            return [];
+        }
+
+        const response = await api.post(`${API_BASE_URL}/table/${resource}/batch`, pid, hash, { ids });
+
+        if (response && response.redirected) {
+            console.log(`[API] batchGetTableItems redirected for ${resource} - authentication required`);
+            return { redirected: true };
+        }
+
+        return response || [];
+    } catch (error: any) {
+        console.error(`[API] batchGetTableItems failed for ${resource}:`, error);
+
+        // Check if this is an authentication error and return redirected response
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log(`[API] batchGetTableItems authentication failed for ${resource} - returning redirected response`);
+            return { redirected: true };
+        }
+
+        throw new Error(error.message || 'Failed to batch get table items');
     }
 }
 

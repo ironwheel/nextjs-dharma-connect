@@ -25,6 +25,7 @@ export const tables: TableConfig[] = [
   { resource: 'views', envVar: 'DYNAMODB_TABLE_VIEWS', pk: 'name', sk: '', ops: ['get', 'list', 'count'] },
   { resource: 'views-profiles', envVar: 'DYNAMODB_TABLE_VIEWS_PROFILES', pk: 'profile', sk: '', ops: ['get', 'list'] },
   { resource: 'app.actions', envVar: 'DYNAMODB_TABLE_APP_ACTIONS', pk: 'host', sk: '', ops: ['get'] },
+  { resource: 'eligibility-cache', envVar: 'DYNAMODB_TABLE_ELIGIBILITY_CACHE', pk: 'aid', sk: '', ops: ['get', 'put', 'list'] },
 ];
 
 /**

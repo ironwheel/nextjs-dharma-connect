@@ -2,7 +2,7 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import { tables, TableConfig } from './tableConfig';
 import { websockets, WebSocketConfig, websocketGetConfig } from './websocketConfig';
-import { listAll, listAllChunked, getOne, deleteOne, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll } from './dynamoClient';
+import { listAll, listAllChunked, getOne, deleteOne, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll, batchGetItems } from './dynamoClient';
 import { verificationEmailSend, verificationEmailCallback, createToken, getViews, getViewsWritePermission, getViewsExportCSV, getViewsHistoryPermission, getViewsEmailDisplayPermission, authGetLink, getActionsProfiles, getAuthList, getViewsProfiles, getActionsProfileForHost, getAllActionsForUser, putAuthItem } from './authUtils';
 import { serialize } from 'cookie';
 import { v4 as uuidv4 } from 'uuid';
@@ -47,6 +47,13 @@ async function dispatchTable(
     const { filterFieldName, filterFieldValue } = req.body;
     const items = await listAllFiltered(tableName, filterFieldName, filterFieldValue);
     return res.status(200).json({ items });
+  }
+
+  // BATCH GET (POST method for batch retrieval by IDs)
+  if (req.method === 'POST' && id === 'batch' && req.body && req.body.ids && Array.isArray(req.body.ids)) {
+    const { ids } = req.body;
+    const items = await batchGetItems(tableName, cfg.pk, ids);
+    return res.status(200).json(items);
   }
 
   // COUNT (POST method for counting items)

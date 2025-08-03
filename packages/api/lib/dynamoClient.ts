@@ -8,7 +8,8 @@ import {
   GetCommand,
   DeleteCommand,
   PutCommand,
-  UpdateCommand
+  UpdateCommand,
+  BatchGetCommand
 } from '@aws-sdk/lib-dynamodb';
 import { fromCognitoIdentityPool } from '@aws-sdk/credential-provider-cognito-identity';
 
@@ -314,4 +315,44 @@ export async function deleteOneWithSort(
       },
     })
   );
+}
+
+/**
+ * Batch get items by their primary keys.
+ * DynamoDB BatchGet has a limit of 100 items per request, so this function handles larger batches by chunking.
+ */
+export async function batchGetItems(
+  tableName: string,
+  pkName: string,
+  ids: string[],
+  identityPoolIdOverride?: string
+) {
+  const client = getDocClient(identityPoolIdOverride);
+  const items: any[] = [];
+
+  // DynamoDB BatchGet has a limit of 100 items per request
+  const BATCH_SIZE = 100;
+
+  for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+    const batch = ids.slice(i, i + BATCH_SIZE);
+
+    const requestItems: Record<string, any> = {
+      [tableName]: {
+        Keys: batch.map(id => ({ [pkName]: id }))
+      }
+    };
+
+    const response = await client.send(new BatchGetCommand({ RequestItems: requestItems }));
+
+    if (response.Responses && response.Responses[tableName]) {
+      items.push(...response.Responses[tableName]);
+    }
+
+    // Handle unprocessed keys (though this shouldn't happen with our batch size)
+    if (response.UnprocessedKeys && Object.keys(response.UnprocessedKeys).length > 0) {
+      console.warn('Some items were not processed in batch get:', response.UnprocessedKeys);
+    }
+  }
+
+  return items;
 }
