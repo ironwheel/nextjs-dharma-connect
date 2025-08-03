@@ -785,7 +785,6 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     }
 
     // Check for existing session which is only created after email verification
-    // and has a TTL of AUTH_SESSION_TTL_SECONDS
     // Sessions records use a primary key of pid-deviceFingerprint
     tableCfg = tableGetConfig('sessions');
     const session = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
@@ -805,13 +804,11 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     }
 
     // No existing session - begin verification process
-    // For now, provide an access token
-    // with a limited set of actions. The login page will begin the
-    // verification process if the user consents which will call
-    // sendVerificationEmail. The link in the verification email will
-    // send the user to the login/callback page where, if the user
-    // consents the verification process will conclude and a new
-    // session record for the current pid+fingerprint will be created
+    // Verification operates with a token that supports a limited set of actions.
+    // The login page will begin the verification process. If the user consents, the login will call
+    // verificationEmailSend() which will send a verification email containing a code to the user. 
+    // The user will copy the code and paste it into the login page. If the login code is confirmed,
+    // verificationEmailCallback() will create a new session record for the current pid+fingerprint.
 
     // Delete any existing verification tokens for this user
     tableCfg = tableGetConfig('verification-tokens');
@@ -822,7 +819,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
 
     const verificationAccessToken = createToken(pid, deviceFingerprint, verificationActionList);
     return {
-        status: 'needs-verification',
+        status: verificationActionList.includes(operation) ? 'expired-auth-flow' : 'needs-verification',
         accessToken: verificationAccessToken,
     };
 }

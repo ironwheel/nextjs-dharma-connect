@@ -25,34 +25,8 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
     const [attempts, setAttempts] = useState(0);
     const [isResending, setIsResending] = useState(false);
     const [isRedirecting, setIsRedirecting] = useState(false);
+    const [expiredAuthFlow, setExpiredAuthFlow] = useState(false);
     const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
-
-    // Name the window when component mounts (when user needs email verification)
-    useEffect(() => {
-        if (typeof window !== 'undefined') {
-            window.name = 'emailVerificationWindow';
-            // Store flags in both sessionStorage and localStorage to identify this window
-            sessionStorage.setItem('emailVerificationWindow', 'true');
-            localStorage.setItem('emailVerificationWindow', 'true');
-            console.log('AuthVerification: Window named and storage flags set');
-
-            // Add message listener to handle verification callbacks from other windows
-            const handleMessage = (event: MessageEvent) => {
-                console.log('AuthVerification: Received message:', event.data);
-                if (event.data && event.data.type === 'VERIFICATION_CALLBACK') {
-                    console.log('AuthVerification: Received verification callback, redirecting to:', event.data.redirectUrl);
-                    window.location.href = event.data.redirectUrl;
-                }
-            };
-
-            window.addEventListener('message', handleMessage);
-
-            // Cleanup function
-            return () => {
-                window.removeEventListener('message', handleMessage);
-            };
-        }
-    }, []);
 
     // Global paste handler for when code input is visible
     useEffect(() => {
@@ -102,9 +76,18 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
 
         setIsSending(true);
         setError(null); // Clear previous errors
+        setExpiredAuthFlow(false); // Clear expired auth flow state
         try {
             const clientIp = await publicIpv4().catch(() => null);
-            await api.post(`/api/auth/verificationEmailSend/${pid}`, pid, hash, clientIp);
+            const result = await api.post(`/api/auth/verificationEmailSend/${pid}`, pid, hash, clientIp);
+
+            // Check if this is an expired auth flow response
+            if (result && result.expiredAuthFlow) {
+                setExpiredAuthFlow(true);
+                setAttempts(0);
+                return;
+            }
+
             setIsSent(true);
             setAttempts(0); // Reset attempts when new code is sent
         } catch (err: any) {
@@ -240,10 +223,20 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
 
         setIsResending(true);
         setError(null);
+        setExpiredAuthFlow(false); // Clear expired auth flow state
 
         try {
             const clientIp = await publicIpv4().catch(() => null);
-            await api.post(`/api/auth/verificationEmailSend/${pid}`, pid, hash, clientIp);
+            const result = await api.post(`/api/auth/verificationEmailSend/${pid}`, pid, hash, clientIp);
+
+            // Check if this is an expired auth flow response
+            if (result && result.expiredAuthFlow) {
+                setExpiredAuthFlow(true);
+                setCode(['', '', '', '', '', '']); // Clear the code inputs
+                setAttempts(0); // Reset attempts
+                return;
+            }
+
             setCode(['', '', '', '', '', '']); // Clear the code inputs
             setAttempts(0); // Reset attempts
         } catch (err: any) {
@@ -333,6 +326,24 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
 
                 {!isSent && !isRedirecting && (
                     <>
+                        {expiredAuthFlow && (
+                            <div
+                                className="mt-6 p-4 bg-yellow-100 text-yellow-700 rounded-lg shadow-inner mb-6"
+                                style={{
+                                    marginTop: '1.5rem',
+                                    padding: '1rem',
+                                    backgroundColor: '#fef3c7',
+                                    color: '#a16207',
+                                    borderRadius: '0.5rem',
+                                    boxShadow: 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.06)',
+                                    marginBottom: '1.5rem'
+                                }}
+                            >
+                                <p className="font-semibold" style={{ fontWeight: '600' }}>Your login session expired.</p>
+                                <p className="text-sm mt-1" style={{ fontSize: '0.875rem', marginTop: '0.25rem' }}>Please press Send Verification Email again to send a new code.</p>
+                            </div>
+                        )}
+
                         <p className="text-gray-600 mb-6" style={{ color: '#4b5563' }}>
                             To securely log in, we need to verify your identity. Please click the button below to send a verification email to your registered address.
                             You will receive an email containing a 6-digit code to complete your login.

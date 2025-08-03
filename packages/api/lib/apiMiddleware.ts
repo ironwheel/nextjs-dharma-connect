@@ -7,6 +7,17 @@ import cors from 'cors';
 import csurf from 'csurf';
 import { checkAccess } from './authUtils';
 
+// Get access token duration from environment and calculate cookie max age (5 seconds less)
+const ACCESS_TOKEN_DURATION_SECONDS = process.env.ACCESS_TOKEN_DURATION;
+if (!ACCESS_TOKEN_DURATION_SECONDS) {
+  throw new Error('ACCESS_TOKEN_DURATION environment variable is required');
+}
+const ACCESS_TOKEN_DURATION_NUM = parseInt(ACCESS_TOKEN_DURATION_SECONDS, 10);
+if (isNaN(ACCESS_TOKEN_DURATION_NUM) || ACCESS_TOKEN_DURATION_NUM <= 0) {
+  throw new Error(`Invalid ACCESS_TOKEN_DURATION value: ${ACCESS_TOKEN_DURATION_SECONDS}`);
+}
+const COOKIE_MAX_AGE = ACCESS_TOKEN_DURATION_NUM - 5; // 5 seconds less than token duration
+
 // Parse allowed origins from environment
 let allowedOrigins: string[] = [];
 // console.log('API CORS_ORIGIN_LIST:', process.env.CORS_ORIGIN_LIST);
@@ -51,7 +62,7 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
         // console.log("API MIDDLEWARE: COOKIES:", req.cookies);
         const checkResult = await checkAccess(req.headers['x-user-id'] as string, req.headers['x-verification-hash'] as string, req.headers['x-host'] as string, req.headers['x-device-fingerprint'] as string, operation, req.cookies['token']);
         console.log("checkResult:", checkResult.status);
-        if ((checkResult.status === 'authenticated' || checkResult.status === 'needs-verification') && checkResult.accessToken) {
+        if ((checkResult.status === 'authenticated' || checkResult.status === 'needs-verification' || checkResult.status === 'expired-auth-flow') && checkResult.accessToken) {
           // We have a new access token to set in cookie
           // Browser cookie rules require secure if sameSite is none
           // So for local development we use strict
@@ -62,9 +73,8 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
             sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
             domain: process.env.NODE_ENV === 'production' ? process.env.MONOREPO_PARENT_DOMAIN : req.headers['x-host'] as string,
             path: '/',
-            maxAge: 15 * 60, // 15 minutes
+            maxAge: COOKIE_MAX_AGE, // 5 seconds less than access token duration
           });
-          // console.log("SETTING COOKIE:", cookieStr);
           res.setHeader('Set-Cookie', cookieStr);
         }
         if (checkResult.status === 'already-authenticated') {
@@ -72,7 +82,11 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
           return;
         }
         if (checkResult.status !== 'authenticated') {
-          res.status(401).json({ error: 'Unauthorized' });
+          res.status(401).json({
+            error: 'Unauthorized',
+            status: checkResult.status,
+            accessToken: checkResult.accessToken
+          });
           return;
         }
       }
