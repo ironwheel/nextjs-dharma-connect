@@ -12,6 +12,8 @@ import {
     getAllTableItems,
     updateTableItem,
     getTableItemOrNull,
+    batchGetTableItems,
+    putTableItem,
     authGetViews,
     authGetViewsWritePermission,
     authGetViewsExportCSV,
@@ -337,6 +339,11 @@ const Home = () => {
     const [currentUserName, setCurrentUserName] = useState<string>("Unknown");
     const [version, setVersion] = useState<string>("dev");
     const [emailDisplayPermission, setEmailDisplayPermission] = useState<boolean>(false);
+    // Add new state for currentEligibleStudents
+    const [currentEligibleStudents, setCurrentEligibleStudents] = useState<Student[]>([]);
+    // Add state for eligibility caching system
+    const [allStudentsLoaded, setAllStudentsLoaded] = useState<boolean>(false);
+    const [loadingEligibilityCache, setLoadingEligibilityCache] = useState<boolean>(false);
     let demoMode = false;
 
     // WebSocket connection
@@ -344,6 +351,44 @@ const Home = () => {
 
     // Component-specific helper functions
     const forceRender = useCallback(() => setForceRenderValue(v => v + 1), []);
+
+    // Add function to calculate eligible students for a given event
+    const calculateEligibleStudents = useCallback((currentEvent: Event, students: Student[], pools: Pool[]): Student[] => {
+        const eligibleStudents: Student[] = [];
+
+        if (currentEvent && Array.isArray(students)) {
+            students.forEach((student, index) => {
+                if (student.unsubscribe) {
+                    return;
+                }
+                if (currentEvent.config?.pool && Array.isArray(pools) && pools.length > 0) {
+                    const isEligible = checkEligibility(currentEvent.config.pool, student, currentEvent.aid, pools);
+                    if (isEligible) {
+                        eligibleStudents.push(student);
+                    }
+                }
+            });
+            eligibleStudents.sort(compareNames);
+        }
+
+        return eligibleStudents;
+    }, []);
+
+    // Function to create eligibility cache record
+    const createEligibilityCacheRecord = async (eventAid: string, eligibleStudentIds: string[]) => {
+        try {
+            const cacheRecord = {
+                aid: eventAid,
+                createdAt: new Date().toISOString(),
+                studentIdList: eligibleStudentIds
+            };
+
+            // Use putTableItem to create the entire record
+            await putTableItem('eligibility-cache', eventAid, cacheRecord, pid as string, hash as string);
+        } catch (error) {
+            console.error('Error creating eligibility cache record:', error);
+        }
+    };
 
     // Helper function to mask email based on email display permission
     const maskEmail = (email: string, emailDisplayValue: boolean = emailDisplayPermission): string => {
@@ -365,7 +410,7 @@ const Home = () => {
                     setLoadingProgress(prev => ({
                         ...prev,
                         total: totalCount,
-                        message: `Loading students...`
+                        message: `Loading all students...`
                     }));
                 }
             } catch (countError) {
@@ -377,7 +422,7 @@ const Home = () => {
                     ...prev,
                     current: count,
                     total: totalCount || Math.max(count, prev.total), // Use actual total if available
-                    message: `Loading students...`
+                    message: `Loading all students...`
                 }));
             });
 
@@ -387,10 +432,139 @@ const Home = () => {
                 return [];
             }
 
+            setAllStudentsLoaded(true);
             return students as Student[];
         } catch (error) {
             console.error('Error fetching students:', error);
             toast.error('Failed to fetch students');
+            return [];
+        }
+    };
+
+    // Function to load students for a specific event using eligibility cache
+    const loadStudentsForEvent = async (eventAid: string, eventsArray?: Event[], poolsArray?: Pool[]): Promise<Student[]> => {
+        try {
+            setLoadingEligibilityCache(true);
+            setLoadingProgress(prev => ({
+                ...prev,
+                current: 0,
+                total: 0,
+                message: `Loading eligibility cache for ${eventAid}...`
+            }));
+
+            // First, check if we have an eligibility cache record for this event
+            const cacheRecord = await getTableItemOrNull('eligibility-cache', eventAid, pid as string, hash as string);
+
+            if (cacheRecord && !('redirected' in cacheRecord) && cacheRecord.studentIdList) {
+                // Check which students we already have in memory
+                const existingStudentIds = new Set(allStudents.map(s => s.id));
+                const missingStudentIds = cacheRecord.studentIdList.filter(id => !existingStudentIds.has(id));
+
+                if (missingStudentIds.length === 0) {
+                    setLoadingEligibilityCache(false);
+                    return allStudents.filter(student => cacheRecord.studentIdList.includes(student.id));
+                }
+                setLoadingProgress(prev => ({
+                    ...prev,
+                    current: 0,
+                    total: missingStudentIds.length,
+                    message: `Loading ${missingStudentIds.length} students from cache...`
+                }));
+
+                // Load missing students in batches
+                const newStudents: Student[] = [];
+                const BATCH_SIZE = 100;
+
+                for (let i = 0; i < missingStudentIds.length; i += BATCH_SIZE) {
+                    const batch = missingStudentIds.slice(i, i + BATCH_SIZE);
+                    const batchStudents = await batchGetTableItems('students', batch, pid as string, hash as string);
+
+                    if (batchStudents && !('redirected' in batchStudents)) {
+                        newStudents.push(...batchStudents);
+                        setLoadingProgress(prev => ({
+                            ...prev,
+                            current: Math.min(i + BATCH_SIZE, missingStudentIds.length),
+                            total: missingStudentIds.length,
+                            message: `Loading ${missingStudentIds.length} students from cache...`
+                        }));
+                    }
+                }
+
+                // Add new students to the existing list, avoiding duplicates
+                const updatedStudents = [...allStudents];
+                for (const newStudent of newStudents) {
+                    if (!existingStudentIds.has(newStudent.id)) {
+                        updatedStudents.push(newStudent);
+                    }
+                }
+                setAllStudents(updatedStudents);
+
+                // Ensure current user is always included in the returned students
+                const finalStudents = updatedStudents.filter(student => cacheRecord.studentIdList.includes(student.id));
+                const currentUserIncluded = finalStudents.some(student => student.id === pid);
+
+                if (!currentUserIncluded && pid) {
+                    const currentUser = updatedStudents.find(student => student.id === pid);
+                    if (currentUser) {
+                        finalStudents.push(currentUser);
+                    }
+                }
+
+                setLoadingEligibilityCache(false);
+                return finalStudents;
+            } else {
+                // If no cache exists and we haven't loaded all students yet, load them
+                let studentsForEligibility = allStudents;
+                if (!allStudentsLoaded) {
+                    setLoadingProgress(prev => ({
+                        ...prev,
+                        current: 0,
+                        total: 0,
+                        message: `Loading all students for eligibility calculation...`
+                    }));
+
+                    const allStudentsData = await fetchStudents();
+                    if (allStudentsData.length === 0) {
+                        setLoadingEligibilityCache(false);
+                        return [];
+                    }
+                    // Update the allStudents state with the loaded data
+                    setAllStudents(allStudentsData);
+                    studentsForEligibility = allStudentsData;
+                }
+
+                // Calculate eligibility for the event
+                const eventsToSearch = eventsArray || allEvents;
+                const event = eventsToSearch.find(e => e.aid === eventAid);
+                if (!event) {
+                    console.error(`Event ${eventAid} not found in events:`, eventsToSearch.map(e => e.aid));
+                    setLoadingEligibilityCache(false);
+                    return [];
+                }
+
+                const eligibleStudents = calculateEligibleStudents(event, studentsForEligibility, poolsArray || allPools);
+
+                // Ensure current user is always included in the returned students
+                const finalEligibleStudents = [...eligibleStudents];
+                const currentUserIncluded = finalEligibleStudents.some(student => student.id === pid);
+
+                if (!currentUserIncluded && pid) {
+                    const currentUser = studentsForEligibility.find(student => student.id === pid);
+                    if (currentUser) {
+                        finalEligibleStudents.push(currentUser);
+                    }
+                }
+
+                // Create cache record for future use (only include originally eligible students)
+                const eligibleStudentIds = eligibleStudents.map(s => s.id);
+                await createEligibilityCacheRecord(eventAid, eligibleStudentIds);
+
+                setLoadingEligibilityCache(false);
+                return finalEligibleStudents;
+            }
+        } catch (error) {
+            console.error('Error loading students for event:', error);
+            setLoadingEligibilityCache(false);
             return [];
         }
     };
@@ -592,21 +766,6 @@ const Home = () => {
             toast.error('Failed to update field');
             return false;
         }
-    };
-
-    // Helper functions
-    const addEligible = (student: Student) => {
-        if (student.unsubscribe) {
-            return;
-        }
-        if (evShadow && evShadow.config?.pool && Array.isArray(allPools) && allPools.length > 0) {
-            const isEligible = checkEligibility(evShadow.config.pool, student, evShadow.aid, allPools);
-            if (isEligible) {
-                // Don't modify module-level variable, just return eligibility status
-                return true;
-            }
-        }
-        return false;
     };
 
     const compareNames = (a: Student, b: Student) => {
@@ -916,6 +1075,13 @@ const Home = () => {
 
             localStorage.setItem('event', JSON.stringify(updatedEvent));
             setEvShadow(updatedEvent);
+
+            // Load students for the new event using the caching system
+            const eligibleStudents = await loadStudentsForEvent(updatedEvent.aid, allEvents, allPools);
+            setCurrentEligibleStudents(eligibleStudents);
+
+            // Update current user name after loading students for the new event
+            fetchCurrentUser(eligibleStudents);
 
             // Update user's eventDashboardLastUsedConfig with the new selection
             try {
@@ -1660,23 +1826,12 @@ const Home = () => {
         const conditions = (viewConfig as any).viewConditions || viewConfig.conditions || [];
         setCurrentViewConditions(conditions);
 
+        // Use cached eligible students instead of recalculating
+
         // Filter students: view conditions, then search (eligibility already handled)
-        const filteredStudents = allStudents.filter(student => {
+        const filteredStudents = currentEligibleStudents.filter(student => {
             if (!evShadow) {
                 return false;
-            }
-
-            // Skip unsubscribed students
-            if (student.unsubscribe) {
-                return false;
-            }
-
-            // Check eligibility (this should be pre-filtered but we'll double-check)
-            if (evShadow.config?.pool && Array.isArray(allPools) && allPools.length > 0) {
-                const isEligible = checkEligibility(evShadow.config.pool, student, evShadow.aid, allPools);
-                if (!isEligible) {
-                    return false;
-                }
             }
 
             const conditionsResult = studentMatchesViewConditions(student, conditions, evShadow, allPools);
@@ -1696,21 +1851,15 @@ const Home = () => {
         });
 
         const rowValues: any[] = [];
-        console.log('Generating row data...');
         if (evShadow) {
-            console.log('Processing', filteredStudents.length, 'filtered students');
             for (const student of filteredStudents) {
                 const row = getRowValuesForStudent(student, columnLabels, columnMetaData, evShadow, allPools, emailDisplayPermission);
                 if (row !== null) {
                     rowValues.push(row);
                 }
             }
-            console.log('Generated', rowValues.length, 'rows');
-        } else {
-            console.log('No evShadow available for row generation');
         }
         setItemCount(rowValues.length);
-        console.log('Final result - columns:', columnLabels.length, 'rows:', rowValues.length);
         return [columnLabels, rowValues];
     };
 
@@ -1720,13 +1869,9 @@ const Home = () => {
         yearValue: string,
         currentEvent: Event,
         students: Student[],
-        pools: Pool[]
+        pools: Pool[],
+        eligibleStudents?: Student[]
     ) => {
-        console.log('assembleColumnLabelsAndRowDataWithData called with:', { viewName, monthValue, yearValue });
-        console.log('Current event:', currentEvent);
-        console.log('Students length:', students.length);
-        console.log('Pools length:', pools.length);
-
         setViewError(null); // Reset error
         let effectiveViewName = viewName;
         // Check for translation in currentEvent.config.dashboardViews
@@ -1736,7 +1881,6 @@ const Home = () => {
                 effectiveViewName = translation;
             }
         }
-        console.log('Effective view name:', effectiveViewName);
 
         // Fetch the view definition
         const viewConfig = await fetchView(effectiveViewName);
@@ -1784,32 +1928,11 @@ const Home = () => {
         const conditions = (viewConfig as any).viewConditions || viewConfig.conditions || [];
         setCurrentViewConditions(conditions);
 
-        // Filter students: eligibility, then view conditions, then search
-        const currentEligibleStudents: Student[] = [];
-        console.log('Calculating eligibility for students...');
-        if (currentEvent && Array.isArray(students)) {
-            console.log('Processing', students.length, 'students');
-            students.forEach((student, index) => {
-                if (student.unsubscribe) {
-                    return;
-                }
-                if (currentEvent.config?.pool && Array.isArray(pools) && pools.length > 0) {
-                    const isEligible = checkEligibility(currentEvent.config.pool, student, currentEvent.aid, pools);
-                    if (isEligible) {
-                        currentEligibleStudents.push(student);
-                    }
-                }
-                if (index % 100 === 0) {
-                    console.log(`Processed ${index} students, ${currentEligibleStudents.length} eligible so far`);
-                }
-            });
-            currentEligibleStudents.sort(compareNames);
-            console.log('Final eligible students count:', currentEligibleStudents.length);
-        } else {
-            console.log('No currentEvent or students not available');
-        }
+        // Use passed eligible students or cached eligible students
+        const studentsToUse = eligibleStudents || currentEligibleStudents;
 
-        const filteredStudents = currentEligibleStudents.filter(student => {
+        // Filter students: view conditions, then search (eligibility already handled)
+        const filteredStudents = studentsToUse.filter(student => {
             if (!currentEvent) {
                 return false;
             }
@@ -1831,21 +1954,15 @@ const Home = () => {
         });
 
         const rowValues: any[] = [];
-        console.log('Generating row data...');
         if (currentEvent) {
-            console.log('Processing', filteredStudents.length, 'filtered students');
             for (const student of filteredStudents) {
                 const row = getRowValuesForStudent(student, columnLabels, columnMetaData, currentEvent, pools, emailDisplayPermission);
                 if (row !== null) {
                     rowValues.push(row);
                 }
             }
-            console.log('Generated', rowValues.length, 'rows');
-        } else {
-            console.log('No currentEvent available for row generation');
         }
         setItemCount(rowValues.length);
-        console.log('Final result - columns:', columnLabels.length, 'rows:', rowValues.length);
         return [columnLabels, rowValues];
     };
 
@@ -1898,31 +2015,26 @@ const Home = () => {
                 // Calculate version
                 calculateVersion();
 
-                // Fetch all data in parallel
-                const [students, events, pools, viewsData] = await Promise.all([
-                    fetchStudents(),
+                // Fetch events, pools, and views in parallel (but not students yet)
+                const [events, pools, viewsData] = await Promise.all([
                     fetchEvents(),
                     fetchPools(),
                     fetchViews()
                 ]);
 
                 // Defensive coding: ensure we have arrays before processing
-                const studentsArray = Array.isArray(students) ? students : [];
                 const filteredEvents = Array.isArray(events) ? events.filter(e => !e.hide) : [];
                 const filteredPools = Array.isArray(pools) ? pools : [];
                 const filteredViews = Array.isArray(viewsData) ? viewsData : [];
 
-                setAllStudents(studentsArray);
                 setAllEvents(filteredEvents);
                 setAllPools(filteredPools);
                 setViews(filteredViews);
 
-                // Set current user information after students are loaded
-                fetchCurrentUser(studentsArray);
-
                 // Fetch current user's student record to get their preferences
                 const currentUserStudentRecord = await fetchCurrentUserLastUsedConfig();
                 const userConfig = currentUserStudentRecord?.eventDashboardLastUsedConfig;
+                console.log('User config from database:', userConfig);
 
                 // Set current event based on user preferences or fallback to config
                 let currentEventToUse: Event | null = null;
@@ -1930,12 +2042,16 @@ const Home = () => {
 
                 if (userConfig?.event && userConfig?.subEvent && Array.isArray(filteredEvents)) {
                     // Use user's last used event and subevent
+                    console.log('Looking for user preference - Event:', userConfig.event, 'SubEvent:', userConfig.subEvent);
+                    console.log('Available events:', filteredEvents.map(e => ({ aid: e.aid, subEvents: Object.keys(e.subEvents || {}) })));
+
                     const foundEvent = filteredEvents.find(e => e.aid === userConfig.event && e.subEvents && e.subEvents[userConfig.subEvent]) || null;
                     if (foundEvent && userConfig.subEvent) {
                         foundEvent.selectedSubEvent = userConfig.subEvent;
                         currentEventToUse = foundEvent;
-                        setEvShadow(foundEvent);
                         console.log('Using user preference - Event:', userConfig.event, 'SubEvent:', userConfig.subEvent);
+                    } else {
+                        console.log('User preference event/subEvent not found in available events');
                     }
                 }
 
@@ -1951,12 +2067,10 @@ const Home = () => {
                             foundEvent.selectedSubEvent = seData.value;
                         }
                         currentEventToUse = foundEvent;
-                        setEvShadow(foundEvent);
                         console.log('Using config fallback - Event:', aidData.value, 'SubEvent:', seData.value);
                     } else if (filteredEvents.length > 0) {
                         // If no config found, use the first event
                         currentEventToUse = filteredEvents[0];
-                        setEvShadow(filteredEvents[0]);
                         console.log('Using first available event as fallback');
                     }
                 }
@@ -1970,35 +2084,36 @@ const Home = () => {
                 }
                 setView(initialView);
 
-                // Ensure we have the current event set before assembling data
+                // Ensure we have the current event set before loading students
                 if (currentEventToUse) {
                     console.log('Setting evShadow:', currentEventToUse);
-                    console.log('Students loaded:', studentsArray.length);
                     console.log('Pools loaded:', filteredPools.length);
                     console.log('Events loaded:', filteredEvents.length);
 
                     // Check if we have the required data
-                    if (studentsArray.length === 0) {
-                        console.log('No students loaded, cannot assemble data');
-                        setLoaded(true);
-                        return;
-                    }
-
                     if (filteredPools.length === 0) {
                         console.log('No pools loaded, cannot assemble data');
                         setLoaded(true);
                         return;
                     }
 
-                    // Temporarily set the state variables for the function call
+                    // Set the state first to ensure it's available for other components
+                    setEvShadow(currentEventToUse);
+
+                    // Load students for the initial event using the caching system
+                    const eligibleStudents = await loadStudentsForEvent(currentEventToUse.aid, filteredEvents, filteredPools);
+                    setCurrentEligibleStudents(eligibleStudents);
+
+                    // Set current user information after students are loaded (use eligible students since current user is guaranteed to be included)
+                    fetchCurrentUser(eligibleStudents);
+
+                    // Use the same event object for consistency
                     const tempEvShadow = currentEventToUse;
-                    const tempAllStudents = studentsArray;
+                    const tempAllStudents = allStudents;
                     const tempAllPools = filteredPools;
 
                     try {
-                        console.log('Assembling data with event:', currentEventToUse, 'and view:', initialView);
-                        const [cl, rd] = await assembleColumnLabelsAndRowDataWithData(initialView, month, year, tempEvShadow, tempAllStudents, tempAllPools);
-                        console.log('Assembled data - columns:', cl.length, 'rows:', rd.length);
+                        const [cl, rd] = await assembleColumnLabelsAndRowDataWithData(initialView, month, year, tempEvShadow, tempAllStudents, tempAllPools, eligibleStudents);
                         setColumnLabels(cl);
                         setRowData(rd);
                     } catch (error) {
@@ -2107,7 +2222,7 @@ const Home = () => {
     }
 
     // Loading display
-    if (!loaded || evShadow === null) {
+    if (!loaded || evShadow === null || loadingEligibilityCache) {
         const progress = loadingProgress.total > 0
             ? Math.min(100, Math.round((loadingProgress.current / loadingProgress.total) * 100))
             : 0;
