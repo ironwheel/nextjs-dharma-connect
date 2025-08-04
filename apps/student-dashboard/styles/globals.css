@@ -106,9 +106,75 @@ a {
     text-decoration: none;
 }
 
+/* Style links in content areas to be clearly clickable */
+div[class*="text-"] a,
+div[class*="bg-"] a,
+div[class*="border-"] a,
+div a {
+    color: #3b82f6 !important;
+    text-decoration: underline !important;
+    text-underline-offset: 2px;
+    transition: color 0.2s ease;
+}
+
+div[class*="text-"] a:hover,
+div[class*="bg-"] a:hover,
+div[class*="border-"] a:hover,
+div a:hover {
+    color: #60a5fa !important;
+    text-decoration: underline !important;
+}
+
+/* Ensure links in dangerouslySetInnerHTML content are styled */
+div[class*="text-"] a[href],
+div[class*="bg-"] a[href],
+div[class*="border-"] a[href],
+div a[href] {
+    color: #3b82f6 !important;
+    text-decoration: underline !important;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+div[class*="text-"] a[href]:hover,
+div[class*="bg-"] a[href]:hover,
+div[class*="border-"] a[href]:hover,
+div a[href]:hover {
+    color: #60a5fa !important;
+    text-decoration: underline !important;
+}
+
 @media (prefers-color-scheme: dark) {
     html {
         color-scheme: dark;
+    }
+}
+
+/* Ensure consistent width between navbar and content */
+.max-w-7xl {
+    max-width: 80rem;
+}
+
+/* Modern Navbar Styles - ensuring width matches content */
+.sticky.top-0.z-50 {
+    max-width: 80rem;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 1rem;
+    padding-right: 1rem;
+}
+
+@media (min-width: 640px) {
+    .sticky.top-0.z-50 {
+        padding-left: 1.5rem;
+        padding-right: 1.5rem;
+    }
+}
+
+@media (min-width: 1024px) {
+    .sticky.top-0.z-50 {
+        padding-left: 2rem;
+        padding-right: 2rem;
     }
 }
 
@@ -118,7 +184,7 @@ a {
     background-color: transparent;
 }
 
-/* Ensure Bootstrap containers don't interfere with background */
+/* Ensure containers don't interfere with background */
 .container {
     background-color: transparent !important;
 }
@@ -872,4 +938,35 @@ a {
 .student-manager-tooltip div {
     color: #000000 !important;
     background-color: #ffffff !important;
+}
+
+/* Schedule content styling */
+.schedule-content h2 {
+    font-weight: bold !important;
+    font-size: 1.5rem !important;
+    margin-top: 2rem !important;
+    margin-bottom: 1rem !important;
+    color: white !important;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    line-height: 1.4 !important;
+}
+
+.schedule-content h2:first-child {
+    margin-top: 0 !important;
+}
+
+.schedule-content ul {
+    margin-bottom: 1.5rem !important;
+    padding-left: 1.5rem !important;
+}
+
+.schedule-content li {
+    margin-bottom: 0.5rem !important;
+    color: white !important;
+    line-height: 1.6 !important;
+}
+
+.schedule-content strong {
+    color: white !important;
+    font-weight: 600 !important;
 }

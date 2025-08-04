@@ -1,11 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from 'next/router';
 import { createPortal } from 'react-dom';
-import Container from "react-bootstrap/Container";
-import Button from "react-bootstrap/Button";
-import Row from "react-bootstrap/Row";
-import Form from "react-bootstrap/Form";
-import Card from 'react-bootstrap/Card';
 import ReactSrcDocIframe from 'react-srcdoc-iframe';
 import { Viewer, Worker } from '@react-pdf-viewer/core';
 import { defaultLayoutPlugin } from '@react-pdf-viewer/default-layout';
@@ -13,6 +8,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faGlobe, faPlus, faMinus, faTimes, faPlusCircle, faMinusCircle, faUser, faCheck, faXmark } from "@fortawesome/free-solid-svg-icons";
 import Pusher from 'pusher-js';
 import FingerprintJS from '@fingerprintjs/fingerprintjs';
+import { toast } from 'react-toastify';
 
 // Import shared components and functions
 import {
@@ -32,11 +28,16 @@ import {
     promptLookupHTMLWithArgsAIDSpecific,
     dbgout,
     checkEligibility,
-    getFingerprint
+    getFingerprint,
+    LanguageProvider,
+    useLanguage
 } from 'sharedFrontend';
 
 // Import API actions
 import { api, getAllTableItems, getTableItem, updateTableItem } from 'sharedFrontend';
+
+// Import MantraCount component
+import MantraCount from '../components/MantraCount';
 
 // Global variables
 let prompts: any[] = [];
@@ -53,7 +54,7 @@ let displayControl: { [key: string]: boolean } = {
     'control': true,
     'event': false,
     'liturgy': false,
-    'video': true,
+    'video': false,
     'mantra': false,
     'schedule': false
 };
@@ -78,7 +79,7 @@ const IFrame = ({ children, ...props }: any) => {
     );
 };
 
-const Home = () => {
+const HomeContent = () => {
     const [loaded, setLoaded] = useState(false);
     const [loadStatus, setLoadStatus] = useState("Loading...");
     const [name, setName] = useState("Unknown");
@@ -88,11 +89,19 @@ const Home = () => {
     const [kmCache, setKMCache] = useState(null);
     const [value, setValue] = useState(0);
     const [error, setError] = useState<string | null>(null);
+    const [showMantraCount, setShowMantraCount] = useState(false);
+    const [showMantraControl, setShowMantraControl] = useState(false);
     const router = useRouter();
     const { pid, language, showcase, hash } = router.query;
     const REGCOMPLETE_WEBHOOK_CHANNEL = 'regcomplete';
+    const { initializeLanguage, currentLanguage } = useLanguage();
 
     event.aid = 'dashboard';
+
+    // Force re-render when language changes
+    useEffect(() => {
+        setValue(prev => prev + 1);
+    }, [currentLanguage]);
 
     useEffect(() => {
         if (!router.isReady) return;
@@ -108,9 +117,8 @@ const Home = () => {
                     return { data: [], error: 'Authentication required' };
                 }
 
-                // Filter prompts by aid
-                const filteredPrompts = prompts.filter((prompt: any) => prompt.aid === laid);
-                return { data: filteredPrompts };
+                // Return all prompts without filtering
+                return { data: prompts };
             } catch (error) {
                 console.error('Error fetching prompts:', error);
                 return { data: [], error: error instanceof Error ? error.message : 'Unknown error fetching prompts' };
@@ -131,6 +139,22 @@ const Home = () => {
             } catch (error) {
                 console.error('Error fetching pools:', error);
                 return { data: [], error: error instanceof Error ? error.message : 'Unknown error fetching pools' };
+            }
+        };
+
+        const fetchConfig = async (configName: string) => {
+            try {
+                const config = await getTableItem('config', configName, pid as string, hash as string);
+
+                if (config && 'redirected' in config) {
+                    console.log(`Config fetch redirected for ${configName} - authentication required`);
+                    return null;
+                }
+
+                return config;
+            } catch (error) {
+                console.error('Error fetching config:', error);
+                return null;
             }
         };
 
@@ -242,6 +266,11 @@ const Home = () => {
                     return;
                 }
 
+                // Initialize language from student preference
+                if (student.writtenLangPref) {
+                    initializeLanguage(student.writtenLangPref);
+                }
+
                 // Set default email preferences
                 if (typeof student.emailPreferences == 'undefined') {
                     student.emailPreferences = { videoNotify: true, offering: true, localPractice: false };
@@ -268,6 +297,12 @@ const Home = () => {
                 if (typeof student.kmCache !== 'undefined') {
                     setKMCache(student.kmCache);
                 }
+
+                // Check mantra control eligibility
+                const mantraCountPoolConfig = await fetchConfig('mantraCountPool');
+                const shouldShowMantraControl = !mantraCountPoolConfig ||
+                    (mantraCountPoolConfig.value && checkEligibility(mantraCountPoolConfig.value, student, 'mantra', pools));
+                setShowMantraControl(shouldShowMantraControl);
 
                 // Update media list
                 updateMediaList();
@@ -336,7 +371,7 @@ const Home = () => {
             subEventDisplayName: null,
             date: '2222-22-22',
             complete: false,
-            bg: 'primary',
+            bg: 'gray',
             indent: 0
         });
 
@@ -348,7 +383,7 @@ const Home = () => {
             subEventDisplayName: null,
             date: '2222-22-22',
             complete: true,
-            bg: 'primary',
+            bg: 'gray',
             indent: 0
         });
 
@@ -360,7 +395,7 @@ const Home = () => {
             subEventDisplayName: null,
             date: '2222-22-22',
             complete: true,
-            bg: 'success',
+            bg: 'gray',
             indent: 0
         });
 
@@ -372,7 +407,7 @@ const Home = () => {
             subEventDisplayName: null,
             date: '2222-22-22',
             complete: true,
-            bg: 'primary',
+            bg: 'gray',
             indent: 0
         });
 
@@ -384,7 +419,7 @@ const Home = () => {
             subEventDisplayName: null,
             date: '2222-22-22',
             complete: true,
-            bg: 'primary',
+            bg: 'gray',
             indent: 0
         });
 
@@ -441,7 +476,7 @@ const Home = () => {
                     date: '2222-22-22',
                     complete: true,
                     parentEvent: parentEvent,
-                    bg: 'success',
+                    bg: 'gray',
                     indent: 16
                 });
 
@@ -513,7 +548,7 @@ const Home = () => {
                         }
                         videoListByYear[year].push({
                             key: parentEvent.name + subEventName,
-                            tag: `video-year-${year}`,
+                            tag: 'video',
                             eventname: eventName,
                             subEventDisplayName: subEventDisplayName,
                             subEventName: subEventName,
@@ -545,6 +580,16 @@ const Home = () => {
         liturgyList.sort(compareDates);
         videoList.sort(compareDates);
         Object.values(videoListByYear).forEach(list => list.sort(compareDates));
+
+        // Initialize year-specific controls dynamically
+        Object.keys(videoListByYear).forEach(year => {
+            const controlKey = `video-year-${year}`;
+            if (!(controlKey in displayControl)) {
+                displayControl[controlKey] = false;
+            }
+        });
+
+
     };
 
     // Continue with the rest of the component...
@@ -891,16 +936,17 @@ const Home = () => {
 
                     const videoControlBubble = () => {
                         return (
-                            <>
-                                <Card style={{ cursor: "pointer", width: "640px" }} border="light" text={'white'} bg={'success'} onClick={onControlClickVideo} >
-                                    <Card.Body>
-                                        <Card.Title>
-                                            <FontAwesomeIcon size="lg" icon={displayVideoControl[videoId] ? faMinus : faPlus}></FontAwesomeIcon>
-                                            {displayVideoControl[videoId] ? promptLookup("videoClose") : promptLookup("videoOpen")}
-                                        </Card.Title>
-                                    </Card.Body>
-                                </Card>
-                            </>
+                            <div
+                                className="cursor-pointer w-full max-w-2xl bg-gray-700 border border-gray-600 text-white rounded-lg p-4 mb-4 transition-all duration-200 hover:bg-gray-600 hover:shadow-lg"
+                                onClick={onControlClickVideo}
+                            >
+                                <div className="flex items-center space-x-2">
+                                    <FontAwesomeIcon icon={displayVideoControl[videoId] ? faMinus : faPlus} className="text-lg" />
+                                    <h3 className="text-lg font-semibold">
+                                        {displayVideoControl[videoId] ? promptLookup("videoClose") : promptLookup("videoOpen")}
+                                    </h3>
+                                </div>
+                            </div>
                         );
                     };
 
@@ -1116,11 +1162,9 @@ const Home = () => {
                 return null;
             }
             return (
-                <>
-                    <Card.Footer >
-                        <div dangerouslySetInnerHTML={descriptionText} />
-                    </Card.Footer>
-                </>
+                <div className="text-gray-300 text-sm">
+                    <div dangerouslySetInnerHTML={descriptionText} />
+                </div>
             );
         };
 
@@ -1149,6 +1193,12 @@ const Home = () => {
         };
 
         const onControlClick = () => {
+            // Special handling for mantra control
+            if (el.control === 'mantra') {
+                setShowMantraCount(true);
+                return;
+            }
+
             displayControl[el.control] = !displayControl[el.control];
             forceRender();
         };
@@ -1159,10 +1209,9 @@ const Home = () => {
                     return null;
                 }
                 return (
-                    <>
+                    <div className="mb-4">
                         <div dangerouslySetInnerHTML={promptLookupHTML('liturgiesIntro')} />
-                        <br></br>
-                    </>
+                    </div>
                 );
             };
 
@@ -1171,45 +1220,46 @@ const Home = () => {
                     return null;
                 }
                 return (
-                    <>
+                    <div className="mb-4">
                         <div dangerouslySetInnerHTML={promptLookupHTML(el.parentEvent.showcaseIntro)} />
-                        <br></br>
-                    </>
+                    </div>
                 );
             };
 
             if (el.tag === 'control-video') {
-                if (!displayControl['video']) {
-                    return null;
-                }
+                const bgColorClass = el.bg === 'primary' ? 'bg-blue-600' : el.bg === 'gray' ? 'bg-gray-700' : 'bg-gray-700';
+                const borderColorClass = el.bg === 'primary' ? 'border-blue-500' : el.bg === 'gray' ? 'border-gray-600' : 'border-gray-600';
+                const hoverBgClass = el.bg === 'primary' ? 'hover:bg-blue-700' : el.bg === 'gray' ? 'hover:bg-gray-600' : 'hover:bg-gray-600';
+
                 return (
                     <>
-                        <Card style={{ cursor: "pointer", marginLeft: el.indent }} border="light" text={'white'} bg={'success'} onClick={onControlClick}  >
-                            <Card.Body>
-                                <Card.Title>
-                                    <FontAwesomeIcon size="lg" icon={displayControl[el.control] ? faMinus : faPlus}></FontAwesomeIcon>
-                                    {promptLookup(el.eventname)}
-                                </Card.Title>
-                            </Card.Body>
-                        </Card>
-                        <br></br>
-                        {LiturgiesIntro()}
-                        {ShowcaseIntro()}
+                        <div
+                            className={`cursor-pointer ${bgColorClass} border ${borderColorClass} text-white rounded-lg p-4 mb-4 transition-all duration-200 ${hoverBgClass} hover:shadow-lg ${el.indent ? `ml-${el.indent}` : ''}`}
+                            onClick={onControlClick}
+                        >
+                            <div className="flex items-center space-x-2">
+                                <FontAwesomeIcon icon={displayControl[el.control] ? faMinus : faPlus} className="text-lg" />
+                                <h3 className="text-lg font-semibold">{promptLookup(el.eventname)}</h3>
+                            </div>
+                        </div>
                     </>
                 );
             }
 
+            const bgColorClass = el.bg === 'primary' ? 'bg-blue-600' : 'bg-gray-700';
+            const borderColorClass = el.bg === 'primary' ? 'border-blue-500' : 'border-gray-600';
+
             return (
                 <>
-                    <Card border="dark" text={'white'} bg={el.bg} onClick={onControlClick} style={{ cursor: "pointer", marginLeft: el.indent }} >
-                        <Card.Body>
-                            <Card.Title>
-                                <FontAwesomeIcon size="lg" icon={displayControl[el.control] ? faMinus : faPlus}></FontAwesomeIcon>
-                                {promptLookup(el.eventname)}
-                            </Card.Title>
-                        </Card.Body>
-                    </Card>
-                    <br></br>
+                    <div
+                        className={`cursor-pointer ${bgColorClass} border ${borderColorClass} text-white rounded-lg p-4 mb-4 transition-all duration-200 hover:shadow-lg ${el.indent ? `ml-${el.indent}` : ''}`}
+                        onClick={onControlClick}
+                    >
+                        <div className="flex items-center space-x-2">
+                            <FontAwesomeIcon icon={displayControl[el.control] ? faMinus : faPlus} className="text-lg" />
+                            <h3 className="text-lg font-semibold">{promptLookup(el.eventname)}</h3>
+                        </div>
+                    </div>
                     {LiturgiesIntro()}
                     {ShowcaseIntro()}
                 </>
@@ -1260,18 +1310,27 @@ const Home = () => {
 
         return (
             <>
-                <Card border="dark" text={'dark'} bg={'light'} >
-                    <Card.Body>
-                        <Card.Title>{eventDate()}{el.eventname}{subEventName()}</Card.Title>
-                        {conditionalIntroduction()}
-                        {mediaElement(el)}
-                    </Card.Body>
-                    {conditionalDescription()}
-                    <Card.Footer >
+                <div className="bg-gray-900 border border-gray-700 text-white rounded-lg overflow-hidden mb-6 shadow-lg">
+                    <div className="p-6">
+                        <h3 className="text-xl font-semibold mb-4">
+                            {eventDate()}{el.eventname}{subEventName()}
+                        </h3>
+                        <div className="mb-4">
+                            {conditionalIntroduction()}
+                        </div>
+                        <div className="mb-4">
+                            {mediaElement(el)}
+                        </div>
+                    </div>
+                    {conditionalDescription() && (
+                        <div className="px-6 pb-4">
+                            {conditionalDescription()}
+                        </div>
+                    )}
+                    <div className="px-6 py-4 bg-gray-800 border-t border-gray-700">
                         <div dangerouslySetInnerHTML={promptLookupHTMLWithArgs('emailForEvent', el.parentEvent.coordEmail, el.parentEvent.coordEmail)} />
-                    </Card.Footer>
-                </Card>
-                <br></br>
+                    </div>
+                </div>
             </>
         );
     };
@@ -1282,15 +1341,12 @@ const Home = () => {
         }
         return (
             <>
-                <div dangerouslySetInnerHTML={promptLookupHTML('schedule')} />
+                <div className="schedule-content" dangerouslySetInnerHTML={promptLookupHTML('schedule')} />
             </>
         );
     };
 
     const displayVideoList = (list: any[]) => {
-        if (!displayControl['video']) {
-            return null;
-        }
         return (
             <>
                 {list.map((el) => mediaElementWrapper(el))}
@@ -1298,109 +1354,215 @@ const Home = () => {
         );
     };
 
+    const VideoControlWithYears = () => {
+        const mainVideoControl = videoList.find(el => el.control === 'video');
+        if (!mainVideoControl) return null;
+
+        // Create year-specific controls dynamically
+        const yearControls = Object.keys(videoListByYear)
+            .sort((a, b) => parseInt(b) - parseInt(a)) // Sort in reverse year order (newest first)
+            .map(year => ({
+                key: `video-year-${year}`,
+                eventname: `controlTitleVideos${year}`,
+                tag: 'control-video',
+                control: `video-year-${year}`,
+                subEventDisplayName: null,
+                date: '2222-22-22',
+                complete: true,
+                bg: 'gray',
+                indent: 16,
+                year: year
+            }));
+
+        return (
+            <>
+                {mediaElementWrapper(mainVideoControl)}
+                {displayControl['video'] && (
+                    <>
+                        {showcaseMasterList.map((showcaseList) => displayVideoList(showcaseList))}
+                        {yearControls.map((yearControl) => (
+                            <div key={yearControl.key}>
+                                {mediaElementWrapper(yearControl)}
+                                {displayControl[yearControl.control] && (
+                                    <div className="ml-8">
+                                        {displayVideoList(videoListByYear[yearControl.year])}
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </>
+                )}
+            </>
+        );
+    };
+
     const MediaList = () => {
+
         return (
             <>
                 {eventList.map((el) => mediaElementWrapper(el))}
                 {liturgyList.length > 1 ? liturgyList.map((el) => mediaElementWrapper(el)) : null}
-                {videoList.map((el) => mediaElementWrapper(el))}
-                {showcaseMasterList.map((showcaseList) => displayVideoList(showcaseList))}
-                {Object.entries(videoListByYear).map(([year, list]) => displayVideoList(list))}
+                <VideoControlWithYears />
                 {mediaElementWrapper(scheduleList[0])}
                 {Schedule()}
-                {mediaElementWrapper(mantraList[0])}
+                {showMantraControl && mantraList[0] && mediaElementWrapper(mantraList[0])}
             </>
         );
     };
 
     const EMailPreferences = () => {
-        const [videoNotify, setVideoNotify] = useState(student.emailPreferences?.videoNotify || true);
-        const [offering, setOffering] = useState(student.emailPreferences?.offering || true);
-        const [localPractice, setLocalPractice] = useState(student.emailPreferences?.localPractice || false);
+        const [videoNotify, setVideoNotify] = useState(true);
+        const [offering, setOffering] = useState(true);
+        const [localPractice, setLocalPractice] = useState(false);
 
-        const writestudentemailpreferences = async (lpid: string, lstudent: any) => {
-            const body = { 'student': lstudent };
-            const response = await api.post(`/api/student/?op=emailwrite&pid=${lpid}`, pid as string, hash as string, body);
-            return response;
+        // Update state when student data changes
+        useEffect(() => {
+            if (student.emailPreferences) {
+                setVideoNotify(student.emailPreferences.videoNotify ?? true);
+                setOffering(student.emailPreferences.offering ?? true);
+                setLocalPractice(student.emailPreferences.localPractice ?? false);
+            }
+        }, [student.emailPreferences]);
+
+        const updateStudentField = async (studentId: string, fieldName: string, fieldValue: any) => {
+            try {
+                await updateTableItem('students', studentId, fieldName, fieldValue, pid as string, hash as string);
+                toast.success('Email preference updated successfully');
+                return true;
+            } catch (error) {
+                console.error('Error updating email preference:', error);
+                toast.error('Failed to update email preference');
+                return false;
+            }
         };
 
-        const handleEMailPreferences = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const handleEMailPreferences = async (e: React.ChangeEvent<HTMLInputElement>) => {
             if (!student.emailPreferences) {
                 student.emailPreferences = {};
             }
-            student.emailPreferences[e.target.name] = e.target.checked;
-            writestudentemailpreferences(pid as string, student);
+            const fieldName = `emailPreferences.${e.target.name}`;
+            const fieldValue = e.target.checked;
+
+            // Update the local state immediately for responsive UI
+            student.emailPreferences[e.target.name] = fieldValue;
+
+            // Update the state variables
             if (e.target.name === 'videoNotify') {
-                setVideoNotify(e.target.checked);
+                setVideoNotify(fieldValue);
             } else if (e.target.name === 'offering') {
-                setOffering(e.target.checked);
+                setOffering(fieldValue);
             } else if (e.target.name === 'localPractice') {
-                setLocalPractice(e.target.checked);
+                setLocalPractice(fieldValue);
             }
+
+            // Update the database
+            await updateStudentField(pid as string, fieldName, fieldValue);
         };
 
         return (
-            <>
-                <div dangerouslySetInnerHTML={promptLookupHTML('emailPreferences')} />
-                <Form.Group as={Row} controlId="EMailPreferences">
-                    <Form.Label column lg={10}>
-                        <Form.Check autoFocus={false} inline onChange={handleEMailPreferences} checked={videoNotify} name={'videoNotify'} label={promptLookup("emailPreferencesVideoNotify")} type={'checkbox'} id={"checkbox-VN"} />
-                        <Form.Check autoFocus={false} inline onChange={handleEMailPreferences} checked={offering} name={'offering'} label={promptLookup("emailPreferencesOffering")} type={'checkbox'} id={"checkbox-Offering"} />
-                        <Form.Check autoFocus={false} inline onChange={handleEMailPreferences} checked={localPractice} name={'localPractice'} label={promptLookup("emailPreferencesLocalPractice")} type={'checkbox'} id={"checkbox-LP"} />
-                    </Form.Label>
-                </Form.Group>
-                <br></br>
-            </>
+            <div className="bg-black/50 border border-white/20 rounded-lg p-6 mb-6">
+                <div className="mb-4" dangerouslySetInnerHTML={promptLookupHTML('emailPreferences')} />
+                <div className="space-y-3">
+                    <label className="flex items-center space-x-3 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={videoNotify}
+                            onChange={handleEMailPreferences}
+                            name="videoNotify"
+                            className="w-4 h-4 text-yellow-500 bg-black border-white/30 rounded focus:ring-yellow-500 focus:ring-2"
+                        />
+                        <span className="text-white">{promptLookup("emailPreferencesVideoNotify")}</span>
+                    </label>
+                    <label className="flex items-center space-x-3 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={offering}
+                            onChange={handleEMailPreferences}
+                            name="offering"
+                            className="w-4 h-4 text-yellow-500 bg-black border-white/30 rounded focus:ring-yellow-500 focus:ring-2"
+                        />
+                        <span className="text-white">{promptLookup("emailPreferencesOffering")}</span>
+                    </label>
+                    <label className="flex items-center space-x-3 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={localPractice}
+                            onChange={handleEMailPreferences}
+                            name="localPractice"
+                            className="w-4 h-4 text-yellow-500 bg-black border-white/30 rounded focus:ring-yellow-500 focus:ring-2"
+                        />
+                        <span className="text-white">{promptLookup("emailPreferencesLocalPractice")}</span>
+                    </label>
+                </div>
+            </div>
         );
     };
 
     const mediaDashboard = () => (
         <>
-            <br></br>
-            <b>{name}</b><br></br>
-            <b>{email}</b><br></br>
-            <KMStatus /><br></br>
-            <div dangerouslySetInnerHTML={promptLookupHTML('msg0')} />
-            <div dangerouslySetInnerHTML={promptLookupHTML('msg1')} />
-            <div dangerouslySetInnerHTML={promptLookupHTML('msg2')} />
-            <div dangerouslySetInnerHTML={promptLookupHTML('msg3')} />
-            <br></br>
+            <div className="mb-6">
+                <div className="text-2xl font-bold text-white mb-2">{name}</div>
+                <div className="text-lg font-semibold text-gray-300 mb-4">{email}</div>
+                <div className="mb-4">
+                    <KMStatus />
+                </div>
+                <div className="space-y-2 text-gray-300">
+                    <div dangerouslySetInnerHTML={promptLookupHTML('msg0')} />
+                    <div dangerouslySetInnerHTML={promptLookupHTML('msg1')} />
+                    <div dangerouslySetInnerHTML={promptLookupHTML('msg2')} />
+                    <div dangerouslySetInnerHTML={promptLookupHTML('msg3')} />
+                </div>
+            </div>
             <MediaList />
             <EMailPreferences />
-            <br></br>
+            <div className="mb-6"></div>
         </>
     );
 
     if (!loaded) {
         return (
-            <Container>
-                <br></br>
-                <b><div id="load-status">{loadStatus}</div></b>
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="mb-4">
+                    <div className="text-lg font-bold text-white" id="load-status">{loadStatus}</div>
+                </div>
                 {error && (
-                    <div style={{
-                        backgroundColor: '#f8d7da',
-                        color: '#721c24',
-                        padding: '15px',
-                        marginTop: '15px',
-                        border: '1px solid #f5c6cb',
-                        borderRadius: '4px'
-                    }}>
+                    <div className="bg-red-900/20 border border-red-500/30 text-red-300 p-4 rounded-lg mt-4">
                         <strong>Error Details:</strong><br />
                         {error}
                     </div>
                 )}
-            </Container>
+            </div>
         );
     }
 
     return (
         <>
-            <TopNavBar updateParent={forceRender} />
-            <Container>
-                {mediaDashboard()}
-            </Container>
-            <br></br>
+            {showMantraCount ? (
+                <MantraCount
+                    studentId={student.id || pid as string}
+                    pid={pid as string}
+                    hash={hash as string}
+                    student={student}
+                    onClose={() => setShowMantraCount(false)}
+                />
+            ) : (
+                <>
+                    <TopNavBar title={promptLookup('title')} />
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                        {mediaDashboard()}
+                    </div>
+                    <div className="mb-8"></div>
+                </>
+            )}
         </>
+    );
+};
+
+const Home = () => {
+    return (
+        <LanguageProvider>
+            <HomeContent />
+        </LanguageProvider>
     );
 };
 

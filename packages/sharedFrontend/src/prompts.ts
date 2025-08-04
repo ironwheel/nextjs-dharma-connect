@@ -48,6 +48,13 @@ export const setEvent = (newEvent: Event) => {
     event = newEvent;
 };
 
+// Function to update language preference
+export const updateLanguage = (newLanguage: string) => {
+    if (student) {
+        student.writtenLangPref = newLanguage;
+    }
+};
+
 // Debug functions
 const dbgOut = () => {
     if (typeof student.debug === 'undefined') {
