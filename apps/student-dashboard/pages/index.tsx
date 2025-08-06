@@ -33,7 +33,7 @@ import {
     useLanguage,
     // New cache system imports
     setPromptCache,
-    setTier1PromptsLoaded,
+    setTier1Loaded,
     setTier2Loaded,
     setCurrentLanguage,
     promptLookupCache,
@@ -103,7 +103,7 @@ const HomeContent = () => {
     const [showMantraCount, setShowMantraCount] = useState(false);
     const [showMantraControl, setShowMantraControl] = useState(false);
     const [tier2PromptsLoaded, setTier2PromptsLoaded] = useState(false);
-    const [tier1Loaded, setTier1PromptsLoaded] = useState(false);
+    const [tier1Loaded, setTier1Loaded] = useState(false);
     const [lastLanguage, setLastLanguage] = useState<string>('');
     const router = useRouter();
     const { pid, language, showcase, hash } = router.query;
@@ -119,7 +119,7 @@ const HomeContent = () => {
 
         setLoaded(false);
         setTier2PromptsLoaded(false);
-        setTier1PromptsLoaded(false);
+        setTier1Loaded(false);
         setPrompts({});
 
         // Load Tier 1 prompts for new language
@@ -127,7 +127,7 @@ const HomeContent = () => {
         if (!tier1Response.error) {
             promptsAccumuator = tier1Response.data;
             setPrompts(tier1Response.data);
-            setTier1PromptsLoaded(true);
+            setTier1Loaded(true);
             await loadTier2PromptsForLanguage(language, promptsAccumuator);
             setLoaded(true);
         } else {
@@ -398,7 +398,7 @@ const HomeContent = () => {
 
                 promptsAccumuator = tier1Response.data;
                 setPrompts(tier1Response.data);
-                setTier1PromptsLoaded(true);
+                setTier1Loaded(true);
 
                 // Set language preference
                 if (typeof language !== 'undefined') {
@@ -1155,6 +1155,14 @@ const HomeContent = () => {
 
                 const ConditionalVideoFrame = (videoId: string, videoFrame: string, password: string) => {
                     const onControlClickVideo = () => {
+                        // Close all other video controls first
+                        Object.keys(displayVideoControl).forEach(controlKey => {
+                            if (controlKey !== videoId) {
+                                displayVideoControl[controlKey] = false;
+                            }
+                        });
+
+                        // Toggle the clicked video control
                         displayVideoControl[videoId] = !displayVideoControl[videoId];
                         forceRender();
                     };
@@ -1423,6 +1431,14 @@ const HomeContent = () => {
                 return;
             }
 
+            // Close all other controls first
+            Object.keys(displayControl).forEach(controlKey => {
+                if (controlKey !== el.control) {
+                    displayControl[controlKey] = false;
+                }
+            });
+
+            // Toggle the clicked control
             displayControl[el.control] = !displayControl[el.control];
             forceRender();
         };
@@ -1725,8 +1741,10 @@ const HomeContent = () => {
     const mediaDashboard = () => (
         <>
             <div className="mb-6">
-                <div className="text-2xl font-bold text-white mb-2">{name}</div>
-                <div className="text-lg font-semibold text-gray-300 mb-4">{email}</div>
+                <div className="flex items-center justify-between mb-2">
+                    <div className="text-2xl font-bold text-white">{name}</div>
+                    <div className="text-lg font-semibold text-gray-300">{email}</div>
+                </div>
                 <div className="space-y-2 text-gray-300">
                     <div dangerouslySetInnerHTML={promptLookupHTML('msg3')} />
                 </div>
@@ -1749,8 +1767,10 @@ const HomeContent = () => {
     if (!loaded) {
         return (
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 mb-4 shadow-lg">
-                    <div className="text-xl font-bold text-white" id="load-status">{loadStatus}</div>
+                <div className="sticky top-0 z-50 bg-gray-900 border border-gray-700 rounded-lg p-4 mb-4 flex items-center justify-between shadow-lg">
+                    <div className="flex items-center">
+                        <div className="text-xl font-bold text-white" id="load-status">{loadStatus}</div>
+                    </div>
                 </div>
                 {error && (
                     <div className="bg-red-900/20 border border-red-500/30 text-red-300 p-4 rounded-lg mt-4">
