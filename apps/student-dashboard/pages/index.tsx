@@ -30,17 +30,28 @@ import {
     checkEligibility,
     getFingerprint,
     LanguageProvider,
-    useLanguage
+    useLanguage,
+    // New cache system imports
+    setPromptCache,
+    setTier1Loaded,
+    setTier2Loaded,
+    setCurrentLanguage,
+    promptLookupCache,
+    promptLookupCacheAIDSpecific,
+    promptLookupHTMLCache,
+    promptLookupHTMLCacheAIDSpecific,
+    promptLookupHTMLWithArgsCache,
+    promptLookupHTMLWithArgsCacheAIDSpecific,
+    processPromptCacheResults
 } from 'sharedFrontend';
 
 // Import API actions
-import { api, getAllTableItems, getTableItem, updateTableItem } from 'sharedFrontend';
+import { api, getAllTableItems, getAllTableItemsFiltered, getTableItem, updateTableItem, queryGetTableItems } from 'sharedFrontend';
 
 // Import MantraCount component
 import MantraCount from '../components/MantraCount';
 
 // Global variables
-let prompts: any[] = [];
 let events: any[] = [];
 let pools: any[] = [];
 let eventList: any[] = [];
@@ -91,10 +102,15 @@ const HomeContent = () => {
     const [error, setError] = useState<string | null>(null);
     const [showMantraCount, setShowMantraCount] = useState(false);
     const [showMantraControl, setShowMantraControl] = useState(false);
+    const [tier2PromptsLoaded, setTier2PromptsLoaded] = useState(false);
+    const [tier1Loaded, setTier1Loaded] = useState(false);
+    const [lastLanguage, setLastLanguage] = useState<string>('');
     const router = useRouter();
     const { pid, language, showcase, hash } = router.query;
     const REGCOMPLETE_WEBHOOK_CHANNEL = 'regcomplete';
-    const { initializeLanguage, currentLanguage } = useLanguage();
+    const { initializeLanguage, currentLanguage, setLanguage: originalSetLanguage } = useLanguage();
+
+
 
     event.aid = 'dashboard';
 
@@ -103,25 +119,69 @@ const HomeContent = () => {
         setValue(prev => prev + 1);
     }, [currentLanguage]);
 
+    // Update media list when tier 2 prompts are loaded
+    useEffect(() => {
+        if (tier2PromptsLoaded) {
+            updateMediaList();
+        }
+    }, [tier2PromptsLoaded]);
+
+    // Watch for language changes and trigger prompt reload
+    useEffect(() => {
+        if (currentLanguage && lastLanguage && currentLanguage !== lastLanguage && tier1Loaded) {
+            console.log('Language changed from', lastLanguage, 'to', currentLanguage, '- triggering reload');
+            // We'll handle the reload in the main useEffect
+            setLastLanguage(currentLanguage);
+        } else if (currentLanguage && !lastLanguage) {
+            setLastLanguage(currentLanguage);
+        }
+    }, [currentLanguage, lastLanguage, tier1Loaded]);
+
+
+
     useEffect(() => {
         if (!router.isReady) return;
 
         // API functions using standardized table operations
-        const fetchPrompts = async (laid: string) => {
+        const fetchTier1Prompts = async (language: string) => {
             try {
-                const prompts = await getAllTableItems('prompts', pid as string, hash as string);
+                const promptKey = `1#${language}#`;
+                const results = await queryGetTableItems('sd-prompts-cache', 'dashboard', promptKey, pid as string, hash as string);
+
+                console.log("fetchTier1Prompts: results:", results);
 
                 // Check if we got a redirected response
-                if (prompts && 'redirected' in prompts) {
-                    console.log('Prompts fetch redirected - authentication required');
-                    return { data: [], error: 'Authentication required' };
+                if (results && 'redirected' in results) {
+                    console.log('Tier 1 prompts fetch redirected - authentication required');
+                    return { data: {}, error: 'Authentication required' };
                 }
 
-                // Return all prompts without filtering
-                return { data: prompts };
+                // Process the results
+                const processedResults = processPromptCacheResults(results);
+                return { data: processedResults };
             } catch (error) {
-                console.error('Error fetching prompts:', error);
-                return { data: [], error: error instanceof Error ? error.message : 'Unknown error fetching prompts' };
+                console.error('Error fetching tier 1 prompts:', error);
+                return { data: {}, error: error instanceof Error ? error.message : 'Unknown error fetching tier 1 prompts' };
+            }
+        };
+
+        const fetchTier2Prompts = async (eventCodes: string, language: string) => {
+            try {
+                const promptKey = `2#${language}#`;
+                const results = await queryGetTableItems('sd-prompts-cache', eventCodes, promptKey, pid as string, hash as string);
+
+                // Check if we got a redirected response
+                if (results && 'redirected' in results) {
+                    console.log('Tier 2 prompts fetch redirected - authentication required');
+                    return { data: {}, error: 'Authentication required' };
+                }
+
+                // Process the results and merge with existing cache
+                const processedResults = processPromptCacheResults(results);
+                return { data: processedResults };
+            } catch (error) {
+                console.error('Error fetching tier 2 prompts:', error);
+                return { data: {}, error: error instanceof Error ? error.message : 'Unknown error fetching tier 2 prompts' };
             }
         };
 
@@ -217,17 +277,34 @@ const HomeContent = () => {
 
         // Initialize data loading
         const initializeData = async () => {
+
+            let promptsAccumuator: Record<string, Record<string, Record<string, string>>> = {};
+
+            console.log("PROMPTs accumulator zeroed");
+
             try {
-                // Get prompts
-                const gpResponse = await fetchPrompts(event.aid);
-                if (gpResponse.error) {
-                    console.error('Error fetching prompts:', gpResponse.error);
-                    setError("PROMPTS FETCH ERROR: " + gpResponse.error);
+                // Set language preference
+                if (typeof language !== 'undefined') {
+                    student.writtenLangPref = language;
+                }
+
+                // Initialize language from student preference or default
+                const currentLanguage = student.writtenLangPref || 'English';
+                setCurrentLanguage(currentLanguage);
+
+                // Load tier 1 prompts first (dashboard prompts in current language)
+                const tier1Response = await fetchTier1Prompts(currentLanguage);
+                if (tier1Response.error) {
+                    console.error('Error fetching tier 1 prompts:', tier1Response.error);
+                    setError("TIER 1 PROMPTS FETCH ERROR: " + tier1Response.error);
                     setLoadStatus("Error loading data. Please check your authentication.");
                     return;
                 }
-                prompts = gpResponse.data;
-                setPrompts(prompts);
+
+                promptsAccumuator = tier1Response.data;
+                console.log("initializeData: promptsAccumuator:", promptsAccumuator);
+                setPrompts(tier1Response.data);
+                setTier1Loaded(true);
 
                 // Set language preference
                 if (typeof language !== 'undefined') {
@@ -253,6 +330,126 @@ const HomeContent = () => {
                     return;
                 }
                 events = geResponse.data;
+
+                // Lazy load tier 2 prompts for all eligible events
+                const reloadPromptsForLanguage = async (language: string) => {
+                    console.log('Reloading prompts for language:', language);
+
+                    // Reset prompts accumulator
+                    let promptsAccumuator: Record<string, Record<string, Record<string, string>>> = {};
+
+                    // Load Tier 1 prompts for new language
+                    const tier1Response = await fetchTier1Prompts(language);
+                    if (!tier1Response.error) {
+                        promptsAccumuator = tier1Response.data;
+                        setPrompts(tier1Response.data);
+                        setTier1Loaded(true);
+                        console.log('Tier 1 prompts reloaded for language:', language);
+
+                        // Load Tier 2 prompts for new language
+                        await loadTier2PromptsForLanguage(language, promptsAccumuator);
+                    } else {
+                        console.error('Failed to reload tier 1 prompts:', tier1Response.error);
+                    }
+                };
+
+                const loadTier2PromptsForLanguage = async (language: string, promptsAccumuator: Record<string, Record<string, Record<string, string>>>) => {
+                    try {
+                        // Collect all event codes from eligible events
+                        const eventCodes: string[] = [];
+                        for (const parentEvent of events) {
+                            if (typeof parentEvent.subEvents !== 'undefined' &&
+                                checkEligibility(parentEvent.config.pool, student, parentEvent.aid, pools)) {
+                                if (parentEvent.aid === 'vr20251001') {
+                                    console.log("loadTier2PromptsForLanguage: VR20251001: PUSHING:", parentEvent.aid);
+                                }
+                                eventCodes.push(parentEvent.aid);
+                            }
+                        }
+
+                        if (eventCodes.length > 0) {
+                            const eventCodesString = eventCodes.join(',');
+
+                            const tier2Response = await fetchTier2Prompts(eventCodesString, language);
+                            if (!tier2Response.error) {
+                                const currentPrompts = promptsAccumuator || {};
+
+                                // Deep merge tier 2 prompts with existing prompts
+                                const combinedPrompts = { ...currentPrompts };
+                                for (const [eventCode, promptNames] of Object.entries(tier2Response.data)) {
+                                    if (!combinedPrompts[eventCode]) {
+                                        combinedPrompts[eventCode] = {};
+                                    }
+                                    for (const [promptName, languages] of Object.entries(promptNames)) {
+                                        if (!combinedPrompts[eventCode][promptName]) {
+                                            combinedPrompts[eventCode][promptName] = {};
+                                        }
+                                        // Merge languages, tier 2 takes precedence for overlapping languages
+                                        combinedPrompts[eventCode][promptName] = {
+                                            ...combinedPrompts[eventCode][promptName],
+                                            ...languages
+                                        };
+                                    }
+                                }
+
+                                setPrompts(combinedPrompts);
+                                setTier2Loaded(true);
+                            } else {
+                                console.warn('Failed to reload tier 2 prompts:', tier2Response.error);
+                            }
+                        }
+                    } catch (error) {
+                        console.warn('Error reloading tier 2 prompts:', error);
+                    }
+                };
+
+                const loadTier2Prompts = async () => {
+                    try {
+                        // Collect all event codes from eligible events
+                        const eventCodes: string[] = [];
+                        for (const parentEvent of events) {
+                            if (typeof parentEvent.subEvents !== 'undefined' &&
+                                checkEligibility(parentEvent.config.pool, student, parentEvent.aid, pools)) {
+                                eventCodes.push(parentEvent.aid);
+                            }
+                        }
+
+                        if (eventCodes.length > 0) {
+                            const eventCodesString = eventCodes.join(',');
+
+                            const tier2Response = await fetchTier2Prompts(eventCodesString, currentLanguage);
+                            if (!tier2Response.error) {
+
+                                const currentPrompts = promptsAccumuator || {};
+                                console.log("loadTier2Prompts: accumulator:", promptsAccumuator['dashboard']);
+
+                                // Deep merge tier 2 prompts with existing prompts
+                                const combinedPrompts = { ...currentPrompts };
+                                for (const [eventCode, promptNames] of Object.entries(tier2Response.data)) {
+                                    if (!combinedPrompts[eventCode]) {
+                                        combinedPrompts[eventCode] = {};
+                                    }
+                                    for (const [promptName, languages] of Object.entries(promptNames)) {
+                                        if (!combinedPrompts[eventCode][promptName]) {
+                                            combinedPrompts[eventCode][promptName] = {};
+                                        }
+                                        // Merge languages, tier 2 takes precedence for overlapping languages
+                                        combinedPrompts[eventCode][promptName] = {
+                                            ...combinedPrompts[eventCode][promptName],
+                                            ...languages
+                                        };
+                                    }
+                                }
+
+                                setPrompts(combinedPrompts);
+                            } else {
+                                console.warn('Failed to load tier 2 prompts:', tier2Response.error);
+                            }
+                        }
+                    } catch (error) {
+                        console.warn('Error loading tier 2 prompts:', error);
+                    }
+                };
 
                 // Find participant
                 const fpResponse = await fetchParticipant(pid as string);
@@ -307,6 +504,16 @@ const HomeContent = () => {
                 // Update media list
                 updateMediaList();
 
+                // Lazy load tier 2 prompts for all eligible events
+                loadTier2Prompts();
+
+                // Handle language change reloads
+                if (lastLanguage && currentLanguage !== lastLanguage && tier1Loaded) {
+                    console.log('Reloading prompts for language change to:', currentLanguage);
+                    reloadPromptsForLanguage(currentLanguage);
+                }
+
+
                 // Setup Pusher for real-time updates
                 try {
                     pusherChannels = new Pusher("0ecad01bb9fe0977da61", { cluster: 'mt1' });
@@ -339,6 +546,7 @@ const HomeContent = () => {
 
                 setError(null);
                 setLoaded(true);
+                setLoadStatus("Ready");
             } catch (err) {
                 console.log("Initialization error:", err);
                 setError("INITIALIZATION ERROR: " + JSON.stringify(err));
@@ -956,7 +1164,6 @@ const HomeContent = () => {
                         return (
                             <>
                                 {videoControlBubble()}
-                                {promptLookup('videoPassword')} {password} <br></br>
                                 {<div dangerouslySetInnerHTML={{ __html: videoFrame }} />}
                             </>
                         );
@@ -1503,6 +1710,13 @@ const HomeContent = () => {
             <div className="mb-6">
                 <div className="text-2xl font-bold text-white mb-2">{name}</div>
                 <div className="text-lg font-semibold text-gray-300 mb-4">{email}</div>
+                <div className="space-y-2 text-gray-300">
+                    <div dangerouslySetInnerHTML={promptLookupHTML('msg3')} />
+                </div>
+            </div>
+            <MediaList />
+            <EMailPreferences />
+            <div className="bg-black/50 border border-white/20 rounded-lg p-6 mb-6">
                 <div className="mb-4">
                     <KMStatus />
                 </div>
@@ -1510,12 +1724,8 @@ const HomeContent = () => {
                     <div dangerouslySetInnerHTML={promptLookupHTML('msg0')} />
                     <div dangerouslySetInnerHTML={promptLookupHTML('msg1')} />
                     <div dangerouslySetInnerHTML={promptLookupHTML('msg2')} />
-                    <div dangerouslySetInnerHTML={promptLookupHTML('msg3')} />
                 </div>
             </div>
-            <MediaList />
-            <EMailPreferences />
-            <div className="mb-6"></div>
         </>
     );
 

@@ -121,7 +121,7 @@ export const WrittenTranslationSelection = (props: {
 
 export const TopNavBar = (props: { title?: string }) => {
     return (
-        <div className="sticky top-0 z-50 bg-black border border-white/20 rounded-lg p-4 mb-4 flex items-center justify-between shadow-lg">
+        <div className="sticky top-0 z-50 bg-gray-900 border border-gray-700 rounded-lg p-4 mb-4 flex items-center justify-between shadow-lg max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center">
                 <h1 className="text-xl font-bold text-white">{props.title || 'Dashboard'}</h1>
             </div>

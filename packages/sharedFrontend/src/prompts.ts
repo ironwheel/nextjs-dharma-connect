@@ -31,12 +31,12 @@ export interface Event {
 }
 
 // Global variables (these will be set by the consuming apps)
-let prompts: Prompt[] = [];
+let prompts: Record<string, Record<string, Record<string, string>>> = {}; // eventCode.promptName.language.text
 let student: Student = {};
 let event: Event = { aid: 'dashboard' };
 
 // Setter functions for the consuming apps to use
-export const setPrompts = (newPrompts: Prompt[]) => {
+export const setPrompts = (newPrompts: Record<string, Record<string, Record<string, string>>>) => {
     prompts = newPrompts;
 };
 
@@ -80,6 +80,7 @@ export const dbgout = (...args: any[]) => {
 
 // Main prompt lookup function
 export const promptLookup = (prompt: string): string => {
+
     if (dbgPrompt()) {
         dbgout("PROMPT*** LOOKUP:", prompt);
     }
@@ -94,36 +95,12 @@ export const promptLookup = (prompt: string): string => {
         language = student.writtenLangPref;
     }
 
-    // aid-specific
-    for (let i = 0; i < prompts.length; i++) {
-        if (!prompts[i]['prompt'].startsWith(event.aid)) {
-            continue;
-        }
+    // New format: eventCode.promptName.language.text
+    if (prompts?.[event.aid]?.[prompt]?.[language]) {
         if (dbgPrompt()) {
-            dbgout("PROMPT AID:", i, prompts[i]['prompt'], prompts[i]['prompt'] === (event.aid + '-' + prompt), prompts[i]['language'], language);
+            dbgout("PROMPT FOUND:", event.aid, prompt, language);
         }
-        if (prompts[i]['prompt'] === (event.aid + '-' + prompt) && prompts[i]['language'] === language) {
-            if (dbgPrompt()) {
-                dbgout("PROMPT AID RETURNING :", i, prompts[i]['prompt'], prompts[i]['prompt'] === (event.aid + '-' + prompt), prompts[i]['language'], language);
-            }
-            return prompts[i]['text'];
-        }
-    }
-
-    // default
-    for (let i = 0; i < prompts.length; i++) {
-        if (!prompts[i]['prompt'].startsWith('default')) {
-            continue;
-        }
-        if (dbgPrompt()) {
-            dbgout("PROMPT DEFAULT:", i, prompts[i]['prompt'], prompts[i]['prompt'] === ('default-' + prompt), prompts[i]['language'], language);
-        }
-        if (prompts[i]['prompt'] === ('default-' + prompt) && ((prompts[i]['language'] === language) || (prompts[i]['language'] === 'universal'))) {
-            if (dbgPrompt()) {
-                dbgout("PROMPT DEFAULT RETURNING :", i, prompts[i]['prompt'], prompts[i]['prompt'] === ('default-' + prompt), prompts[i]['language'], language);
-            }
-            return prompts[i]['text'];
-        }
+        return prompts[event.aid][prompt][language];
     }
 
     // unknown
@@ -131,7 +108,7 @@ export const promptLookup = (prompt: string): string => {
         dbgout("PROMPT UNKNOWN:", prompt, language);
     }
 
-    return event.aid + "-" + prompt + "-" + language + "-unknown";
+    return `${event.aid}-${prompt}-${language}-unknown`;
 };
 
 // Aid-specific prompt lookup
@@ -155,36 +132,12 @@ export const promptLookupAIDSpecific = (aid: string, aidAlias: string | undefine
         aid = aidAlias;
     }
 
-    // aid-specific
-    for (let i = 0; i < prompts.length; i++) {
-        if (!prompts[i]['prompt'].startsWith(aid)) {
-            continue;
-        }
+    // New format: eventCode.promptName.language.text
+    if (prompts?.[aid]?.[prompt]?.[language]) {
         if (dbgPrompt()) {
-            dbgout("PROMPT AID:", i, prompts[i]['prompt'], prompts[i]['prompt'] === (aid + '-' + prompt), prompts[i]['language'], language);
+            dbgout("PROMPT AID FOUND:", aid, prompt, language);
         }
-        if (prompts[i]['prompt'] === (aid + '-' + prompt) && prompts[i]['language'] === language) {
-            if (dbgPrompt()) {
-                dbgout("PROMPT AID RETURNING :", i, prompts[i]['prompt'], prompts[i]['prompt'] === (aid + '-' + prompt), prompts[i]['language'], language);
-            }
-            return prompts[i]['text'];
-        }
-    }
-
-    // default
-    for (let i = 0; i < prompts.length; i++) {
-        if (!prompts[i]['prompt'].startsWith('default')) {
-            continue;
-        }
-        if (dbgPrompt()) {
-            dbgout("PROMPT DEFAULT:", i, prompts[i]['prompt'], prompts[i]['prompt'] === ('default-' + prompt), prompts[i]['language'], language);
-        }
-        if (prompts[i]['prompt'] === ('default-' + prompt) && ((prompts[i]['language'] === language) || (prompts[i]['language'] === 'universal'))) {
-            if (dbgPrompt()) {
-                dbgout("PROMPT DEFAULT RETURNING :", i, prompts[i]['prompt'], prompts[i]['prompt'] === ('default-' + prompt), prompts[i]['language'], language);
-            }
-            return prompts[i]['text'];
-        }
+        return prompts[aid][prompt][language];
     }
 
     // unknown
@@ -192,13 +145,13 @@ export const promptLookupAIDSpecific = (aid: string, aidAlias: string | undefine
         dbgout("PROMPT UNKNOWN:", prompt, language);
     }
 
-    return aid + "-" + prompt + "-" + language + "-unknown";
+    return `${aid}-${prompt}-${language}-unknown`;
 };
 
 // HTML prompt lookup
 export const promptLookupHTML = (prompt: string): { __html: string } => {
     if (dbgPrompt()) {
-        dbgout("PROMPTHTML*** LOOKUP:", prompt, prompts.length);
+        dbgout("PROMPTHTML*** LOOKUP:", prompt);
     }
 
     let language = "English";
@@ -206,57 +159,29 @@ export const promptLookupHTML = (prompt: string): { __html: string } => {
         language = student.writtenLangPref;
     }
 
-    // aid specific
-    for (let i = 0; i < prompts.length; i++) {
-        if (!prompts[i]['prompt'].startsWith(event.aid)) {
-            continue;
-        }
+    // New format: eventCode.promptName.language.text
+    if (prompts?.[event.aid]?.[prompt]?.[language]) {
+        let text = prompts[event.aid][prompt][language];
+        text = text.replace("||title||", promptLookup("title"));
+        text = text.replace("||deadline||", promptLookup("deadline"));
+        text = text.replace(/\|\|email\|\|/g, student.email || '');
         if (dbgPrompt()) {
-            dbgout("PROMPTHTML AID:", i, prompts[i]['prompt'], prompts[i]['prompt'] === (event.aid + '-' + prompt), prompts[i]['language'], language);
+            dbgout("PROMPTHTML FOUND:", event.aid, prompt, language);
         }
-        if (prompts[i]['prompt'] === (event.aid + '-' + prompt) && prompts[i]['language'] === language) {
-            let text = prompts[i]['text'];
-            text = text.replace("||title||", promptLookup("title"));
-            text = text.replace("||deadline||", promptLookup("deadline"));
-            text = text.replace(/\|\|email\|\|/g, student.email || '');
-            if (dbgPrompt()) {
-                dbgout("PROMPTHTML AID RETURNING :", i, prompts[i]['prompt'], prompts[i]['prompt'] === (event.aid + '-' + prompt), prompts[i]['language'], language);
-            }
-            return { __html: text };
-        }
-    }
-
-    for (let i = 0; i < prompts.length; i++) {
-        if (!prompts[i]['prompt'].startsWith('default')) {
-            continue;
-        }
-        if (dbgPrompt()) {
-            dbgout("PROMPTHTML DEFAULT:", i, prompts[i]['prompt'], prompts[i]['prompt'] === ('default-' + prompt), prompts[i]['language'], language);
-        }
-        if (prompts[i]['prompt'] === ('default-' + prompt) && prompts[i]['language'] === language) {
-            let text = prompts[i]['text'];
-            text = text.replace("||title||", promptLookup("title"));
-            text = text.replace("||deadline||", promptLookup("deadline"));
-            text = text.replace(/\|\|coord-email\|\|/g, student.coordEmail || '');
-            text = text.replace(/\|\|email\|\|/g, student.email || '');
-            if (dbgPrompt()) {
-                dbgout("PROMPTHTML DEFAULT RETURNING :", i, prompts[i]['prompt'], prompts[i]['prompt'] === ('default-' + prompt), prompts[i]['language'], language);
-            }
-            return { __html: text };
-        }
+        return { __html: text };
     }
 
     // unknown
     if (dbgPrompt()) {
         dbgout("PROMPTHTML UNKNOWN:", prompt, language);
     }
-    return { __html: event.aid + "-" + prompt + "-" + language + "-unknown" };
+    return { __html: `${event.aid}-${prompt}-${language}-unknown` };
 };
 
 // Aid-specific HTML prompt lookup
 export const promptLookupHTMLAIDSpecific = (laid: string, prompt: string): { __html: string } => {
     if (dbgPrompt()) {
-        dbgout("PROMPTHTML*** LOOKUP:", prompt, prompts.length);
+        dbgout("PROMPTHTML*** LOOKUP:", prompt);
     }
 
     let language = "English";
@@ -264,57 +189,29 @@ export const promptLookupHTMLAIDSpecific = (laid: string, prompt: string): { __h
         language = student.writtenLangPref;
     }
 
-    // aid specific
-    for (let i = 0; i < prompts.length; i++) {
-        if (!prompts[i]['prompt'].startsWith(laid)) {
-            continue;
-        }
+    // New format: eventCode.promptName.language.text
+    if (prompts?.[laid]?.[prompt]?.[language]) {
+        let text = prompts[laid][prompt][language];
+        text = text.replace("||title||", promptLookup("title"));
+        text = text.replace("||deadline||", promptLookup("deadline"));
+        text = text.replace(/\|\|email\|\|/g, student.email || '');
         if (dbgPrompt()) {
-            dbgout("PROMPTHTML AID:", i, prompts[i]['prompt'], prompts[i]['prompt'] === (laid + '-' + prompt), prompts[i]['language'], language);
+            dbgout("PROMPTHTML AID FOUND:", laid, prompt, language);
         }
-        if (prompts[i]['prompt'] === (laid + '-' + prompt) && prompts[i]['language'] === language) {
-            let text = prompts[i]['text'];
-            text = text.replace("||title||", promptLookup("title"));
-            text = text.replace("||deadline||", promptLookup("deadline"));
-            text = text.replace(/\|\|email\|\|/g, student.email || '');
-            if (dbgPrompt()) {
-                dbgout("PROMPTHTML AID RETURNING :", i, prompts[i]['prompt'], prompts[i]['prompt'] === (laid + '-' + prompt), prompts[i]['language'], language);
-            }
-            return { __html: text };
-        }
-    }
-
-    for (let i = 0; i < prompts.length; i++) {
-        if (!prompts[i]['prompt'].startsWith('default')) {
-            continue;
-        }
-        if (dbgPrompt()) {
-            dbgout("PROMPTHTML DEFAULT:", i, prompts[i]['prompt'], prompts[i]['prompt'] === ('default-' + prompt), prompts[i]['language'], language);
-        }
-        if (prompts[i]['prompt'] === ('default-' + prompt) && prompts[i]['language'] === language) {
-            let text = prompts[i]['text'];
-            text = text.replace("||title||", promptLookup("title"));
-            text = text.replace("||deadline||", promptLookup("deadline"));
-            text = text.replace(/\|\|coord-email\|\|/g, student.coordEmail || '');
-            text = text.replace(/\|\|email\|\|/g, student.email || '');
-            if (dbgPrompt()) {
-                dbgout("PROMPTHTML DEFAULT RETURNING :", i, prompts[i]['prompt'], prompts[i]['prompt'] === ('default-' + prompt), prompts[i]['language'], language);
-            }
-            return { __html: text };
-        }
+        return { __html: text };
     }
 
     // unknown
     if (dbgPrompt()) {
         dbgout("PROMPTHTML UNKNOWN:", prompt, language);
     }
-    return { __html: laid + "-" + prompt + "-" + language + "-unknown" };
+    return { __html: `${laid}-${prompt}-${language}-unknown` };
 };
 
 // Description prompt lookup
 export const promptLookupDescription = (prompt: string): { __html: string } | null => {
     if (dbgPrompt()) {
-        dbgout("PROMPTDESCRIPTION LOOKUP:", prompt, prompts.length);
+        dbgout("PROMPTDESCRIPTION LOOKUP:", prompt);
     }
 
     let language = "English";
@@ -322,28 +219,21 @@ export const promptLookupDescription = (prompt: string): { __html: string } | nu
         language = student.writtenLangPref;
     }
 
-    // descriptions specific
-    for (let i = 0; i < prompts.length; i++) {
-        if (prompts[i]['aid'] !== 'descriptions') {
-            continue;
+    // New format: eventCode.promptName.language.text
+    if (prompts?.['descriptions']?.[prompt]?.[language]) {
+        const text = prompts['descriptions'][prompt][language];
+        // the system may have created empty prompts to translate
+        if (text.length === 0) {
+            return null;
         }
+        let processedText = text;
+        processedText = processedText.replace("||title||", promptLookup("title"));
+        processedText = processedText.replace("||deadline||", promptLookup("deadline"));
+        processedText = processedText.replace(/\|\|email\|\|/g, student.email || '');
         if (dbgPrompt()) {
-            dbgout("PROMPTDESCRIPTION AID:", i, prompts[i]['prompt'], prompts[i]['prompt'] === (event.aid + '-' + prompt), prompts[i]['language'], language);
+            dbgout("PROMPTDESCRIPTION FOUND:", 'descriptions', prompt, language);
         }
-        if (prompts[i]['prompt'] === ('descriptions-' + prompt) && prompts[i]['language'] === language) {
-            // the system may have created empty prompts to translate
-            if (prompts[i]['text'].length === 0) {
-                return null;
-            }
-            let text = prompts[i]['text'];
-            text = text.replace("||title||", promptLookup("title"));
-            text = text.replace("||deadline||", promptLookup("deadline"));
-            text = text.replace(/\|\|email\|\|/g, student.email || '');
-            if (dbgPrompt()) {
-                dbgout("PROMPTDESCRIPTION AID RETURNING :", i, prompts[i]['prompt'], prompts[i]['prompt'] === (event.aid + '-' + prompt), prompts[i]['language'], language);
-            }
-            return { __html: text };
-        }
+        return { __html: processedText };
     }
 
     return null;
@@ -356,39 +246,22 @@ export const promptLookupHTMLWithArgs = (prompt: string, arg1?: string, arg2?: s
         language = student.writtenLangPref;
     }
 
-    for (let i = 0; i < prompts.length; i++) {
-        if (prompts[i]['prompt'] === (event.aid + '-' + prompt) && prompts[i]['language'] === language) {
-            let text = prompts[i]['text'];
-            if (typeof arg1 !== 'undefined') {
-                text = text.replace("||arg1||", arg1);
-            }
-            if (typeof arg2 !== 'undefined') {
-                text = text.replace("||arg2||", arg2);
-            }
-            if (typeof arg3 !== 'undefined') {
-                text = text.replace("||arg3||", arg3);
-            }
-            return { __html: text };
+    // New format: eventCode.promptName.language.text
+    if (prompts?.[event.aid]?.[prompt]?.[language]) {
+        let text = prompts[event.aid][prompt][language];
+        if (typeof arg1 !== 'undefined') {
+            text = text.replace("||arg1||", arg1);
         }
+        if (typeof arg2 !== 'undefined') {
+            text = text.replace("||arg2||", arg2);
+        }
+        if (typeof arg3 !== 'undefined') {
+            text = text.replace("||arg3||", arg3);
+        }
+        return { __html: text };
     }
 
-    for (let i = 0; i < prompts.length; i++) {
-        if (prompts[i]['prompt'] === ('default-' + prompt) && prompts[i]['language'] === language) {
-            let text = prompts[i]['text'];
-            if (typeof arg1 !== 'undefined') {
-                text = text.replace("||arg1||", arg1);
-            }
-            if (typeof arg2 !== 'undefined') {
-                text = text.replace("||arg2||", arg2);
-            }
-            if (typeof arg3 !== 'undefined') {
-                text = text.replace("||arg3||", arg3);
-            }
-            return { __html: text };
-        }
-    }
-
-    return { __html: event.aid + "-" + prompt + "-" + language + "-unknown" };
+    return { __html: `${event.aid}-${prompt}-${language}-unknown` };
 };
 
 // Aid-specific HTML prompt lookup with arguments
@@ -398,37 +271,173 @@ export const promptLookupHTMLWithArgsAIDSpecific = (laid: string, prompt: string
         language = student.writtenLangPref;
     }
 
-    for (let i = 0; i < prompts.length; i++) {
-        if (prompts[i]['prompt'] === (laid + '-' + prompt) && prompts[i]['language'] === language) {
-            let text = prompts[i]['text'];
-            if (typeof arg1 !== 'undefined') {
-                text = text.replace("||arg1||", arg1);
+    // New format: eventCode.promptName.language.text
+    if (prompts?.[laid]?.[prompt]?.[language]) {
+        let text = prompts[laid][prompt][language];
+        if (typeof arg1 !== 'undefined') {
+            text = text.replace("||arg1||", arg1);
+        }
+        if (typeof arg2 !== 'undefined') {
+            text = text.replace("||arg2||", arg2);
+        }
+        if (typeof arg3 !== 'undefined') {
+            text = text.replace("||arg3||", arg3);
+        }
+        return { __html: text };
+    }
+
+    return { __html: `${laid}-${prompt}-${language}-unknown` };
+};
+
+// New prompt cache system for two-tiered loading
+interface PromptCacheItem {
+    eventCode: string;
+    promptKey: string;
+    text: string;
+}
+
+// Global variables for the new cache system
+let promptCache: Record<string, Record<string, string>> = {}; // {eventCode: {promptKey: text}}
+let tier1Loaded = false;
+let tier2Loaded = false;
+let currentLanguage = "English";
+
+// Setter functions for the new cache system
+export const setPromptCache = (newCache: Record<string, Record<string, string>>) => {
+    promptCache = newCache;
+};
+
+export const setTier1Loaded = (loaded: boolean) => {
+    tier1Loaded = loaded;
+};
+
+export const setTier2Loaded = (loaded: boolean) => {
+    tier2Loaded = loaded;
+};
+
+export const setCurrentLanguage = (language: string) => {
+    currentLanguage = language;
+};
+
+// New prompt lookup function for the cache system
+export const promptLookupCache = (eventCode: string, promptName: string): string => {
+
+    if (!promptCache[eventCode]) {
+        return `${eventCode}-${promptName}-${currentLanguage}-unknown`;
+    }
+
+    const promptKey = `1#${currentLanguage}#${promptName}`;
+
+    const text = promptCache[eventCode][promptKey];
+
+    if (text) {
+        return text;
+    }
+
+    return `${eventCode}-${promptName}-${currentLanguage}-unknown`;
+};
+
+// Aid-specific prompt lookup for the cache system
+export const promptLookupCacheAIDSpecific = (aid: string, aidAlias: string | undefined, promptName: string): string => {
+    const eventCode = aidAlias || aid;
+    return promptLookupCache(eventCode, promptName);
+};
+
+// HTML prompt lookup for the cache system
+export const promptLookupHTMLCache = (eventCode: string, promptName: string): { __html: string } => {
+    const text = promptLookupCache(eventCode, promptName);
+    let processedText = text;
+
+    // Apply the same replacements as the original function
+    processedText = processedText.replace("||title||", promptLookupCache(eventCode, "title"));
+    processedText = processedText.replace("||deadline||", promptLookupCache(eventCode, "deadline"));
+    processedText = processedText.replace(/\|\|email\|\|/g, student.email || '');
+
+    return { __html: processedText };
+};
+
+// Aid-specific HTML prompt lookup for the cache system
+export const promptLookupHTMLCacheAIDSpecific = (aid: string, aidAlias: string | undefined, promptName: string): { __html: string } => {
+    const eventCode = aidAlias || aid;
+    return promptLookupHTMLCache(eventCode, promptName);
+};
+
+// HTML prompt lookup with arguments for the cache system
+export const promptLookupHTMLWithArgsCache = (eventCode: string, promptName: string, arg1?: string, arg2?: string, arg3?: string): { __html: string } => {
+    const text = promptLookupCache(eventCode, promptName);
+    let processedText = text;
+
+    if (typeof arg1 !== 'undefined') {
+        processedText = processedText.replace("||arg1||", arg1);
+    }
+    if (typeof arg2 !== 'undefined') {
+        processedText = processedText.replace("||arg2||", arg2);
+    }
+    if (typeof arg3 !== 'undefined') {
+        processedText = processedText.replace("||arg3||", arg3);
+    }
+
+    return { __html: processedText };
+};
+
+// Aid-specific HTML prompt lookup with arguments for the cache system
+export const promptLookupHTMLWithArgsCacheAIDSpecific = (aid: string, aidAlias: string | undefined, promptName: string, arg1?: string, arg2?: string, arg3?: string): { __html: string } => {
+    const eventCode = aidAlias || aid;
+    return promptLookupHTMLWithArgsCache(eventCode, promptName, arg1, arg2, arg3);
+};
+
+// Helper function to convert cache results to the new internal format
+export const processPromptCacheResults = (results: any): Record<string, Record<string, Record<string, string>>> => {
+    const processed: Record<string, Record<string, Record<string, string>>> = {};
+
+    // Handle different result formats
+    if (Array.isArray(results)) {
+        // If results is a direct array of items
+        for (const item of results) {
+            if (item.eventCode && item.promptKey && item.text) {
+                const parts = item.promptKey.split('#');
+                if (parts.length >= 3) {
+                    const tier = parts[0];
+                    const language = parts[1];
+                    const promptName = parts[2];
+
+                    if (!processed[item.eventCode]) {
+                        processed[item.eventCode] = {};
+                    }
+                    if (!processed[item.eventCode][promptName]) {
+                        processed[item.eventCode][promptName] = {};
+                    }
+                    processed[item.eventCode][promptName][language] = item.text;
+                }
             }
-            if (typeof arg2 !== 'undefined') {
-                text = text.replace("||arg2||", arg2);
+        }
+    } else if (typeof results === 'object' && results !== null) {
+        // If results is an object with eventCode keys
+        for (const [eventCode, items] of Object.entries(results)) {
+            if (Array.isArray(items)) {
+                if (!processed[eventCode]) {
+                    processed[eventCode] = {};
+                }
+                for (const item of items) {
+                    if (item.eventCode && item.promptKey && item.text) {
+                        const parts = item.promptKey.split('#');
+                        if (parts.length >= 3) {
+                            const tier = parts[0];
+                            const language = parts[1];
+                            const promptName = parts[2];
+
+                            if (!processed[eventCode][promptName]) {
+                                processed[eventCode][promptName] = {};
+                            }
+                            if (!processed[eventCode][promptName][language]) {
+                                processed[eventCode][promptName][language] = item.text;
+                            }
+                        }
+                    }
+                }
             }
-            if (typeof arg3 !== 'undefined') {
-                text = text.replace("||arg3||", arg3);
-            }
-            return { __html: text };
         }
     }
 
-    for (let i = 0; i < prompts.length; i++) {
-        if (prompts[i]['prompt'] === ('default-' + prompt) && prompts[i]['language'] === language) {
-            let text = prompts[i]['text'];
-            if (typeof arg1 !== 'undefined') {
-                text = text.replace("||arg1||", arg1);
-            }
-            if (typeof arg2 !== 'undefined') {
-                text = text.replace("||arg2||", arg2);
-            }
-            if (typeof arg3 !== 'undefined') {
-                text = text.replace("||arg3||", arg3);
-            }
-            return { __html: text };
-        }
-    }
-
-    return { __html: laid + "-" + prompt + "-" + language + "-unknown" };
+    return processed;
 }; 

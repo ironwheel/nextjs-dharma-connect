@@ -171,9 +171,6 @@ const Home = () => {
                     return;
                 }
 
-                // Note: Translator access is now managed by permitted-hosts entries in the auth table
-                // The student.translator check has been removed as per requirements
-
                 // Get translation permissions
                 const lpResponse = await fetchLangTransPerms(pid as string);
                 if (lpResponse.data && typeof lpResponse.data === 'object' && !Array.isArray(lpResponse.data)) {

@@ -423,7 +423,7 @@ const MantraCount: React.FC<MantraCountProps> = ({ studentId, pid, hash, student
             {/* Ensure Tailwind includes color classes */}
             <div className="hidden bg-blue-600 bg-green-600 bg-purple-600 bg-red-600 bg-orange-600 border-blue-500 border-green-500 border-purple-500 border-red-500 border-orange-500"></div>
             <TopNavBar title={promptLookup('controlTitleMantraCounter')} />
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
                 {/* Header */}
                 <div className="text-center mb-8">
                     <p className="text-gray-300 mb-2">
@@ -481,12 +481,12 @@ const MantraCount: React.FC<MantraCountProps> = ({ studentId, pid, hash, student
                                         <div className="flex justify-between items-center mt-auto">
                                             <button
                                                 onClick={() => handleCountChange(config.id, -config.incrementAmount)}
-                                                disabled={!isMantraWritable(config)}
-                                                className={`rounded-full w-10 h-10 flex items-center justify-center transition-colors border ${isMantraWritable(config)
+                                                disabled={!isMantraWritable(config) || (personalCounts[config.id] || 0) <= (originalCounts[config.id] || 0)}
+                                                className={`rounded-full w-10 h-10 flex items-center justify-center transition-colors border ${isMantraWritable(config) && (personalCounts[config.id] || 0) > (originalCounts[config.id] || 0)
                                                     ? 'bg-white/20 hover:bg-white/30 text-white border-white/30'
                                                     : 'bg-gray-600 text-gray-400 border-gray-500 cursor-not-allowed'
                                                     }`}
-                                                title={isMantraWritable(config) ? `Subtract ${config.incrementAmount}` : 'Write access not available'}
+                                                title={isMantraWritable(config) && (personalCounts[config.id] || 0) > (originalCounts[config.id] || 0) ? `Subtract ${config.incrementAmount}` : 'Write access not available or cannot decrement below original value'}
                                             >
                                                 <FontAwesomeIcon icon={faArrowDown} />
                                             </button>
