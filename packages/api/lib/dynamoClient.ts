@@ -9,7 +9,8 @@ import {
   DeleteCommand,
   PutCommand,
   UpdateCommand,
-  BatchGetCommand
+  BatchGetCommand,
+  QueryCommand
 } from '@aws-sdk/lib-dynamodb';
 import { fromCognitoIdentityPool } from '@aws-sdk/credential-provider-cognito-identity';
 
@@ -355,4 +356,78 @@ export async function batchGetItems(
   }
 
   return items;
+}
+
+async function listAllQueryBeginsWithSortKey(
+  tableName: string,
+  primaryKeyName: string,
+  primaryKeyValue: string,
+  sortKeyName: string,
+  sortKeyValue: string,
+  identityPoolIdOverride?: string
+) {
+  const client = getDocClient(identityPoolIdOverride);
+  const items: any[] = [];
+  let ExclusiveStartKey;
+
+  do {
+    const response = await client.send(
+      new QueryCommand({
+        TableName: tableName,
+        KeyConditionExpression: `${primaryKeyName} = :pk AND begins_with(${sortKeyName}, :sk_prefix)`,
+        ExpressionAttributeValues: {
+          ':pk': primaryKeyValue,
+          ':sk_prefix': sortKeyValue,
+        },
+        ExclusiveStartKey,
+      })
+    );
+    if (response.Items) items.push(...response.Items);
+    ExclusiveStartKey = response.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+
+  return items;
+}
+
+/**
+ * Query items by multiple partition keys with a begins_with condition on the sort key.
+ * This function handles comma-separated primary key values and returns results organized by primary key.
+ */
+export async function listAllQueryBeginsWithSortKeyMultiple(
+  tableName: string,
+  primaryKeyName: string,
+  primaryKeyValues: string,
+  sortKeyName: string,
+  sortKeyValue: string,
+  identityPoolIdOverride?: string
+) {
+  const primaryKeyList = primaryKeyValues.split(',');
+  const results: Record<string, any[]> = {};
+
+  console.log("listAllQueryBeginsWithSortKeyMultiple: primaryKeyList:", primaryKeyList);
+  console.log("listAllQueryBeginsWithSortKeyMultiple: tableName:", tableName);
+  console.log("listAllQueryBeginsWithSortKeyMultiple: primaryKeyName:", primaryKeyName);
+  console.log("listAllQueryBeginsWithSortKeyMultiple: sortKeyName:", sortKeyName);
+  console.log("listAllQueryBeginsWithSortKeyMultiple: sortKeyValue:", sortKeyValue);
+
+  try {
+    const queryPromises = primaryKeyList.map(async (primaryKeyValue) => {
+      const items = await listAllQueryBeginsWithSortKey(
+        tableName,
+        primaryKeyName,
+        primaryKeyValue.trim(),
+        sortKeyName,
+        sortKeyValue,
+        identityPoolIdOverride
+      );
+      results[primaryKeyValue.trim()] = items;
+      console.log("listAllQueryBeginsWithSortKeyMultiple: results:", results);
+    });
+
+    await Promise.all(queryPromises);
+    return results;
+  } catch (error) {
+    console.error('Error in listAllQueryBeginsWithSortKeyMultiple:', error);
+    throw error;
+  }
 }

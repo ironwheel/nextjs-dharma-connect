@@ -418,6 +418,36 @@ export async function getAllTableItemsFiltered(
     }
 }
 
+export async function queryGetTableItems(
+    resource: string,
+    primaryKeyValue: string,
+    sortKeyValue: string,
+    pid: string,
+    hash: string,
+    onProgress?: ProgressCallback
+): Promise<any[] | Record<string, any[]> | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/table/${resource}/query`, pid, hash, {
+            primaryKeyValue,
+            sortKeyValue
+        });
+
+        if (response && response.redirected) {
+            return { redirected: true };
+        }
+
+        // Check if we have results (multiple keys) or items (single key)
+        if (response.results) {
+            return response.results;
+        } else {
+            return response.items || [];
+        }
+    } catch (error: any) {
+        console.error(`[API] queryGetTableItems failed for ${resource}:`, error);
+        throw new Error(error.message || 'Failed to query table items');
+    }
+}
+
 export async function getTableCount(
     resource: string,
     pid: string,

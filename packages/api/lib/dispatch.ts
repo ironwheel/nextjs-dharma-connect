@@ -2,7 +2,7 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import { tables, TableConfig } from './tableConfig';
 import { websockets, WebSocketConfig, websocketGetConfig } from './websocketConfig';
-import { listAll, listAllChunked, getOne, deleteOne, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll, batchGetItems } from './dynamoClient';
+import { listAll, listAllChunked, getOne, deleteOne, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll, batchGetItems, listAllQueryBeginsWithSortKeyMultiple } from './dynamoClient';
 import { verificationEmailSend, verificationEmailCallback, createToken, getViews, getViewsWritePermission, getViewsExportCSV, getViewsHistoryPermission, getViewsEmailDisplayPermission, authGetLink, getActionsProfiles, getAuthList, getViewsProfiles, getActionsProfileForHost, getAllActionsForUser, putAuthItem } from './authUtils';
 import { serialize } from 'cookie';
 import { v4 as uuidv4 } from 'uuid';
@@ -47,6 +47,14 @@ async function dispatchTable(
     const { filterFieldName, filterFieldValue } = req.body;
     const items = await listAllFiltered(tableName, filterFieldName, filterFieldValue);
     return res.status(200).json({ items });
+  }
+
+  // QUERY (POST method for querying with begins_with on sort key)
+  if (req.method === 'POST' && id === 'query' && req.body && req.body.primaryKeyValue && req.body.sortKeyValue && cfg.ops.includes('query')) {
+    const { primaryKeyValue, sortKeyValue } = req.body;
+
+    const results = await listAllQueryBeginsWithSortKeyMultiple(tableName, cfg.pk, primaryKeyValue, cfg.sk, sortKeyValue);
+    return res.status(200).json({ results });
   }
 
   // BATCH GET (POST method for batch retrieval by IDs)

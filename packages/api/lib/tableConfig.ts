@@ -4,7 +4,7 @@ export interface TableConfig {
   envVar: string;
   pk: string;
   sk: string;
-  ops: Array<'get' | 'list' | 'delete' | 'put' | 'count' | 'update'>;
+  ops: Array<'get' | 'list' | 'delete' | 'put' | 'count' | 'update' | 'query'>;
 }
 
 export const tables: TableConfig[] = [
@@ -28,6 +28,7 @@ export const tables: TableConfig[] = [
   { resource: 'eligibility-cache', envVar: 'DYNAMODB_TABLE_ELIGIBILITY_CACHE', pk: 'aid', sk: '', ops: ['get', 'put', 'list'] },
   { resource: 'mantra-count', envVar: 'DYNAMODB_TABLE_MANTRA_COUNT', pk: 'id', sk: '', ops: ['get', 'put', 'list', 'update'] },
   { resource: 'mantra-config', envVar: 'DYNAMODB_TABLE_MANTRA_CONFIG', pk: 'id', sk: '', ops: ['get', 'put', 'list', 'update'] },
+  { resource: 'sd-prompts-cache', envVar: 'DYNAMODB_TABLE_PROMPTS_CACHE', pk: 'eventCode', sk: 'promptKey', ops: ['get', 'list', 'query'] },
 ];
 
 /**
