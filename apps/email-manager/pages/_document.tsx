@@ -12,7 +12,7 @@ export default function Document() {
                 <link rel="icon" type="image/png" sizes="512x512" href="/android-chrome-512x512.png" />
                 <link rel="manifest" href="/site.webmanifest" />
                 <meta name="theme-color" content="#2563eb" />
-                <meta name="description" content="Event Dashboard for Dharma Connect" />
+                <meta name="description" content="Email Manager for Dharma Connect" />
             </Head>
             <body>
                 <Main />
