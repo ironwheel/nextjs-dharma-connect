@@ -1429,12 +1429,27 @@ const HomeContent = () => {
                 return;
             }
 
-            // Close all other controls first
-            Object.keys(displayControl).forEach(controlKey => {
-                if (controlKey !== el.control) {
-                    displayControl[controlKey] = false;
-                }
-            });
+            // Check if this is a year-specific video control (sub-control)
+            const isYearVideoControl = el.control.startsWith('video-year-');
+            // Check if this is a showcase control (sub-control)
+            const isShowcaseControl = el.control.endsWith('-showcase');
+
+            if (isYearVideoControl || isShowcaseControl) {
+                // For sub-controls, only close other sub-controls
+                // but keep the main video control open
+                Object.keys(displayControl).forEach(controlKey => {
+                    if ((controlKey.startsWith('video-year-') || controlKey.endsWith('-showcase')) && controlKey !== el.control) {
+                        displayControl[controlKey] = false;
+                    }
+                });
+            } else {
+                // For main controls, close all other main controls
+                Object.keys(displayControl).forEach(controlKey => {
+                    if (!controlKey.startsWith('video-year-') && !controlKey.endsWith('-showcase') && controlKey !== el.control) {
+                        displayControl[controlKey] = false;
+                    }
+                });
+            }
 
             // Toggle the clicked control
             displayControl[el.control] = !displayControl[el.control];
