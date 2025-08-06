@@ -7,7 +7,6 @@ import { defaultLayoutPlugin } from '@react-pdf-viewer/default-layout';
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faGlobe, faPlus, faMinus, faTimes, faPlusCircle, faMinusCircle, faUser, faCheck, faXmark } from "@fortawesome/free-solid-svg-icons";
 import Pusher from 'pusher-js';
-import FingerprintJS from '@fingerprintjs/fingerprintjs';
 import { toast } from 'react-toastify';
 
 // Import shared components and functions
@@ -28,7 +27,6 @@ import {
     promptLookupHTMLWithArgsAIDSpecific,
     dbgout,
     checkEligibility,
-    getFingerprint,
     LanguageProvider,
     useLanguage,
     // New cache system imports
