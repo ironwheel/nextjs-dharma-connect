@@ -858,6 +858,31 @@ a {
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
 }
 
+/* Pulse animation for loading progress bar */
+@keyframes pulse {
+  0% {
+    opacity: 0.6;
+  }
+
+  50% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0.6;
+  }
+}
+
+/* Spin animation for loading spinner */
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
 /* Maximum specificity overrides for production environments */
 .modern-dropdown .custom-dropdown-menu .dropdown-item,
 .modern-dropdown .custom-dropdown-menu button.dropdown-item {

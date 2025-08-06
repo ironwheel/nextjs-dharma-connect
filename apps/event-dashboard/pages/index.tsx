@@ -344,6 +344,10 @@ const Home = () => {
     // Add state for eligibility caching system
     const [allStudentsLoaded, setAllStudentsLoaded] = useState<boolean>(false);
     const [loadingEligibilityCache, setLoadingEligibilityCache] = useState<boolean>(false);
+    const [allStudentsLoadedForCurrentEvent, setAllStudentsLoadedForCurrentEvent] = useState<boolean>(false);
+    // Use a ref to maintain accumulated eligible students across callbacks
+    const accumulatedEligibleStudentsRef = useRef<Student[]>([]);
+    const currentLoadingAbortControllerRef = useRef<AbortController | null>(null);
     let demoMode = false;
 
     // WebSocket connection
@@ -441,8 +445,14 @@ const Home = () => {
         }
     };
 
-    // Function to load students for a specific event using eligibility cache
-    const loadStudentsForEvent = async (eventAid: string, eventsArray?: Event[], poolsArray?: Pool[]): Promise<Student[]> => {
+    // Function to load students for a specific event using eligibility cache with incremental updates
+    const loadStudentsForEvent = async (
+        eventAid: string,
+        eventsArray?: Event[],
+        poolsArray?: Pool[],
+        onIncrementalUpdate?: (eligibleStudents: Student[]) => void,
+        abortController?: AbortController
+    ): Promise<Student[]> => {
         try {
             setLoadingEligibilityCache(true);
             setLoadingProgress(prev => ({
@@ -452,17 +462,55 @@ const Home = () => {
                 message: `Loading eligibility cache for ${eventAid}...`
             }));
 
+            // Get the current event for eligibility calculation
+            const eventsToSearch = eventsArray || allEvents;
+            const currentEvent = eventsToSearch.find(e => e.aid === eventAid);
+            if (!currentEvent) {
+                console.error(`Event ${eventAid} not found in events:`, eventsToSearch.map(e => e.aid));
+                setLoadingEligibilityCache(false);
+                return [];
+            }
+
+            // STEP 1: Check eligibility on existing students and display them immediately
+            const existingEligibleStudents = calculateEligibleStudents(currentEvent, allStudents, poolsArray || allPools);
+            const alreadyHaveStudentIds = new Set(existingEligibleStudents.map(s => s.id));
+
+            console.log(`Found ${existingEligibleStudents.length} eligible students from existing data`);
+
+            // Display existing eligible students immediately
+            if (onIncrementalUpdate && existingEligibleStudents.length > 0) {
+                console.log('Displaying existing eligible students immediately');
+                onIncrementalUpdate(existingEligibleStudents);
+            }
+
             // First, check if we have an eligibility cache record for this event
             const cacheRecord = await getTableItemOrNull('eligibility-cache', eventAid, pid as string, hash as string);
 
             if (cacheRecord && !('redirected' in cacheRecord) && cacheRecord.studentIdList) {
-                // Check which students we already have in memory
+                // STEP 2: Filter cache to exclude students already loaded globally
                 const existingStudentIds = new Set(allStudents.map(s => s.id));
                 const missingStudentIds = cacheRecord.studentIdList.filter(id => !existingStudentIds.has(id));
 
+                console.log(`Cache has ${cacheRecord.studentIdList.length} students, ${existingStudentIds.size} already loaded globally, ${missingStudentIds.length} need to be loaded`);
+
                 if (missingStudentIds.length === 0) {
                     setLoadingEligibilityCache(false);
-                    return allStudents.filter(student => cacheRecord.studentIdList.includes(student.id));
+                    setAllStudentsLoadedForCurrentEvent(true);
+                    console.log('No missing students to load from cache, all eligible students already loaded');
+
+                    // Ensure current user is included in the result
+                    const finalStudents = [...existingEligibleStudents];
+                    const currentUserIncluded = finalStudents.some(student => student.id === pid);
+
+                    if (!currentUserIncluded && pid) {
+                        const currentUser = allStudents.find(student => student.id === pid);
+                        if (currentUser) {
+                            finalStudents.push(currentUser);
+                        }
+                    }
+
+                    console.log(`Returning ${finalStudents.length} eligible students (all from existing data)`);
+                    return finalStudents;
                 }
                 setLoadingProgress(prev => ({
                     ...prev,
@@ -471,11 +519,17 @@ const Home = () => {
                     message: `Loading ${missingStudentIds.length} students from cache...`
                 }));
 
-                // Load missing students in batches
+                // Load missing students in batches with incremental updates
                 const newStudents: Student[] = [];
                 const BATCH_SIZE = 100;
+                let updatedStudents = [...allStudents]; // Track the updated students list
 
                 for (let i = 0; i < missingStudentIds.length; i += BATCH_SIZE) {
+                    // Check if operation was aborted
+                    if (abortController?.signal.aborted) {
+                        throw new Error('Operation aborted');
+                    }
+
                     const batch = missingStudentIds.slice(i, i + BATCH_SIZE);
                     const batchStudents = await batchGetTableItems('students', batch, pid as string, hash as string);
 
@@ -487,20 +541,52 @@ const Home = () => {
                             total: missingStudentIds.length,
                             message: `Loading ${missingStudentIds.length} students from cache...`
                         }));
+
+                        // Update allStudents incrementally, avoiding duplicates
+                        const addedStudentIds = new Set<string>();
+
+                        for (const newStudent of batchStudents) {
+                            // Check if student already exists in allStudents
+                            const studentExists = updatedStudents.some(existing => existing.id === newStudent.id);
+                            if (!studentExists) {
+                                updatedStudents.push(newStudent);
+                                addedStudentIds.add(newStudent.id);
+                            } else {
+                                console.log(`Skipping duplicate student: ${newStudent.id} (${newStudent.first} ${newStudent.last})`);
+                            }
+                        }
+
+                        setAllStudents(updatedStudents);
+
+                        console.log(`Batch processed: ${batchStudents.length} students, added: ${addedStudentIds.size}, skipped: ${batchStudents.length - addedStudentIds.size} duplicates`);
+
+                        // Calculate eligible students from the current batch only
+                        const currentBatchEligibleStudents = batchStudents.filter(student =>
+                            cacheRecord.studentIdList.includes(student.id)
+                        );
+
+                        // Ensure current user is always included in the batch
+                        const currentUserIncluded = currentBatchEligibleStudents.some(student => student.id === pid);
+                        if (!currentUserIncluded && pid) {
+                            const currentUser = batchStudents.find(student => student.id === pid);
+                            if (currentUser) {
+                                currentBatchEligibleStudents.push(currentUser);
+                            }
+                        }
+
+                        if (onIncrementalUpdate) {
+                            console.log('Calling onIncrementalUpdate with', currentBatchEligibleStudents.length, 'students from current batch');
+                            onIncrementalUpdate(currentBatchEligibleStudents);
+                        }
                     }
                 }
 
-                // Add new students to the existing list, avoiding duplicates
-                const updatedStudents = [...allStudents];
-                for (const newStudent of newStudents) {
-                    if (!existingStudentIds.has(newStudent.id)) {
-                        updatedStudents.push(newStudent);
-                    }
-                }
-                setAllStudents(updatedStudents);
+                // Final result - combine existing eligible students with newly loaded ones
+                const newlyLoadedEligibleStudents = updatedStudents.filter(student =>
+                    cacheRecord.studentIdList.includes(student.id) && !existingEligibleStudents.some(existing => existing.id === student.id)
+                );
 
-                // Ensure current user is always included in the returned students
-                const finalStudents = updatedStudents.filter(student => cacheRecord.studentIdList.includes(student.id));
+                const finalStudents = [...existingEligibleStudents, ...newlyLoadedEligibleStudents];
                 const currentUserIncluded = finalStudents.some(student => student.id === pid);
 
                 if (!currentUserIncluded && pid) {
@@ -510,7 +596,10 @@ const Home = () => {
                     }
                 }
 
+                console.log(`Final result: ${existingEligibleStudents.length} existing + ${newlyLoadedEligibleStudents.length} newly loaded = ${finalStudents.length} total eligible students`);
+                console.log(`Global student count: ${updatedStudents.length} (was ${allStudents.length} at start)`);
                 setLoadingEligibilityCache(false);
+                setAllStudentsLoadedForCurrentEvent(true);
                 return finalStudents;
             } else {
                 // If no cache exists and we haven't loaded all students yet, load them
@@ -558,6 +647,12 @@ const Home = () => {
                 // Create cache record for future use (only include originally eligible students)
                 const eligibleStudentIds = eligibleStudents.map(s => s.id);
                 await createEligibilityCacheRecord(eventAid, eligibleStudentIds);
+
+                // Trigger incremental update with final result
+                if (onIncrementalUpdate) {
+                    console.log('Calling onIncrementalUpdate with final result:', finalEligibleStudents.length, 'students');
+                    onIncrementalUpdate(finalEligibleStudents);
+                }
 
                 setLoadingEligibilityCache(false);
                 return finalEligibleStudents;
@@ -1065,6 +1160,15 @@ const Home = () => {
             const selectedEvent = allEvents.find(e => e.aid === eventAid) || null;
             if (!selectedEvent) return;
 
+            // Abort any current loading operation
+            if (currentLoadingAbortControllerRef.current) {
+                currentLoadingAbortControllerRef.current.abort();
+                console.log('Aborted previous loading operation for event switch');
+            }
+
+            // Create new abort controller for this load
+            currentLoadingAbortControllerRef.current = new AbortController();
+
             // Set the current event and sub-event
             const updatedEvent = { ...selectedEvent };
 
@@ -1076,31 +1180,40 @@ const Home = () => {
             localStorage.setItem('event', JSON.stringify(updatedEvent));
             setEvShadow(updatedEvent);
 
-            // Load students for the new event using the caching system
-            const eligibleStudents = await loadStudentsForEvent(updatedEvent.aid, allEvents, allPools);
-            setCurrentEligibleStudents(eligibleStudents);
+            // Set loaded=true BEFORE calling loadStudentsForEvent for lazy loading
+            setLoaded(true);
 
-            // Update current user name after loading students for the new event
-            fetchCurrentUser(eligibleStudents);
+            // Reset accumulated eligible students ref for new event
+            accumulatedEligibleStudentsRef.current = [];
 
-            // Update user's eventDashboardLastUsedConfig with the new selection
-            try {
-                await updateUserEventDashboardLastUsedConfig({
+            // Reset the "all students loaded" state for the new event
+            setAllStudentsLoadedForCurrentEvent(false);
+
+            // Load students for the new event using the caching system (now in background)
+            loadStudentsForEvent(
+                updatedEvent.aid,
+                allEvents,
+                allPools,
+                (eligibleStudents) => updateTableDataIncrementally(eligibleStudents, undefined, updatedEvent, allPools),
+                currentLoadingAbortControllerRef.current
+            ).then(eligibleStudents => {
+                setCurrentEligibleStudents(eligibleStudents);
+
+                // Update current user name after loading students for the new event
+                fetchCurrentUser(eligibleStudents);
+
+                // Update user's eventDashboardLastUsedConfig with the new selection
+                return updateUserEventDashboardLastUsedConfig({
                     event: eventAid,
                     subEvent: subEventKey || undefined
                 });
-            } catch (error) {
-                console.error('Error updating user eventDashboardLastUsedConfig:', error);
-            }
-
-            // Rebuild the data with the new event using the new function
-            try {
-                const [cl, rd] = await assembleColumnLabelsAndRowDataWithData(view || 'Joined', month, year, updatedEvent, allStudents, allPools);
-                setColumnLabels(cl);
-                setRowData(rd);
-            } catch (error) {
-                console.error('Error updating data for new event:', error);
-            }
+            }).catch(error => {
+                if (error.name === 'AbortError') {
+                    console.log('Loading operation was aborted due to event switch');
+                } else {
+                    console.error('Error loading students or updating data for new event:', error);
+                }
+            });
             setEventDropdownOpen(false);
         };
 
@@ -1174,7 +1287,7 @@ const Home = () => {
                 <button
                     type="button"
                     className="dropdown-trigger"
-                    style={{ width: dropdownWidth, minWidth: dropdownWidth }}
+                    style={{ width: dropdownWidth, minWidth: dropdownWidth, position: 'relative' }}
                     onClick={() => {
                         setEventDropdownOpen(!eventDropdownOpen);
                     }}
@@ -1189,6 +1302,36 @@ const Home = () => {
                     >
                         <polyline points="6,9 12,15 18,9" />
                     </svg>
+
+                    {/* Progressive purple overlay that fills the dropdown bubble */}
+                    {(loadingEligibilityCache || allStudentsLoadedForCurrentEvent) && (
+                        <div style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            borderRadius: '8px',
+                            overflow: 'hidden',
+                            zIndex: 10
+                        }}>
+                            {/* Progress fill that grows from left to right */}
+                            <div style={{
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                height: '100%',
+                                backgroundColor: 'rgba(139, 69, 219, 0.4)',
+                                width: allStudentsLoadedForCurrentEvent
+                                    ? '100%'
+                                    : loadingProgress.total > 0
+                                        ? `${Math.min(100, (loadingProgress.current / loadingProgress.total) * 100)}%`
+                                        : '30%',
+                                transition: 'width 0.3s ease',
+                                animation: loadingProgress.total === 0 && !allStudentsLoadedForCurrentEvent ? 'pulse 1.5s ease-in-out infinite' : 'none'
+                            }}></div>
+                        </div>
+                    )}
                 </button>
                 {eventDropdownOpen && (
                     <div className="custom-dropdown-menu" style={{
@@ -1744,6 +1887,64 @@ const Home = () => {
         return rowValues;
     }
 
+    // Helper function to update table data incrementally
+    const updateTableDataIncrementally = async (eligibleStudents: Student[], viewName?: string, currentEvent?: Event, currentPools?: Pool[]) => {
+        console.log('updateTableDataIncrementally called with:', {
+            eligibleStudentsCount: eligibleStudents?.length,
+            viewName,
+            evShadow: !!evShadow,
+            currentEvent: !!currentEvent,
+            allStudentsCount: allStudents?.length,
+            allPoolsCount: allPools?.length,
+            currentPoolsCount: currentPools?.length
+        });
+
+        const eventToUse = currentEvent || evShadow;
+        if (!eventToUse) {
+            console.log('No event available, returning early');
+            return;
+        }
+
+        const poolsToUse = currentPools || allPools;
+        if (!poolsToUse || poolsToUse.length === 0) {
+            console.log('No pools available, returning early');
+            return;
+        }
+
+        const currentView = viewName || view || 'Joined';
+        console.log('Using currentView:', currentView);
+
+        try {
+            // Accumulate eligible students from all batches using ref
+            const allEligibleStudents = [...accumulatedEligibleStudentsRef.current, ...eligibleStudents];
+            console.log('Accumulated eligible students:', {
+                previousCount: accumulatedEligibleStudentsRef.current.length,
+                newBatchCount: eligibleStudents?.length || 0,
+                totalCount: allEligibleStudents.length
+            });
+
+            // Update the ref with accumulated data
+            accumulatedEligibleStudentsRef.current = allEligibleStudents;
+
+            // Use all accumulated eligible students instead of just the current batch
+            const [cl, rd] = await assembleColumnLabelsAndRowDataWithData(
+                currentView,
+                month,
+                year,
+                eventToUse,
+                allStudents,
+                poolsToUse,
+                allEligibleStudents
+            );
+            console.log('Table data assembled:', { columnsCount: cl?.length, rowsCount: rd?.length });
+            setColumnLabels(cl);
+            setRowData(rd);
+            setCurrentEligibleStudents(allEligibleStudents);
+        } catch (error) {
+            console.error('Error updating table data incrementally:', error);
+        }
+    };
+
     // Add this helper at the top or near the merge logic
     // function deepMerge(target: any, source: any): any {
     //     if (typeof target !== 'object' || typeof source !== 'object' || target === null || source === null) {
@@ -1850,6 +2051,12 @@ const Home = () => {
             return true;
         });
 
+        console.log('assembleColumnLabelsAndRowDataWithData - filteredStudents:', {
+            filteredStudentsCount: filteredStudents.length,
+            conditionsCount: conditions.length,
+            searchTerm: searchTerm
+        });
+
         const rowValues: any[] = [];
         if (evShadow) {
             for (const student of filteredStudents) {
@@ -1929,10 +2136,15 @@ const Home = () => {
         setCurrentViewConditions(conditions);
 
         // Use passed eligible students or cached eligible students
-        const studentsToUse = eligibleStudents || currentEligibleStudents;
+        const studentsToUse = eligibleStudents !== undefined ? eligibleStudents : currentEligibleStudents;
+        console.log('assembleColumnLabelsAndRowDataWithData - studentsToUse:', {
+            eligibleStudentsCount: eligibleStudents?.length,
+            currentEligibleStudentsCount: currentEligibleStudents?.length,
+            studentsToUseCount: studentsToUse?.length
+        });
 
         // Filter students: view conditions, then search (eligibility already handled)
-        const filteredStudents = studentsToUse.filter(student => {
+        const filteredStudents = (studentsToUse || []).filter(student => {
             if (!currentEvent) {
                 return false;
             }
@@ -1962,6 +2174,10 @@ const Home = () => {
                 }
             }
         }
+        console.log('assembleColumnLabelsAndRowDataWithData - final result:', {
+            rowValuesCount: rowValues.length,
+            columnLabelsCount: columnLabels.length
+        });
         setItemCount(rowValues.length);
         return [columnLabels, rowValues];
     };
@@ -1976,7 +2192,6 @@ const Home = () => {
         const loadInitialData = async () => {
             try {
                 console.log('Starting initial data load, demoMode initial value:', demoMode);
-                setLoadingProgress({ current: 0, total: 1, message: 'Starting data load...' });
 
                 // Fetch write permission
                 const writePermission = await authGetViewsWritePermission(pid as string, hash as string);
@@ -2100,30 +2315,41 @@ const Home = () => {
                     // Set the state first to ensure it's available for other components
                     setEvShadow(currentEventToUse);
 
-                    // Load students for the initial event using the caching system
-                    const eligibleStudents = await loadStudentsForEvent(currentEventToUse.aid, filteredEvents, filteredPools);
-                    setCurrentEligibleStudents(eligibleStudents);
+                    // Set loaded=true BEFORE calling loadStudentsForEvent for lazy loading
+                    setLoaded(true);
 
-                    // Set current user information after students are loaded (use eligible students since current user is guaranteed to be included)
-                    fetchCurrentUser(eligibleStudents);
+                    // Reset accumulated eligible students ref for new event
+                    accumulatedEligibleStudentsRef.current = [];
 
-                    // Use the same event object for consistency
-                    const tempEvShadow = currentEventToUse;
-                    const tempAllStudents = allStudents;
-                    const tempAllPools = filteredPools;
+                    // Reset the "all students loaded" state for initial load
+                    setAllStudentsLoadedForCurrentEvent(false);
 
-                    try {
-                        const [cl, rd] = await assembleColumnLabelsAndRowDataWithData(initialView, month, year, tempEvShadow, tempAllStudents, tempAllPools, eligibleStudents);
-                        setColumnLabels(cl);
-                        setRowData(rd);
-                    } catch (error) {
-                        console.error('Error assembling data:', error);
-                    }
+                    // Create abort controller for initial load
+                    currentLoadingAbortControllerRef.current = new AbortController();
+
+                    // Load students for the initial event using the caching system (now in background)
+                    loadStudentsForEvent(
+                        currentEventToUse.aid,
+                        filteredEvents,
+                        filteredPools,
+                        (eligibleStudents) => updateTableDataIncrementally(eligibleStudents, initialView, currentEventToUse, filteredPools),
+                        currentLoadingAbortControllerRef.current
+                    ).then(eligibleStudents => {
+                        setCurrentEligibleStudents(eligibleStudents);
+
+                        // Set current user information after students are loaded
+                        fetchCurrentUser(eligibleStudents);
+                    }).catch(error => {
+                        if (error.name === 'AbortError') {
+                            console.log('Initial loading operation was aborted');
+                        } else {
+                            console.error('Error loading students:', error);
+                        }
+                    });
                 } else {
                     console.log('No currentEventToUse found');
+                    setLoaded(true);
                 }
-
-                setLoaded(true);
 
             } catch (error) {
                 console.error('Error loading initial data:', error);
@@ -2221,12 +2447,8 @@ const Home = () => {
         );
     }
 
-    // Loading display
-    if (!loaded || evShadow === null || loadingEligibilityCache) {
-        const progress = loadingProgress.total > 0
-            ? Math.min(100, Math.round((loadingProgress.current / loadingProgress.total) * 100))
-            : 0;
-
+    // Loading display - simplified for lazy loading
+    if (!loaded || evShadow === null) {
         return (
             <div className="loading-container" style={{ marginTop: '70px', minHeight: '400px', flexDirection: 'column', justifyContent: 'flex-start', paddingTop: '100px' }}>
                 <div style={{ textAlign: 'center', marginBottom: '40px' }}>
@@ -2234,40 +2456,10 @@ const Home = () => {
                         Event Dashboard
                     </h1>
                     <b style={{ fontSize: '24px', marginBottom: '10px', display: 'block', color: 'white' }}>
-                        {loadingProgress.message || 'Loading...'}
+                        Loading...
                     </b>
                     <Spinner animation="border" role="status" style={{ color: 'rgba(139, 69, 219, 0.8)', width: '3rem', height: '3rem' }} />
                 </div>
-
-                {loadingProgress.current > 0 && (
-                    <div style={{ width: '100%', maxWidth: '400px', margin: '0 auto' }}>
-                        <div style={{ color: 'white', marginBottom: '10px', textAlign: 'center' }}>
-                            Items loaded: {loadingProgress.current}
-                            {loadingProgress.total > loadingProgress.current && ` of ${loadingProgress.total}`}
-                        </div>
-                        <div style={{ color: 'white', marginBottom: '15px', textAlign: 'center' }}>
-                            {loadingProgress.total > loadingProgress.current ?
-                                `Progress: ${Math.round((loadingProgress.current / loadingProgress.total) * 100)}%` :
-                                `Chunks processed: ${Math.ceil(loadingProgress.current / 100)}`
-                            }
-                        </div>
-                        <div style={{
-                            width: '100%',
-                            backgroundColor: 'rgba(255,255,255,0.1)',
-                            borderRadius: '10px',
-                            overflow: 'hidden',
-                            border: '1px solid rgba(255,255,255,0.2)'
-                        }}>
-                            <div style={{
-                                width: `${Math.min(100, (loadingProgress.current / loadingProgress.total) * 100)}%`,
-                                height: '25px',
-                                background: 'linear-gradient(135deg, rgba(139, 69, 219, 0.8), rgba(88, 28, 135, 0.8))',
-                                borderRadius: '10px',
-                                transition: 'width 0.3s ease'
-                            }}></div>
-                        </div>
-                    </div>
-                )}
             </div>
         );
     }
