@@ -44,7 +44,7 @@ The existing `handleCheckAccess` function is enhanced to:
   },
   deviceFingerprint: "abc123...",
   createdAt: timestamp,
-  expiresAt: timestamp + 30 days,
+  expiresAt: timestamp + 24 hours,
   lastUsed: timestamp
 }
 ```
@@ -96,7 +96,7 @@ The existing `handleCheckAccess` function is enhanced to:
 The system needed to:
 1. Use existing PID+hash validation
 2. Add email verification for identity confirmation  
-3. Support 30-day sessions without passwords
+3. Support 24-hour sessions without passwords
 4. Use JWT for stateless auth checks
 5. Support dynamic permission updates
 6. Work across multiple apps in monorepo
@@ -105,7 +105,7 @@ The system needed to:
 
 ✅ Zero-knowledge initial access (just need valid link)  
 ✅ Strong identity verification (email confirmation)  
-✅ Seamless return user experience (30-day sessions)  
+✅ Seamless return user experience (24-hour sessions)  
 ✅ Granular permissions (action-based)  
 ✅ Dynamic authorization (claims refresh)  
 ✅ Comprehensive audit trail  
