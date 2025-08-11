@@ -1,4 +1,10 @@
-// apps/auth-test/pages/index.tsx
+/**
+ * @file apps/auth-test/pages/index.tsx
+ * @copyright Robert E. Taylor, Extropic Systems, 2025
+ * @license MIT
+ * @description The main page for the auth-test application.
+ */
+
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { api, useWebSocket } from 'sharedFrontend';
@@ -10,6 +16,11 @@ import {
   getWebSocketConnectionNoToken
 } from 'sharedFrontend';
 
+/**
+ * @component Home
+ * @description The main page for the auth-test application.
+ * @returns {React.FC} The Home component.
+ */
 export default function Home() {
   const router = useRouter();
   const { pid, hash } = router.query;
@@ -26,6 +37,10 @@ export default function Home() {
   const [sqsError, setSqsError] = useState<string | null>(null);
   const [sqsSuccess, setSqsSuccess] = useState<string | null>(null);
 
+  /**
+   * @function getStudentData
+   * @description Fetches the student data from the API.
+   */
   const getStudentData = async () => {
     if (!pid || !hash) return;
     setError(null);
@@ -47,6 +62,10 @@ export default function Home() {
     }
   };
 
+  /**
+   * @function getAllStudentsData
+   * @description Fetches all student data from the API.
+   */
   const getAllStudentsData = async () => {
     if (!pid || !hash) return;
     setError(null);
@@ -74,6 +93,10 @@ export default function Home() {
     }
   };
 
+  /**
+   * @function sendWorkOrderMessageData
+   * @description Sends a work order message to the SQS queue.
+   */
   const sendWorkOrderMessageData = async () => {
     if (!pid || !hash) return;
     setSqsError(null);
@@ -94,6 +117,11 @@ export default function Home() {
     }
   };
 
+  /**
+   * @function handleWebSocketConnect
+   * @description Handles the WebSocket connection.
+   * @param {'workorders' | 'students'} resource - The resource to connect to.
+   */
   const handleWebSocketConnect = async (resource: 'workorders' | 'students' = 'workorders') => {
     if (!pid || !hash) return;
     setWebsocketError(null);
@@ -127,10 +155,19 @@ export default function Home() {
     }
   };
 
+  /**
+   * @function handleWebSocketDisconnect
+   * @description Handles the WebSocket disconnection.
+   */
   const handleWebSocketDisconnect = () => {
     disconnect();
   };
 
+  /**
+   * @function handleWebSocketConnectNoToken
+   * @description Handles the WebSocket connection without a token.
+   * @param {'workorders' | 'students'} resource - The resource to connect to.
+   */
   const handleWebSocketConnectNoToken = async (resource: 'workorders' | 'students' = 'workorders') => {
     if (!pid || !hash) return;
     setWebsocketError(null);

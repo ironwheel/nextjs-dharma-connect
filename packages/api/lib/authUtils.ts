@@ -1,5 +1,5 @@
 /**
- * @file packages/sharedBackend/src/authUtils.ts
+ * @file packages/api/lib/authUtils.ts
  * @copyright Robert E. Taylor, Extropic Systems, 2025
  * @license MIT
  * @description Shared core logic for authentication, user lookups, email, and permissions.
@@ -51,7 +51,12 @@ if (!VERIFICATION_DURATION_SECONDS) {
     throw new Error('VERIFICATION_DURATION environment variable is required');
 }
 
-// Helper function to convert seconds to JWT duration string (e.g., 900 -> '15m')
+/**
+ * @function secondsToJwtDuration
+ * @description Helper function to convert seconds to JWT duration string (e.g., 900 -> '15m').
+ * @param {string} seconds - The number of seconds to convert.
+ * @returns {string} The JWT duration string.
+ */
 function secondsToJwtDuration(seconds: string): string {
     const secondsNum = parseInt(seconds, 10);
     if (isNaN(secondsNum) || secondsNum <= 0) {
@@ -72,7 +77,12 @@ function secondsToJwtDuration(seconds: string): string {
     }
 }
 
-// Helper function to convert seconds to milliseconds
+/**
+ * @function secondsToMilliseconds
+ * @description Helper function to convert seconds to milliseconds.
+ * @param {string} seconds - The number of seconds to convert.
+ * @returns {number} The number of milliseconds.
+ */
 function secondsToMilliseconds(seconds: string): number {
     const secondsNum = parseInt(seconds, 10);
     if (isNaN(secondsNum) || secondsNum <= 0) {
@@ -134,10 +144,9 @@ export const DEFAULT_NO_PERMISSIONS = {
 // --- Helper Functions ---
 
 /**
- * Fetches prompts relevant to a given application ID (aid) from DynamoDB.
- * Used by sendConfirmationEmail.
  * @async
  * @function getPromptsForAid
+ * @description Fetches prompts relevant to a given application ID (aid) from DynamoDB.
  * @param {string} aid - The application ID for which to fetch prompts.
  * @returns {Promise<Array<object>>} A promise that resolves to an array of prompt items.
  * @throws {Error} If the database scan fails or table name is not configured.
@@ -148,10 +157,9 @@ export async function getPromptsForAid(aid: string): Promise<Array<any>> {
 }
 
 /**
- * Finds a participant by ID in DynamoDB.
- * Used by sendConfirmationEmail.
  * @async
  * @function findParticipantForAuth
+ * @description Finds a participant by ID in DynamoDB.
  * @param {string} id - The participant's ID.
  * @returns {Promise<object>} A promise that resolves to the participant's data (specific fields for auth).
  * @throws {Error} If participant not found or database query fails or table name not configured.
@@ -162,13 +170,12 @@ export async function findParticipantForAuth(id: string): Promise<any> {
 }
 
 /**
- * Creates a JWT token using provided criteria.
- * @async
  * @function createToken
+ * @description Creates a JWT token using provided criteria.
  * @param {string} pid - The participant ID expected in the token.
  * @param {string} clientFingerprint - The client's browser fingerprint (can be null/undefined).
  * @param {string} actionList - List of allowed operations.
- * @returns {stringn} created token.
+ * @returns {string} created token.
  * @throws {Error} Throws errors related to bad configuration
  */
 export function createToken(pid: string, clientFingerprint: string, actionList: string[]): string {
@@ -183,10 +190,8 @@ export function createToken(pid: string, clientFingerprint: string, actionList: 
 }
 
 /**
- * Verifies a JWT token against specified criteria. Returns true or false. 
- * Throws errors on bad configuration.
- * @async
  * @function verifyToken
+ * @description Verifies a JWT token against specified criteria. Returns true or false.
  * @param {string} pid - The participant ID expected in the token.
  * @param {string} clientFingerprint - The client's browser fingerprint (can be null/undefined).
  * @param {string} operation - Operation this token would like to be used for.
@@ -269,17 +274,15 @@ export function verifyToken(token: string, pid: string, clientFingerprint: strin
 }
 
 /**
- * Sends a confirmation email to the participant.
  * @async
  * @function verificationEmailSend
+ * @description Sends a confirmation email to the participant.
  * @param {string} pid - Participant ID.
- * @param {string} email - Participant's email address.
- * @param {string} clientIp - Client's IP address (can be null/undefined).
- * @param {string} clientFingerprint - Client's browser fingerprint (required).
- * @param {string} verificationToken - The verification token from DynamoDB.
- * @param {string} [showcase] - Optional showcase identifier.
- * @param {string} [host] - Optional app host for hash logic.
- * @returns {Promise<string>} Resolves with the participant's email address on success.
+ * @param {string} hash - The hash value to verify.
+ * @param {string} host - The host of the calling app.
+ * @param {string} deviceFingerprint - The client's browser fingerprint.
+ * @param {string | null} clientIp - The client's IP address.
+ * @returns {Promise<boolean>} Resolves with true on success.
  * @throws {Error} If configuration is missing or sending fails.
  */
 export async function verificationEmailSend(pid: string, hash: string, host: string, deviceFingerprint: string, clientIp: string | null): Promise<boolean> {
@@ -442,18 +445,16 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
 }
 
 /**
- * Sends a confirmation email to the participant.
  * @async
  * @function verificationEmailCallback
+ * @description Handles the callback for the verification email.
  * @param {string} pid - Participant ID.
- * @param {string} email - Participant's email address.
- * @param {string} clientIp - Client's IP address (can be null/undefined).
- * @param {string} clientFingerprint - Client's browser fingerprint (required).
- * @param {string} verificationToken - The verification token from DynamoDB.
- * @param {string} [showcase] - Optional showcase identifier.
- * @param {string} [host] - Optional app host for hash logic.
- * @returns {Promise<string>} Resolves with the participant's email address on success.
- * @throws {Error} If configuration is missing or sending fails.
+ * @param {string} hash - The hash value to verify.
+ * @param {string} host - The host of the calling app.
+ * @param {string} deviceFingerprint - The client's browser fingerprint.
+ * @param {string} verificationTokenId - The verification token from the email.
+ * @returns {Promise<any>} Resolves with the authentication status and access token on success.
+ * @throws {Error} If configuration is missing or verification fails.
  */
 export async function verificationEmailCallback(pid: string, hash: string, host: string, deviceFingerprint: string, verificationTokenId: string): Promise<any> {
 
@@ -633,8 +634,8 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
 }
 
 /**
- * Retrieves language permissions for a given PID.
  * @function getPermissionsLogic
+ * @description Retrieves language permissions for a given PID.
  * @param {string} pid - The participant ID.
  * @returns {object} The permissions object for the PID, or a default "no permissions" object if not found.
  */
@@ -652,17 +653,12 @@ export function getPermissionsLogic(pid: string): any {
 }
 
 /**
- * Generates an HMAC hash of a UUID using a secret key.
- *
+ * @function generateAuthHash
+ * @description Generates an HMAC hash of a UUID using a secret key.
  * @param {string} guid - UUID string in standard uuid4 format
  * @param {string} secretKeyHex - 64-character hexadecimal secret key
  * @returns {string} HMAC-SHA256 hash as a hex string
- * 
- * The command to generate a new secret is:
- * openssl rand -hex 32
- * The command line tool to generate the hash is:
- * echo -n "<student id" | openssl dgst -sha256 -mac HMAC -macopt hexkey:<secret> -hex
-*/
+ */
 export function generateAuthHash(guid: string, secretKeyHex: string): string {
     if (!/^[0-9a-f]{64}$/i.test(secretKeyHex)) {
         throw new Error('Secret key must be a 64-character hexadecimal string');
@@ -674,8 +670,9 @@ export function generateAuthHash(guid: string, secretKeyHex: string): string {
 }
 
 /**
- * Checks access for a participant and host using a hash and a secret from APP_ACCESS_JSON.
- *
+ * @async
+ * @function checkAccess
+ * @description Checks access for a participant and host using a hash and a secret from APP_ACCESS_JSON.
  * @param {string} pid - Participant ID
  * @param {string} hash - Hash value to check
  * @param {string} host - host of the calling app
@@ -824,10 +821,11 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
 }
 
 /**
- * Get views for a specified participant
  * @async
  * @function getViews
+ * @description Get views for a specified participant
  * @param {string} pid - Participant ID.
+ * @param {string} host - The host of the calling app.
  * @returns {Promise<string[]>} Resolves with a list of views the participant has access to
  * @throws {Error} If configuration is missing
  */
@@ -872,9 +870,9 @@ export async function getViews(pid: string, host: string): Promise<string[]> {
 }
 
 /**
- * Get viewsWritePermission for a specified participant and host
  * @async
  * @function getViewsWritePermission
+ * @description Get viewsWritePermission for a specified participant and host
  * @param {string} pid - Participant ID.
  * @param {string} host - Host string.
  * @returns {Promise<boolean>} Resolves with the viewsWritePermission boolean
@@ -892,6 +890,15 @@ export async function getViewsWritePermission(pid: string, host: string): Promis
     return !!data.eventDashboardConfig?.writePermission;
 }
 
+/**
+ * @async
+ * @function getViewsExportCSV
+ * @description Get viewsExportCSV for a specified participant and host
+ * @param {string} pid - Participant ID.
+ * @param {string} host - Host string.
+ * @returns {Promise<boolean>} Resolves with the viewsExportCSV boolean
+ * @throws {Error} If configuration is missing
+ */
 export async function getViewsExportCSV(pid: string, host: string): Promise<boolean> {
     let tableCfg = tableGetConfig('auth');
     let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
@@ -904,6 +911,15 @@ export async function getViewsExportCSV(pid: string, host: string): Promise<bool
     return !!data.eventDashboardConfig?.exportCSV;
 }
 
+/**
+ * @async
+ * @function getViewsHistoryPermission
+ * @description Get viewsHistoryPermission for a specified participant and host
+ * @param {string} pid - Participant ID.
+ * @param {string} host - Host string.
+ * @returns {Promise<boolean>} Resolves with the viewsHistoryPermission boolean
+ * @throws {Error} If configuration is missing
+ */
 export async function getViewsHistoryPermission(pid: string, host: string): Promise<boolean> {
     let tableCfg = tableGetConfig('auth');
     let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
@@ -916,6 +932,15 @@ export async function getViewsHistoryPermission(pid: string, host: string): Prom
     return !!data.eventDashboardConfig?.studentHistory;
 }
 
+/**
+ * @async
+ * @function getViewsEmailDisplayPermission
+ * @description Get viewsEmailDisplayPermission for a specified participant and host
+ * @param {string} pid - Participant ID.
+ * @param {string} host - Host string.
+ * @returns {Promise<boolean>} Resolves with the viewsEmailDisplayPermission boolean
+ * @throws {Error} If configuration is missing
+ */
 export async function getViewsEmailDisplayPermission(pid: string, host: string): Promise<boolean> {
     let tableCfg = tableGetConfig('auth');
     let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
@@ -929,9 +954,9 @@ export async function getViewsEmailDisplayPermission(pid: string, host: string):
 }
 
 /**
- * Generates an access link for a student to a specific domain.
  * @async
  * @function authGetLink
+ * @description Generates an access link for a student to a specific domain.
  * @param {string} domainName - The domain name for the app.
  * @param {string} studentId - The student ID.
  * @returns {Promise<string>} The access link in format: https://${domainName}/?pid=${studentId}&hash=${appSpecificHash}
@@ -983,9 +1008,9 @@ export async function authGetLink(domainName: string, studentId: string): Promis
 }
 
 /**
- * Retrieves all action profile names from the actions-profiles table.
  * @async
  * @function getActionsProfiles
+ * @description Retrieves all action profile names from the actions-profiles table.
  * @returns {Promise<string[]>} Resolves with a list of profile names from the 'profile' field
  * @throws {Error} If the database scan fails or table name is not configured.
  */
@@ -1000,9 +1025,9 @@ export async function getActionsProfiles(): Promise<string[]> {
 }
 
 /**
- * Retrieves all auth records from the auth table.
  * @async
  * @function getAuthList
+ * @description Retrieves all auth records from the auth table.
  * @returns {Promise<any[]>} Resolves with a list of all auth records
  * @throws {Error} If the database scan fails or table name is not configured.
  */
@@ -1014,9 +1039,9 @@ export async function getAuthList(): Promise<any[]> {
 }
 
 /**
- * Updates or creates an auth record in the auth table.
  * @async
  * @function putAuthItem
+ * @description Updates or creates an auth record in the auth table.
  * @param {string} id - The auth record ID (student ID or 'default')
  * @param {any} authRecord - The auth record data to save
  * @returns {Promise<void>} Resolves when the record is saved
@@ -1028,9 +1053,9 @@ export async function putAuthItem(id: string, authRecord: any): Promise<void> {
 }
 
 /**
- * Retrieves all views profile names from the views-profiles table.
  * @async
  * @function getViewsProfiles
+ * @description Retrieves all views profile names from the views-profiles table.
  * @returns {Promise<string[]>} Resolves with a list of profile names from the 'profile' field
  * @throws {Error} If the database scan fails or table name is not configured.
  */
@@ -1068,9 +1093,9 @@ export async function getViewsProfiles(): Promise<string[]> {
 }
 
 /**
- * Gets the actions profile for a given host from the app.actions table
  * @async
  * @function getActionsProfileForHost
+ * @description Gets the actions profile for a given host from the app.actions table
  * @param {string} host - The host to look up
  * @returns {Promise<string>} The actions profile name for the host
  * @throws {Error} If host not found in app.actions table
@@ -1085,9 +1110,9 @@ export async function getActionsProfileForHost(host: string): Promise<string> {
 }
 
 /**
- * Gets all actions for a user based on their permitted hosts
  * @async
  * @function getAllActionsForUser
+ * @description Gets all actions for a user based on their permitted hosts
  * @param {string[]} permittedHosts - Array of hosts the user has access to
  * @returns {Promise<string[]>} Array of all actions the user has access to
  * @throws {Error} If any host's actions profile is not found

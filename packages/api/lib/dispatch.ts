@@ -1,4 +1,10 @@
-// packages/api/lib/dispatch.ts
+/**
+ * @file packages/api/lib/dispatch.ts
+ * @copyright Robert E. Taylor, Extropic Systems, 2025
+ * @license MIT
+ * @description Dispatches API requests to the appropriate handlers.
+ */
+
 import { NextApiRequest, NextApiResponse } from 'next';
 import { tables, TableConfig } from './tableConfig';
 import { websockets, WebSocketConfig, websocketGetConfig } from './websocketConfig';
@@ -8,6 +14,16 @@ import { serialize } from 'cookie';
 import { v4 as uuidv4 } from 'uuid';
 import { sendWorkOrderMessage } from './sqsClient';
 
+/**
+ * @async
+ * @function dispatchTable
+ * @description Dispatches table-related API requests.
+ * @param {string} resource - The resource to dispatch the request to.
+ * @param {string | undefined} id - The ID of the resource.
+ * @param {NextApiRequest} req - The Next.js API request object.
+ * @param {NextApiResponse} res - The Next.js API response object.
+ * @returns {Promise<void>}
+ */
 async function dispatchTable(
   resource: string,
   id: string | undefined,
@@ -157,6 +173,16 @@ async function dispatchTable(
   return res.status(405).end(`Method ${req.method} Not Allowed`);
 }
 
+/**
+ * @async
+ * @function dispatchAuth
+ * @description Dispatches authentication-related API requests.
+ * @param {string} action - The action to dispatch the request to.
+ * @param {string | undefined} id - The ID of the resource.
+ * @param {NextApiRequest} req - The Next.js API request object.
+ * @param {NextApiResponse} res - The Next.js API response object.
+ * @returns {Promise<void>}
+ */
 async function dispatchAuth(
   action: string,
   id: string | undefined,
@@ -234,6 +260,17 @@ async function dispatchAuth(
   }
 }
 
+/**
+ * @async
+ * @function dispatchWebSocket
+ * @description Dispatches WebSocket-related API requests.
+ * @param {string} resource - The resource to dispatch the request to.
+ * @param {string} action - The action to dispatch the request to.
+ * @param {string | undefined} id - The ID of the resource.
+ * @param {NextApiRequest} req - The Next.js API request object.
+ * @param {NextApiResponse} res - The Next.js API response object.
+ * @returns {Promise<void>}
+ */
 async function dispatchWebSocket(
   resource: string,
   action: string,
@@ -292,6 +329,16 @@ async function dispatchWebSocket(
   }
 }
 
+/**
+ * @async
+ * @function dispatchSQS
+ * @description Dispatches SQS-related API requests.
+ * @param {string} action - The action to dispatch the request to.
+ * @param {string | undefined} id - The ID of the resource.
+ * @param {NextApiRequest} req - The Next.js API request object.
+ * @param {NextApiResponse} res - The Next.js API response object.
+ * @returns {Promise<void>}
+ */
 async function dispatchSQS(
   action: string,
   id: string | undefined,
@@ -344,6 +391,15 @@ async function dispatchSQS(
   }
 }
 
+/**
+ * @async
+ * @function dispatch
+ * @description Dispatches API requests to the appropriate handlers.
+ * @param {string[]} slug - The slug from the API request.
+ * @param {NextApiRequest} req - The Next.js API request object.
+ * @param {NextApiResponse} res - The Next.js API response object.
+ * @returns {Promise<void>}
+ */
 export async function dispatch(
   slug: string[],
   req: NextApiRequest,

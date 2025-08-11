@@ -1,3 +1,10 @@
+/**
+ * @file infrastructure/lib/dharma-connect-stack.ts
+ * @copyright Robert E. Taylor, Extropic Systems, 2025
+ * @license MIT
+ * @description This file defines the DharmaConnectStack, which is the main CDK stack for the application.
+ */
+
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
@@ -9,6 +16,11 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda_event_sources from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as logs from 'aws-cdk-lib/aws-logs';
 
+/**
+ * @class DharmaConnectStack
+ * @description The main CDK stack for the application.
+ * @extends cdk.Stack
+ */
 export class DharmaConnectStack extends cdk.Stack {
     constructor(scope: Construct, id: string, props?: cdk.StackProps) {
         super(scope, id, props);
