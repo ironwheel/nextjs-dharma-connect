@@ -651,7 +651,6 @@ export function getPermissionsLogic(pid: string): any {
     }
 }
 
-// --- Access Hash and Check Logic ---
 /**
  * Generates an HMAC hash of a UUID using a secret key.
  *
