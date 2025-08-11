@@ -1,4 +1,10 @@
-// packages/backend/src/tableConfig.ts
+/**
+ * @file packages/api/lib/tableConfig.ts
+ * @copyright Robert E. Taylor, Extropic Systems, 2025
+ * @license MIT
+ * @description Defines the configuration for all the DynamoDB tables used in the application.
+ */
+
 export interface TableConfig {
   resource: string;
   envVar: string;
@@ -32,10 +38,11 @@ export const tables: TableConfig[] = [
 ];
 
 /**
- * Looks up a table config by resource name and returns the related config object
- * @param resource - The resource name to look up (e.g., 'prompts', 'students')
- * @returns The table config object
- * @throws Error if the table config is not found
+ * @function tableGetConfig
+ * @description Looks up a table config by resource name and returns the related config object.
+ * @param {string} resource - The resource name to look up (e.g., 'prompts', 'students').
+ * @returns {TableConfig & { tableName: string }} The table config object.
+ * @throws {Error} If the table config is not found.
  */
 export function tableGetConfig(resource: string): TableConfig & { tableName: string } {
   const cfg = tables.find((t: TableConfig) => t.resource === resource);

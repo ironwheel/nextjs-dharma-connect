@@ -33,10 +33,8 @@ export interface Pool {
 }
 
 /**
- * Checks if a student is eligible for content based on pool definitions.
- * Recursive function to handle nested pool logic.
- *
  * @function checkEligibility
+ * @description Checks if a student is eligible for content based on pool definitions.
  * @param {string} poolName - The name of the eligibility pool to check.
  * @param {StudentData} studentData - The student data object containing programs, practice info, etc.
  * @param {string} currentAid - The AID of the current event context, for program-specific checks.

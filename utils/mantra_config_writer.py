@@ -1,16 +1,8 @@
-#!/usr/bin/env python3
 """
-Utility script to write records to the AWS mantra-config table.
-
-This script reads a JSON file containing mantra configuration records and writes them
-to the DynamoDB mantra-config table. The table name is accessed via the MANTRA_CONFIG_TABLE
-environment variable.
-
-Usage:
-    python mantra_config_writer.py --input mantra-config-records.json
-    python mantra_config_writer.py --input mantra-config-records.json --dry-run
-    python mantra_config_writer.py --delete-all
-    python mantra_config_writer.py --delete-all --dry-run
+@file utils/mantra_config_writer.py
+@copyright Robert E. Taylor, Extropic Systems, 2025
+@license MIT
+@description Utility script to write records to the AWS mantra-config table.
 """
 
 import argparse
@@ -36,12 +28,21 @@ if not MANTRA_CONFIG_TABLE:
     sys.exit(1)
 
 def get_dynamodb_client():
-    """Get DynamoDB client using the configured AWS profile."""
+    """
+    @function get_dynamodb_client
+    @description Get DynamoDB client using the configured AWS profile.
+    @returns A DynamoDB client.
+    """
     session = boto3.Session(profile_name=AWS_PROFILE, region_name=AWS_REGION)
     return session.resource('dynamodb')
 
 def load_json_records(file_path: str) -> List[Dict[str, Any]]:
-    """Load records from JSON file."""
+    """
+    @function load_json_records
+    @description Load records from JSON file.
+    @param file_path - The path to the JSON file.
+    @returns A list of records.
+    """
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
             records = json.load(file)
@@ -63,7 +64,12 @@ def load_json_records(file_path: str) -> List[Dict[str, Any]]:
         sys.exit(1)
 
 def validate_record(record: Dict[str, Any]) -> bool:
-    """Validate a single record against the expected schema."""
+    """
+    @function validate_record
+    @description Validate a single record against the expected schema.
+    @param record - The record to validate.
+    @returns True if the record is valid, False otherwise.
+    """
     required_fields = [
         'id', 'displayNamePrompt', 'descriptionPrompt',
         'bgColor', 'borderColor', 'displayOrder', 'isActive', 'incrementAmount'
@@ -94,7 +100,14 @@ def validate_record(record: Dict[str, Any]) -> bool:
     return True
 
 def write_record(dynamodb, table_name: str, record: Dict[str, Any], dry_run: bool = False):
-    """Write a single record to the DynamoDB table."""
+    """
+    @function write_record
+    @description Write a single record to the DynamoDB table.
+    @param dynamodb - The DynamoDB client.
+    @param table_name - The name of the table to write to.
+    @param record - The record to write.
+    @param dry_run - If True, only print what would be done without writing to DynamoDB.
+    """
     if dry_run:
         print(f"[DRYRUN] Would write record to {table_name}: {record['id']}")
         return
@@ -112,7 +125,13 @@ def write_record(dynamodb, table_name: str, record: Dict[str, Any], dry_run: boo
         print(f"ERROR: Failed to write record {record['id']}: {e}")
 
 def delete_all_records(dynamodb, table_name: str, dry_run: bool = False):
-    """Delete all records from the table."""
+    """
+    @function delete_all_records
+    @description Delete all records from the table.
+    @param dynamodb - The DynamoDB client.
+    @param table_name - The name of the table to delete from.
+    @param dry_run - If True, only print what would be done without writing to DynamoDB.
+    """
     if dry_run:
         print(f"[DRYRUN] Would delete all records from {table_name}")
         return
@@ -134,6 +153,10 @@ def delete_all_records(dynamodb, table_name: str, dry_run: bool = False):
         print(f"ERROR: Failed to delete records from {table_name}: {e}")
 
 def main():
+    """
+    @function main
+    @description The main function for the script.
+    """
     parser = argparse.ArgumentParser(description='Write records to the mantra-config table')
     parser.add_argument('--input', '-i', type=str, help='Input JSON file containing records')
     parser.add_argument('--dry-run', action='store_true', help='Perform all operations except writing to the table')

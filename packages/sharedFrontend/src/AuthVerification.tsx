@@ -1,3 +1,10 @@
+/**
+ * @file packages/sharedFrontend/src/AuthVerification.tsx
+ * @copyright Robert E. Taylor, Extropic Systems, 2025
+ * @license MIT
+ * @description Defines the AuthVerification component for handling email verification.
+ */
+
 import React, { useState, useEffect, useRef } from 'react';
 import { publicIpv4 } from 'public-ip';
 import { api } from './httpClient';
@@ -8,13 +15,10 @@ interface AuthVerificationProps {
 }
 
 /**
- * AuthVerification Component
- * This component handles the UI and logic for sending a verification email.
- * It's designed to be a shared component in a monorepo setup.
- *
- * Props:
- * - pid: The user's unique identifier (e.g., from URL parameters).
- * - hash: A unique hash for the verification request (e.g., from URL parameters).
+ * @component AuthVerification
+ * @description This component handles the UI and logic for sending a verification email.
+ * @param {AuthVerificationProps} props - The props for the component.
+ * @returns {React.FC} The AuthVerification component.
  */
 const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
     const [isSending, setIsSending] = useState(false);
@@ -64,8 +68,8 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
     }, [isSent, code]);
 
     /**
-     * Initiates the email verification process by calling the backend API.
-     * Displays loading, success, or error messages based on the API response.
+     * @function initiateVerification
+     * @description Initiates the email verification process by calling the backend API.
      */
     const initiateVerification = async () => {
         // Prevent sending if pid or hash are missing, or if already sending/sent
@@ -99,7 +103,10 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
     };
 
     /**
-     * Handles code input changes and auto-advances to next input
+     * @function handleCodeChange
+     * @description Handles code input changes and auto-advances to next input.
+     * @param {number} index - The index of the input field.
+     * @param {string} value - The value of the input field.
      */
     const handleCodeChange = (index: number, value: string) => {
         if (value.length > 1) {
@@ -132,7 +139,10 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
     };
 
     /**
-     * Handles backspace to go to previous input
+     * @function handleKeyDown
+     * @description Handles backspace to go to previous input.
+     * @param {number} index - The index of the input field.
+     * @param {React.KeyboardEvent<HTMLInputElement>} e - The keyboard event.
      */
     const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Backspace' && !code[index] && index > 0) {
@@ -141,8 +151,10 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
     };
 
     /**
- * Handles paste events specifically for individual input fields
- */
+     * @function handlePaste
+     * @description Handles paste events specifically for individual input fields.
+     * @param {React.ClipboardEvent<HTMLInputElement>} e - The clipboard event.
+     */
     const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
         e.preventDefault();
         e.stopPropagation(); // Prevent the global paste handler from also firing
@@ -165,7 +177,8 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
     };
 
     /**
-     * Verifies the entered 6-digit code
+     * @function verifyCode
+     * @description Verifies the entered 6-digit code.
      */
     const verifyCode = async () => {
         const codeString = code.join('');
@@ -213,7 +226,8 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
     };
 
     /**
-     * Resends verification email
+     * @function resendCode
+     * @description Resends verification email.
      */
     const resendCode = async () => {
         if (!pid || !hash || isResending) {

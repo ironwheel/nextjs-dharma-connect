@@ -1,13 +1,8 @@
-#!/usr/bin/env python3
 """
-Utility script to create recipient lists for a specific campaign.
-
-This script scans the student DynamoDB table and checks if each student has the specified
-campaign in their emails field. If a student has the campaign, a new entry is added to both
-SEND_TABLE and DRYRUN_TABLE (from environment variables).
-
-Usage:
-    python create_recipient_list.py --campaign "campaign-name"
+@file utils/create_recipient_list.py
+@copyright Robert E. Taylor, Extropic Systems, 2025
+@license MIT
+@description Utility script to create recipient lists for a specific campaign.
 """
 
 import argparse
@@ -31,10 +26,22 @@ if not SEND_TABLE or not DRYRUN_TABLE:
     sys.exit(1)
 
 def get_dynamodb_client():
+    """
+    @function get_dynamodb_client
+    @description Initializes and returns a DynamoDB client.
+    @returns A DynamoDB client.
+    """
     session = boto3.Session(profile_name=AWS_PROFILE, region_name=AWS_REGION)
     return session.resource('dynamodb')
 
 def scan_student_table(dynamodb, table_name: str) -> list:
+    """
+    @function scan_student_table
+    @description Scans the student table and returns all items.
+    @param dynamodb - The DynamoDB client.
+    @param table_name - The name of the table to scan.
+    @returns A list of items from the table.
+    """
     table = dynamodb.Table(table_name)
     students = []
     last_evaluated_key = None
@@ -54,6 +61,16 @@ def scan_student_table(dynamodb, table_name: str) -> list:
     return students
 
 def add_recipient_entry(dynamodb, table_name: str, campaign: str, student: Dict[str, Any], sendtime: str, dryrun: bool = False):
+    """
+    @function add_recipient_entry
+    @description Adds a recipient entry to the specified table.
+    @param dynamodb - The DynamoDB client.
+    @param table_name - The name of the table to add the entry to.
+    @param campaign - The campaign to add the recipient to.
+    @param student - The student to add.
+    @param sendtime - The send time for the email.
+    @param dryrun - If True, only print what would be done without writing to DynamoDB.
+    """
     entry = {
         'name': student.get('first', '') + ' ' + student.get('last', ''),
         'email': student.get('email', ''),
@@ -101,6 +118,10 @@ def add_recipient_entry(dynamodb, table_name: str, campaign: str, student: Dict[
         print(f"Error adding recipient to {table_name}: {e}")
 
 def main():
+    """
+    @function main
+    @description The main function for the script.
+    """
     parser = argparse.ArgumentParser(
         description='Create recipient lists for a specific campaign',
         formatter_class=argparse.RawDescriptionHelpFormatter,

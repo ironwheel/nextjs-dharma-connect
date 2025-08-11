@@ -1,30 +1,8 @@
-#!/usr/bin/env python3
 """
-Utility script to update Vimeo video domain permissions for embedded videos in events.
-
-This script scans the events DynamoDB table and looks for embeddedVideoList entries.
-For each video found, it calls the Vimeo API to set the allowed domain specified
-via the --allowed-domain command line argument.
-
-The script follows the AWS access patterns used by other utilities in this folder,
-using environment variables for configuration and the slsupport AWS profile.
-
-Required Environment Variables:
-    VIMEO_BEARER_TOKEN: Vimeo API bearer token for authentication
-
-Optional Environment Variables:
-    AWS_REGION: AWS region (default: us-east-1)
-    AWS_PROFILE: AWS profile name (default: slsupport)
-    EVENTS_TABLE: DynamoDB events table name (default: events)
-
-Usage:
-    python update_video_domains.py --allowed-domain "example.com"
-    python update_video_domains.py --allowed-domain "example.com" --dry-run
-    python update_video_domains.py --allowed-domain "example.com" --aid "specific-aid"
-    python update_video_domains.py --allowed-domain "example.com" --subevent "specific-subevent"
-
-The --dry-run flag performs all read operations (scanning events table, extracting videos)
-but does not make any API calls to update Vimeo domain settings.
+@file utils/update_video_domains.py
+@copyright Robert E. Taylor, Extropic Systems, 2025
+@license MIT
+@description Utility script to update Vimeo video domain permissions for embedded videos in events.
 """
 
 import argparse
@@ -53,12 +31,22 @@ if not VIMEO_BEARER_TOKEN:
     sys.exit(1)
 
 def get_dynamodb_client():
-    """Get DynamoDB client using the configured AWS profile."""
+    """
+    @function get_dynamodb_client
+    @description Get DynamoDB client using the configured AWS profile.
+    @returns A DynamoDB client.
+    """
     session = boto3.Session(profile_name=AWS_PROFILE, region_name=AWS_REGION)
     return session.resource('dynamodb')
 
 def scan_events_table(dynamodb, table_name: str) -> List[Dict[str, Any]]:
-    """Scan the events table and return all events."""
+    """
+    @function scan_events_table
+    @description Scan the events table and return all events.
+    @param dynamodb - The DynamoDB client.
+    @param table_name - The name of the table to scan.
+    @returns A list of events.
+    """
     table = dynamodb.Table(table_name)
     events = []
     last_evaluated_key = None
@@ -82,15 +70,12 @@ def scan_events_table(dynamodb, table_name: str) -> List[Dict[str, Any]]:
 
 def set_allowed_domain(video_id: str, domain: str, dry_run: bool = False) -> bool:
     """
-    Set the allowed domain for a Vimeo video.
-    
-    Args:
-        video_id: The Vimeo video ID
-        domain: The domain to allow
-        dry_run: If True, don't actually make the API call
-    
-    Returns:
-        True if successful, False otherwise
+    @function set_allowed_domain
+    @description Set the allowed domain for a Vimeo video.
+    @param video_id - The Vimeo video ID.
+    @param domain - The domain to allow.
+    @param dry_run - If True, don't actually make the API call.
+    @returns True if successful, False otherwise.
     """
     url = f"https://api.vimeo.com/videos/{video_id}/privacy/domains/{domain}"
     
@@ -117,13 +102,10 @@ def set_allowed_domain(video_id: str, domain: str, dry_run: bool = False) -> boo
 
 def extract_videos_from_event(event: Dict[str, Any]) -> List[str]:
     """
-    Extract all video IDs from an event's embeddedVideoList.
-    
-    Args:
-        event: The event dictionary from DynamoDB
-    
-    Returns:
-        List of video IDs found in the event
+    @function extract_videos_from_event
+    @description Extract all video IDs from an event's embeddedVideoList.
+    @param event - The event dictionary from DynamoDB.
+    @returns List of video IDs found in the event.
     """
     videos = []
     
@@ -156,17 +138,15 @@ def process_events(events: List[Dict[str, Any]], allowed_domain: str,
                   aid_filter: Optional[str] = None, subevent_filter: Optional[str] = None,
                   dry_run: bool = False, debug: bool = False) -> Dict[str, int]:
     """
-    Process events and update video domains.
-    
-    Args:
-        events: List of events from DynamoDB
-        allowed_domain: Domain to allow for videos
-        aid_filter: Optional aid to filter events
-        subevent_filter: Optional subevent to filter
-        dry_run: If True, don't actually make API calls
-    
-    Returns:
-        Dictionary with counts of processed items
+    @function process_events
+    @description Process events and update video domains.
+    @param events - List of events from DynamoDB.
+    @param allowed_domain - Domain to allow for videos.
+    @param aid_filter - Optional aid to filter events.
+    @param subevent_filter - Optional subevent to filter.
+    @param dry_run - If True, don't actually make API calls.
+    @param debug - If True, show debug information about video structure.
+    @returns Dictionary with counts of processed items.
     """
     stats = {
         'events_processed': 0,
@@ -241,7 +221,10 @@ def process_events(events: List[Dict[str, Any]], allowed_domain: str,
     return stats
 
 def main():
-    """Main function to run the video domain update utility."""
+    """
+    @function main
+    @description Main function to run the video domain update utility.
+    """
     parser = argparse.ArgumentParser(
         description='Update Vimeo video domain permissions for embedded videos in events'
     )

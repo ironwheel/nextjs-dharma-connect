@@ -1,4 +1,10 @@
-// packages/sharedFrontend/src/index.ts
+/**
+ * @file packages/sharedFrontend/src/index.ts
+ * @copyright Robert E. Taylor, Extropic Systems, 2025
+ * @license MIT
+ * @description This file exports all the modules from the sharedFrontend package.
+ */
+
 export * from './httpClient';
 export * from './fingerprint';
 export * from './apiActions';
