@@ -1,9 +1,8 @@
-# Customer Identity and Access Management (CIAM)
+# Auth and Session Architecture of the "Dharma Connect" monorepo
 
 ## Overview
 
-This document defines the authentication and session architecture for the nextjs-dharma-connect monorepo. It describes the two-stage auth flow (PID+hash → email verification), DynamoDB-backed session model, short-lived JWT access tokens (no refresh tokens), CSRF/CORS protections, route hardening, device fingerprinting, and how these pieces integrate with Vercel’s WAF. The goal is to give engineers and reviewers a single, handoff-friendly reference for how identity, authorization, and session renewal work across all apps in the monorepo.
-Note: WAF rules are primarily managed in the Vercel dashboard; any JSON snippets here are illustrative. Only security headers and related app-level safeguards are versioned in this repo.
+This document defines the authentication and session architecture for the nextjs-dharma-connect monorepo. It describes the two-stage auth flow (PID+hash → email verification), DynamoDB-backed session model, short-lived JWT access tokens, CSRF/CORS protections, route hardening, device fingerprinting, and how these pieces integrate with Vercel's WAF. The goal is to give engineers and reviewers a single, handoff-friendly reference for how identity, authorization, and session renewal work across all apps in the monorepo.
 
 ## Architecture
 
@@ -11,19 +10,18 @@ Note: WAF rules are primarily managed in the Vercel dashboard; any JSON snippets
 
 1. **Two-Stage Authentication**
    - Stage 1: High-entropy URL access validation (PID + hash)
-   - Stage 2: Email verification with magic links
+   - Stage 2: Email verification with 6-digit OTP
 2. **Session Management** - DynamoDB-backed sessions with 24-hour expiration
 3. **Access Tokens** - Short-lived JWT tokens (15 minutes) with embedded claims
 4. **CSRF/CORS Protection** - All routes protected against cross-site attacks
 5. **Device Fingerprinting** - Additional security layer for device verification
-6. **Vercel WAF Integration** - Multi-layered protection against application and infrastructure threats
 
 ### Technology Stack
 
 - **Backend**: Next.js API Routes (trusted execution environment)
 - **Database**: DynamoDB (TTL-enabled tables)
-- **Tokens**: JWT (access tokens only, no refresh tokens)
-- **Email**: AWS SES or similar provider
+- **Tokens**: JWT (access tokens only, with session-based refresh via TTL-enabled DynamoDB sessions)
+- **Email**: gmail, AWS SES or similar provider
 - **Security**: httpOnly cookies, CSRF tokens, device fingerprinting
 - **Infrastructure**: Vercel WAF with managed rulesets and custom protection
 
@@ -40,151 +38,12 @@ The `nextjs-dharma-connect` project follows Next.js security best practices by p
 
 ### Multi-Layered Security Model
 
-```mermaid
-graph TB
-    subgraph "Vercel WAF Layer"
-        WAF[Vercel WAF]
-        WAF --> L7[Layer 7 Protection<br/>SQL Injection, XSS, RFI]
-        WAF --> RL[Rate Limiting<br/>& DDoS Protection]
-        WAF --> IP[IP Blocking<br/>& Geolocation]
-    end
-    
-    subgraph "Application Security Layer"
-        APP[Next.js API Routes]
-        APP --> CSRF[CSRF Protection<br/>Token Validation]
-        APP --> CORS[CORS Configuration<br/>Origin Validation]
-        APP --> JWT[JWT Access Tokens<br/>RS256, 15min expiry]
-        APP --> FP[Device Fingerprinting<br/>Browser Fingerprint]
-    end
-    
-    subgraph "Authentication Layer"
-        AUTH[Authentication Flow]
-        AUTH --> PID[PID + Hash<br/>URL Validation]
-        AUTH --> EMAIL[Email Verification<br/>6-digit OTP]
-        AUTH --> SESSION[DynamoDB Sessions<br/>24-hour TTL]
-    end
-    
-    subgraph "Data Layer"
-        DB[DynamoDB Tables]
-        DB --> AUTH_TABLE[auth table<br/>permissions & hosts]
-        DB --> SESSIONS_TABLE[sessions table<br/>pid + fingerprint]
-        DB --> VERIFY_TABLE[verification-tokens<br/>6-digit OTP]
-        DB --> ACTIONS_TABLE[actions-profile<br/>operation permissions]
-    end
-    
-    WAF --> APP
-    APP --> AUTH
-    AUTH --> DB
-```
+The security architecture consists of multiple layers:
 
-## Vercel Web Application Firewall (WAF) Integration
-
-### WAF Capabilities
-
-Vercel's WAF provides comprehensive protection at multiple layers, seamlessly integrated with our CIAM system:
-
-#### Layer 7 Application Protection
-- **SQL Injection Prevention**: Blocks malicious SQL queries targeting DynamoDB operations
-- **Cross-Site Scripting (XSS) Protection**: Prevents script injection attacks
-- **Remote File Inclusion (RFI) Blocking**: Stops unauthorized file access attempts
-- **Bot Traffic Management**: Identifies and challenges automated attacks
-
-#### Custom Security Rules
-Our WAF configuration includes custom rules tailored to the CIAM system:
-
-```javascript
-// Example WAF rule for authentication endpoints
-{
-  "name": "auth-endpoint-protection",
-  "description": "Protect authentication endpoints from abuse",
-  "conditions": [
-    {
-      "field": "path",
-      "operator": "matches",
-      "value": "/api/auth/*"
-    }
-  ],
-  "actions": [
-    {
-      "type": "rate-limit",
-      "value": "10/minute"
-    },
-    {
-      "type": "challenge",
-      "value": "captcha"
-    }
-  ]
-}
-```
-
-#### Rate Limiting Configuration
-- **Authentication Endpoints**: 10 requests per minute per IP
-- **API Endpoints**: 100 requests per minute per authenticated user
-- **Public Endpoints**: 50 requests per minute per IP
-- **Token Refresh**: 5 requests per minute per session
-
-#### IP Blocking and Geolocation
-- **Known Malicious IPs**: Automatically blocked based on threat intelligence
-- **Geographic Restrictions**: Optional country-based access controls
-- **Scraper Protection**: Blocks automated data extraction attempts
-
-#### DDoS Mitigation
-- **Automatic Protection**: Layer 3/4 DDoS protection enabled by default
-- **Traffic Analysis**: Real-time detection of volumetric attacks
-- **Global Distribution**: Traffic distributed across Vercel's edge network
-
-### WAF Integration with CIAM
-
-#### Authentication Flow Protection
-The WAF enhances our two-stage authentication process:
-
-1. **Link Validation Stage**:
-   - WAF validates request patterns before reaching application
-   - Rate limits prevent brute force attacks on PID/hash combinations
-   - Bot protection challenges suspicious automated requests
-
-2. **Email Verification Stage**:
-   - Custom rules protect email sending endpoints (`/api/auth/verificationEmailSend/*`)
-   - Rate limiting prevents email bombing attacks (3 emails per 2 minutes per PID)
-   - Challenge mode for suspicious verification attempts
-
-#### Session Management Security
-- **Session Creation**: WAF monitors for unusual session creation patterns
-- **Token Refresh**: Rate limits prevent token refresh abuse
-- **Session Hijacking**: Detects and blocks suspicious session access patterns
-
-#### API Endpoint Protection
-All API endpoints benefit from WAF protection. Actions are validated as HTTP method + path combinations:
-
-```javascript
-// WAF rule for table operations
-{
-  "name": "table-operations-protection",
-  "conditions": [
-    {
-      "field": "path",
-      "operator": "matches", 
-      "value": "/api/table/*"
-    }
-  ],
-  "actions": [
-    {
-      "type": "require-auth",
-      "value": "jwt-token"
-    },
-    {
-      "type": "validate-action",
-      "value": "method+path"
-    }
-  ]
-}
-
-// Example protected actions:
-// GET/table/students - Read student data
-// POST/table/students - Create/update student data  
-// POST/table/prompts - Manage prompts
-// GET/table/mantra-count - Read mantra counts
-```
+1. **Vercel WAF Layer**: Layer 7 protection (SQL injection, XSS, RFI), rate limiting, DDoS protection, IP blocking, geolocation
+2. **Application Security Layer**: Next.js API routes with CSRF protection, CORS configuration, JWT access tokens, device fingerprinting
+3. **Authentication Layer**: Two-stage authentication flow with PID + hash validation and 6-digit OTP email verification
+4. **Data Layer**: DynamoDB tables for auth, sessions, verification tokens, and action profiles
 
 ## Two-Stage Authentication Flow
 
@@ -197,57 +56,40 @@ https://app.dharma-connect.com/?pid=e271aea6-031e-4a7d-8269-99ee4adae5bf&hash=ab
 ```
 
 This link is validated through `checkAccess()` function which:
-1. **WAF Pre-validation**: Request filtered through WAF rules
-2. **Hash Verification**: Verifies the hash using HMAC-SHA256 with app-specific secrets
-3. **Access Control**: Checks if the PID has access to the requested host via `auth` table
-4. **Session Check**: Returns a JWT if an existing valid session is found in DynamoDB
-5. **Verification Flow**: Creates verification token if no valid session exists
+1. **Hash Verification**: Verifies the hash using HMAC-SHA256 with app-specific secrets
+2. **Access Control**: Checks if the PID has access to the requested host (app) via `auth` table
+3. **Session Check**: Returns a JWT if an existing valid session is found in DynamoDB
+4. **Verification Flow**: Initiates email verification process if no valid session exists
 
 ### Stage 2: Email Verification
 
 If no valid session exists, users must verify their email with a 6-digit OTP:
 
-```mermaid
-sequenceDiagram
-    User->>WAF: Visit access link with PID+hash
-    WAF->>Frontend: Filtered request (rate limited, bot checked)
-    Frontend->>Backend: POST /api/auth/check-access
-    Backend->>Backend: Validate hash & check auth table
-    Backend->>Backend: Check for existing session
-    alt Existing valid session
-        Backend->>Frontend: Return JWT access token
-        Frontend->>Dashboard: Redirect to app
-    else No valid session
-        Backend->>Frontend: Return needs-verification
-        Frontend->>User: Show AuthVerification component
-        User->>Frontend: Click "Send Verification Email"
-        Frontend->>WAF: POST /api/auth/verificationEmailSend/{pid}
-        WAF->>Backend: Rate-limited request
-        Backend->>DynamoDB: Store 6-digit OTP token
-        Backend->>Email: Send email with 6-digit code
-        User->>Email: Copy 6-digit code
-        User->>Frontend: Enter 6-digit code
-        Frontend->>WAF: POST /api/auth/verificationEmailCallback/{code}
-        WAF->>Backend: Validate OTP
-        Backend->>DynamoDB: Create session (pid + fingerprint)
-        Backend->>Frontend: Return authenticated status
-        Frontend->>Dashboard: Redirect to app
-    end
-```
+1. **User visits access link** with PID+hash
+2. **Frontend shows AuthVerification component** if no valid session
+3. **User requests verification email** via POST `/api/auth/verificationEmailSend/{pid}`
+4. **System generates 6-digit OTP** and stores it in `verification-tokens` table with 15-minute TTL
+5. **Email sent with 6-digit code** to user
+6. **User enters 6-digit code** in the AuthVerification component
+7. **Code verified** via POST `/api/auth/verificationEmailCallback/{code}`
+8. **Upon successful verification**: verification token deleted, session created in DynamoDB (pid + device fingerprint) with 24-hour TTL
+9. **User redirected to dashboard** with authenticated status
 
 ### 1. Initial Access Check
 
-The `handleCheckAccess` function validates the PID and hash, then either:
+The `checkAccess` function validates the PID and hash, then either:
 - Returns a JWT for existing valid sessions
-- Creates a temporary session for new authentication attempts
+- Returns "already-authenticated" if user has valid token but tries verification actions
+- Initiates the email verification process if no valid session exists
 
 **Request**:
 ```javascript
 {
   pid: "e271aea6-031e-4a7d-8269-99ee4adae5bf",
   hash: "7f3a2b9c...",
-  url: "https://app.dharma-connect.com",
-  deviceFingerprint: "abc123..."
+  host: "app.dharma-connect.com",
+  deviceFingerprint: "abc123...",
+  operation: "GET/table/students"  // HTTP method + path
 }
 ```
 
@@ -255,8 +97,7 @@ The `handleCheckAccess` function validates the PID and hash, then either:
 ```javascript
 {
   status: "authenticated",
-  accessToken: "eyJhbGciOiJ...",
-  expiresIn: 900
+  accessToken: "eyJhbGciOiJ..."  // Full permissions JWT
 }
 ```
 
@@ -264,14 +105,25 @@ The `handleCheckAccess` function validates the PID and hash, then either:
 ```javascript
 {
   status: "needs-verification",
-  tempToken: "eyJhbGciOiJ...",
-  email: "user@example.com"  // Pre-filled if available
+  accessToken: "eyJhbGciOiJ...",  // Limited verification actions only
+  message: "Email verification required"
 }
 ```
 
+**Response (Already Authenticated)**:
+```javascript
+{
+  status: "already-authenticated",
+  message: "User is already authenticated"
+}
+```
+
+**When "already-authenticated" Occurs**:
+This state is returned when a user has a valid access token but attempts to perform verification-related actions (`POST/auth/verificationEmailSend` or `POST/auth/verificationEmailCallback`). This prevents already authenticated users from unnecessarily going through the verification process again, improving security and user experience.
+
 ### 2. Email Verification Request
 
-Users must explicitly request email verification after link validation. The system generates a 6-digit OTP and sends it via email.
+Users must explicitly request email verification after link validation. The system generates a 6-digit OTP and sends it via email. This creates a verification token record in the `verification-tokens` table.
 
 **Verification Token Structure**:
 ```javascript
@@ -283,7 +135,7 @@ Users must explicitly request email verification after link validation. The syst
   deviceFingerprint: "abc123...",
   createdAt: 1704067200000,
   ttl: 1704068100000,  // 15 minutes TTL from VERIFICATION_DURATION
-  failedAttempt: false  // Optional, for rate limiting
+  failedAttempt: false  // Tracks failed verification attempts for rate limiting
 }
 ```
 
@@ -299,7 +151,12 @@ Users must enter this 6-digit code in the AuthVerification component to complete
 
 ### 4. Session Creation
 
-Upon successful verification:
+Upon successful verification, the system:
+1. **Validates the 6-digit OTP** against the stored verification token
+2. **Checks rate limiting** (max 5 failed attempts per 5 minutes per PID+device)
+3. **Creates a new session** in the DynamoDB sessions table
+4. **Deletes the verification token** to prevent reuse
+5. **Returns a new access token** with full permissions
 
 ```javascript
 // Session structure in DynamoDB (sessions table)
@@ -343,15 +200,17 @@ Short-lived tokens (15 minutes) containing essential claims:
 }
 ```
 
-### Session Management (No Refresh Tokens)
+### Session Management (Session-Based Token Refresh)
 
-This implementation uses **DynamoDB sessions instead of refresh tokens**. The session management works as follows:
+This implementation uses **DynamoDB sessions instead of traditional refresh tokens**. The session management works as follows:
 
 1. **Access Token**: Short-lived JWT tokens (15 minutes) with RS256 signing
-2. **Session Storage**: DynamoDB sessions table with composite key (pid + deviceFingerprint)
+2. **Session Storage**: DynamoDB sessions table with composite key (pid + deviceFingerprint) and TTL
 3. **Session Duration**: 24-hour TTL from environment variable `SESSION_DURATION`
-4. **Token Refresh**: Automatic refresh via `checkAccess()` function on each API call
+4. **Token Refresh**: Automatic refresh via `checkAccess()` function on each API call by validating the TTL-enabled session entry
 5. **Session Validation**: Device fingerprint must match for session to be valid
+6. **Security Design**: TTL-enabled sessions provide controlled-access storage without the security overhead of refresh tokens
+7. **State Management**: Returns "already-authenticated" for verified users attempting verification actions
 
 ### Cookie Configuration
 
@@ -378,22 +237,53 @@ This implementation uses **DynamoDB sessions instead of refresh tokens**. The se
 }
 ```
 
+### Cross-Application Authentication
+
+The monorepo contains multiple applications that share authentication state through browser cookies:
+
+**Applications in the Monorepo**:
+- `student-dashboard` - Student interface
+- `student-manager` - Administrative interface for student management
+- `email-manager` - Email campaign management
+- `event-dashboard` - Event management interface
+- `translation-manager` - Translation workflow management
+- `auth-test` - Authentication testing
+
+**Cross-Application Behavior**:
+
+1. **Production Environment**:
+   - Uses `MONOREPO_PARENT_DOMAIN` environment variable (e.g., `.your-domain.com`)
+   - Access token cookies are set with `domain: .your-domain.com`
+   - **All subdomain apps share the same authentication state**
+   - User verification in one app automatically authenticates them in other apps
+
+2. **Development Environment**:
+   - Uses `x-host` header value for cookie domain
+   - Cookies are scoped to individual hostnames (e.g., `localhost:3000`)
+   - **Apps run independently** - no cross-application authentication
+
+3. **Cookie Sharing Rules**:
+   - **Same Browser, Different Tabs**: ✅ Authentication shared across tabs
+   - **Same Browser, Different Apps (Production)**: ✅ Authentication shared across subdomains
+   - **Same Browser, Different Apps (Development)**: ❌ Authentication isolated per app
+   - **Different Browsers**: ❌ Authentication not shared
+
+4. **Security Implications**:
+   - Once authenticated in any production app, users can access all apps they have permission to access without re-verification
+   - Session expiration (24 hours) applies globally across all applications
+   - Device fingerprinting ensures authentication is tied to the same device across apps
+
 ## Route Categories
 
-### 1. Public Routes
-No authentication required:
-- `/api/health`
-- `/api/status`
-- `/api/config/public`
-
-### 2. Auth Flow Routes
+### 1. Auth Flow Routes
 Available during authentication process:
 - `/api/csrf` - CSRF token endpoint
 - `/api/auth/verificationEmailSend/{pid}` - Send verification email
 - `/api/auth/verificationEmailCallback/{code}` - Verify 6-digit OTP
 
-### 3. Protected Routes
-Require valid session and access token. Actions are HTTP method + path combinations:
+### 2. Protected Routes
+Require valid session and access token. Actions are HTTP method + path combinations. **This list is partial** - each app has its own app-specific "actions profile" that prevents users with permissions in one app from receiving permissions to access resources only required for other apps:
+
 - `GET/table/students` - Read student data
 - `POST/table/students` - Create/update student data
 - `GET/table/config` - Read configuration
@@ -404,6 +294,7 @@ Require valid session and access token. Actions are HTTP method + path combinati
 - `POST/table/mantra-count` - Update mantra counts
 - `POST/table/mantra-config` - Manage mantra configuration
 - `POST/table/sd-prompts-cache` - Manage prompt cache
+- ...
 
 ### Route Protection Example
 
@@ -532,221 +423,6 @@ headers: {
 }
 ```
 
-### Unverified vs Verified Sessions
-
-Sessions start in an unverified state with limited claims:
-
-```javascript
-// Unverified session (during auth flow)
-{
-  sessionId: "550e8400-...",
-  email: "user@example.com",
-  verified: false,
-  claims: {
-    identity: {
-      email: "user@example.com",
-      emailVerified: false
-    },
-    authorization: {
-      role: "guest",
-      actions: [
-        "handleGetTranslations",
-        "handleGetPublicConfig",
-        "handleRequestLogin",
-        "handleVerifyEmail"
-      ],
-      organizationId: null
-    },
-    limits: {
-      apiCallsRemaining: 10,  // Very limited
-      maxStorageMB: 0
-    }
-  },
-  expiresAt: Date.now() + 1800000  // 30 minutes for unverified
-}
-
-// After verification, session is updated
-{
-  verified: true,
-  claims: {
-    authorization: {
-      role: "user",
-      actions: [
-        "handleFindParticipant",
-        "handleScanTable",
-        "handleCheckAccess",
-        "handleGetUserProfile",
-        "handleUpdateProfile",
-        "handleListDocuments",
-        "handleCreateDocument",
-        // ... full list of allowed actions
-      ],
-      actionConstraints: {
-        "handleScanTable": {
-          maxResults: 100,
-          allowedTables: ["participants", "documents"]
-        }
-      }
-    },
-    limits: {
-      apiCallsRemaining: 1000,
-      maxStorageMB: 1000
-    }
-  },
-  expiresAt: Date.now() + 86400000  // Extended to 24 hours
-}
-```
-
-```javascript
-// Update user permissions after verification
-await dynamodb.update({
-  TableName: 'Sessions',
-  Key: { sessionId },
-  UpdateExpression: `
-    SET verified = :true,
-    claims.authorization.role = :role,
-    claims.authorization.actions = :actions,
-    claims.identity.emailVerified = :emailVerified
-  `,
-  ExpressionAttributeValues: {
-    ':true': true,
-    ':role': 'user',
-    ':actions': [
-      'handleFindParticipant',
-      'handleScanTable',
-      'handleCheckAccess',
-      'handleGetUserProfile',
-      'handleUpdateProfile'
-    ],
-    ':emailVerified': true
-  }
-});
-
-// Update dynamic limits
-await dynamodb.update({
-  TableName: 'Sessions',
-  Key: { sessionId },
-  UpdateExpression: 'SET claims.limits = :limits, lastClaimsRefresh = :now',
-  ExpressionAttributeValues: {
-    ':limits': {
-      apiCallsRemaining: 950,
-      apiCallsResetAt: Date.now() + 3600000,
-      storageUsedMB: 234,
-      maxStorageMB: 1000
-    },
-    ':now': Date.now()
-  }
-});
-
-// Next token refresh will include updated claims
-```
-
-## Vercel WAF Configuration
-
-### WAF Rules Configuration
-
-```javascript
-// vercel.json - WAF configuration
-{
-  "functions": {
-    "apps/*/pages/api/**/*.ts": {
-      "maxDuration": 30
-    }
-  },
-  "headers": [
-    {
-      "source": "/api/(.*)",
-      "headers": [
-        {
-          "key": "X-Content-Type-Options",
-          "value": "nosniff"
-        },
-        {
-          "key": "X-Frame-Options",
-          "value": "DENY"
-        },
-        {
-          "key": "X-XSS-Protection",
-          "value": "1; mode=block"
-        },
-        {
-          "key": "Referrer-Policy",
-          "value": "strict-origin-when-cross-origin"
-        },
-        {
-          "key": "Strict-Transport-Security",
-          "value": "max-age=31536000; includeSubDomains"
-        }
-      ]
-    }
-  ],
-  "waf": {
-    "rules": [
-      {
-        "name": "auth-rate-limit",
-        "description": "Rate limit authentication endpoints",
-        "conditions": [
-          {
-            "field": "path",
-            "operator": "matches",
-            "value": "/api/auth/*"
-          }
-        ],
-        "actions": [
-          {
-            "type": "rate-limit",
-            "value": "10/minute"
-          }
-        ]
-      },
-      {
-        "name": "api-protection",
-        "description": "Protect API endpoints",
-        "conditions": [
-          {
-            "field": "path",
-            "operator": "matches",
-            "value": "/api/*"
-          }
-        ],
-        "actions": [
-          {
-            "type": "challenge",
-            "value": "captcha"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-### WAF Monitoring and Analytics
-
-The WAF provides comprehensive visibility into security events:
-
-```javascript
-// WAF event logging
-{
-  "timestamp": "2024-01-01T12:00:00Z",
-  "event": "waf_block",
-  "rule": "auth-rate-limit",
-  "ip": "192.168.1.100",
-  "path": "/api/auth/request-login",
-  "userAgent": "Mozilla/5.0...",
-  "country": "US",
-  "action": "rate_limit_exceeded"
-}
-```
-
-### WAF Integration Benefits
-
-1. **Automatic Threat Detection**: WAF identifies and blocks known attack patterns
-2. **Real-time Protection**: Instant propagation of security rules globally
-3. **Comprehensive Logging**: Detailed audit trail of all security events
-4. **Zero Configuration**: Basic protection enabled by default
-5. **Custom Rules**: Tailored protection for specific application needs
-
 ## DynamoDB Tables
 
 ### DynamoDB Tables
@@ -792,7 +468,7 @@ Attributes:
   - deviceFingerprint: String
   - createdAt: Number
   - ttl: Number (TTL timestamp)
-  - failedAttempt: Boolean (optional)
+  - failedAttempt: Boolean (tracks failed attempts for rate limiting)
 ```
 
 #### actions-profile Table
@@ -837,6 +513,14 @@ Attributes:
 
 ## Environment Variables
 
+The client-side only has one environment variable, the url of the back end.
+
+```env
+NEXT_PUBLIC_API_URL=https://api.your-domain.com
+```
+
+The server-side secrets are either Vercel environment variables as shown here, or live in the config table.
+
 ```env
 # JWT Configuration
 JWT_ISSUER_NAME=your-jwt-issuer
@@ -872,8 +556,7 @@ APP_ACCESS_JSON=[{"host":"example.com","secret":"your-secret-key"}]
 LANG_PERMISSIONS_JSON={"pid1":{"English":true,"Spanish":false}}
 
 # Production Configuration
-MONOREPO_PARENT_DOMAIN=.your-domain.com
-NEXT_PUBLIC_API_URL=https://api.your-domain.com
+MONOREPO_PARENT_DOMAIN=.your-domain.com  # Enables cross-application cookie sharing
 ```
 
 ## Monitoring and Observability
@@ -900,28 +583,6 @@ NEXT_PUBLIC_API_URL=https://api.your-domain.com
 - IP blocked
 - Challenge mode activated
 
-### WAF Analytics Dashboard
-
-```javascript
-// Example WAF metrics
-{
-  "totalRequests": 1000000,
-  "blockedRequests": 5000,
-  "rateLimitViolations": 1200,
-  "botTraffic": 800,
-  "topThreats": [
-    { "type": "sql_injection", "count": 1500 },
-    { "type": "xss_attempt", "count": 800 },
-    { "type": "rate_limit", "count": 1200 }
-  ],
-  "geographicDistribution": {
-    "US": 600000,
-    "EU": 300000,
-    "Asia": 100000
-  }
-}
-```
-
 ## Security Best Practices
 
 ### Next.js Security Guidelines
@@ -931,14 +592,6 @@ NEXT_PUBLIC_API_URL=https://api.your-domain.com
 3. **Input Validation**: All user input validated server-side
 4. **Output Encoding**: Proper encoding of all dynamic content
 5. **Secure Headers**: Security headers configured in next.config.js
-
-### WAF Security Guidelines
-
-1. **Layered Defense**: WAF provides additional protection beyond application security
-2. **Custom Rules**: Tailored rules for application-specific threats
-3. **Rate Limiting**: Prevents abuse and brute force attacks
-4. **Bot Protection**: Challenges automated requests
-5. **Real-time Monitoring**: Continuous threat detection and response
 
 ### Token Security Guidelines
 
@@ -950,21 +603,102 @@ NEXT_PUBLIC_API_URL=https://api.your-domain.com
 
 ## Migration Guide
 
-For applications migrating to this CIAM system:
+For applications migrating to this authentication system:
 
 1. Map existing user identifiers to new userId format
 2. Implement device fingerprinting on all clients
 3. Update API routes to use new middleware
-4. Migrate from existing auth to magic links
-5. Update frontend to handle temp tokens during auth
-6. Test all protected routes with new auth flow
-7. Configure Vercel WAF rules for application-specific threats
-8. Set up WAF monitoring and alerting
+4. Update frontend to handle temp tokens during auth
+5. Test all protected routes with new auth flow
+6. Configure Vercel WAF rules for application-specific threats
+7. Set up WAF monitoring and alerting
+
+## Vercel WAF Integration
+
+### WAF Capabilities
+
+Vercel's WAF provides comprehensive protection at multiple layers, seamlessly integrated with our authentication system:
+
+#### Layer 7 Application Protection
+- **SQL Injection Prevention**: Blocks malicious SQL queries targeting DynamoDB operations
+- **Cross-Site Scripting (XSS) Protection**: Prevents script injection attacks
+- **Remote File Inclusion (RFI) Blocking**: Stops unauthorized file access attempts
+- **Bot Traffic Management**: Identifies and challenges automated attacks
+
+#### Custom Security Rules
+Our WAF configuration includes custom rules tailored to the authentication system:
+
+- **Authentication Endpoints**: 10 requests per minute per IP
+- **API Endpoints**: 100 requests per minute per authenticated user
+- **Email Verification**: 3 emails per 2 minutes per PID
+- **Token Refresh**: 5 requests per minute per session
+
+#### IP Blocking and Geolocation
+- **Known Malicious IPs**: Automatically blocked based on threat intelligence
+- **Geographic Restrictions**: Optional country-based access controls
+- **Scraper Protection**: Blocks automated data extraction attempts
+
+#### DDoS Mitigation
+- **Automatic Protection**: Layer 3/4 DDoS protection enabled by default
+- **Traffic Analysis**: Real-time detection of volumetric attacks
+- **Global Distribution**: Traffic distributed across Vercel's edge network
+
+### WAF Integration with Authentication System
+
+#### Authentication Flow Protection
+The WAF enhances our two-stage authentication process:
+
+1. **Link Validation Stage**:
+   - WAF validates request patterns before reaching application
+   - Rate limits prevent brute force attacks on PID/hash combinations
+   - Bot protection challenges suspicious automated requests
+
+2. **Email Verification Stage**:
+   - Custom rules protect email sending endpoints (`/api/auth/verificationEmailSend/*`)
+   - Rate limiting prevents email bombing attacks (3 emails per 2 minutes per PID)
+   - Challenge mode for suspicious verification attempts
+   - Failed verification attempts tracked and rate-limited (max 5 per 5 minutes per PID+device)
+
+#### Session Management Security
+- **Session Creation**: WAF monitors for unusual session creation patterns
+- **Token Refresh**: Rate limits prevent token refresh abuse
+- **Session Hijacking**: Detects and blocks suspicious session access patterns
+
+#### API Endpoint Protection
+All API endpoints benefit from WAF protection. Actions are validated as HTTP method + path combinations:
+
+- **WAF rule for table operations**: `/api/table/*` path with `validate-action` type
+- **Example protected actions**:
+  - `GET/table/students` - Read student data
+  - `POST/table/students` - Create/update student data
+  - `POST/table/prompts` - Manage prompts
+  - `GET/table/mantra-count` - Read mantra counts
+
+
+
+### WAF Monitoring and Analytics
+
+The WAF provides comprehensive visibility into security events:
+
+- **Automatic Threat Detection**: WAF identifies and blocks known attack patterns
+- **Real-time Protection**: Instant propagation of security rules globally
+- **Comprehensive Logging**: Detailed audit trail of all security events
+- **Zero Configuration**: Basic protection enabled by default
+- **Custom Rules**: Tailored protection for specific application needs
+
+
+
+### WAF Security Guidelines
+
+1. **Layered Defense**: WAF provides additional protection beyond application security
+2. **Custom Rules**: Tailored rules for application-specific threats
+3. **Rate Limiting**: Prevents abuse and brute force attacks
+4. **Bot Protection**: Challenges automated requests
+5. **Real-time Monitoring**: Continuous threat detection and response
 
 ## Support
 
-For questions or issues with the CIAM implementation:
-- Check the troubleshooting guide in `/docs/ciam-troubleshooting.md`
-- Review example implementations in `/examples/ciam-integration`
-- Contact the platform team at platform@dharma-connect.com
+For questions or issues with the authentication implementation:
+- Check the troubleshooting guide in `/docs/auth-troubleshooting.md`
+- Review example implementations in `/examples/auth-integration`
 - Vercel WAF documentation: https://vercel.com/docs/security/waf
