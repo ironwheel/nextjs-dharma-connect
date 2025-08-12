@@ -12,12 +12,9 @@ import {
     getAllTableItemsWithProjectionExpression,
     updateTableItem,
     getTableItemOrNull,
-    putTableItem,
     deleteTableItem,
     getTableCount,
-    checkEligibility,
-    authGetLink,
-
+    authLinkEmailSend,
     authGetAuthList,
     authGetViewsProfiles,
     authPutAuthItem,
@@ -54,8 +51,6 @@ interface AuthRecord {
     };
     'permitted-hosts': string[]; // Now just an array of host strings
 }
-
-
 
 interface ViewsProfile {
     id: string;
@@ -498,7 +493,7 @@ const Home = () => {
                     );
 
                     if (fullDomain) {
-                        handleCopyLink(fullDomain, rowData.studentId, fallbackStudent);
+                        handleSendLinkEmail(fullDomain, rowData.studentId, fallbackStudent);
                     }
                 }
                 return;
@@ -517,7 +512,7 @@ const Home = () => {
 
                 console.log('Found full domain:', fullDomain);
                 if (fullDomain) {
-                    handleCopyLink(fullDomain, rowData.studentId, student);
+                    handleSendLinkEmail(fullDomain, rowData.studentId, student);
                 } else {
                     console.error('Could not find full domain for app:', appName);
                 }
@@ -533,7 +528,7 @@ const Home = () => {
                     );
 
                     if (fullDomain) {
-                        handleCopyLink(fullDomain, rowData.studentId, fallbackStudent);
+                        handleSendLinkEmail(fullDomain, rowData.studentId, fallbackStudent);
                     }
                 }
             }
@@ -683,20 +678,25 @@ const Home = () => {
         }
     };
 
-    const handleCopyLink = async (domainName: string, studentId: string, student?: Student | { first: string; last: string }) => {
-        try {
-            const accessLink = await authGetLink(domainName, studentId, pid as string, hash as string);
-            if (typeof accessLink === 'string') {
-                await navigator.clipboard.writeText(accessLink);
-                const studentName = student ? `${student.first} ${student.last}` : 'Student';
-                const appName = formatDomainForDisplay(domainName);
-                toast.success(`Link copied for ${studentName} - ${appName}`);
-            } else {
-                toast.error('Failed to generate access link');
+    const handleSendLinkEmail = async (domainName: string, studentId: string, student?: Student | { first: string; last: string }) => {
+        const studentName = student ? `${student.first} ${student.last}` : 'Student';
+        const appName = formatDomainForDisplay(domainName);
+
+        // Show confirmation dialog
+        if (window.confirm(`Are you sure you want to email a ${appName} link to ${studentName}?`)) {
+            try {
+                const result = await authLinkEmailSend(pid as string, hash as string, domainName);
+                if (result === true) {
+                    toast.success(`Link email sent successfully to ${studentName} for ${appName}`);
+                } else if (result && 'redirected' in result) {
+                    toast.error('Authentication required');
+                } else {
+                    toast.error('Failed to send link email');
+                }
+            } catch (error) {
+                console.error('Error sending link email:', error);
+                toast.error('Failed to send link email');
             }
-        } catch (error) {
-            console.error('Error copying access link:', error);
-            toast.error('Failed to copy access link');
         }
     };
 

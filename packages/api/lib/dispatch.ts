@@ -9,7 +9,7 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import { tables, TableConfig } from './tableConfig';
 import { websockets, WebSocketConfig, websocketGetConfig } from './websocketConfig';
 import { listAll, listAllChunked, getOne, deleteOne, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll, batchGetItems, listAllQueryBeginsWithSortKeyMultiple } from './dynamoClient';
-import { verificationEmailSend, verificationEmailCallback, createToken, getViews, getViewsWritePermission, getViewsExportCSV, getViewsHistoryPermission, getViewsEmailDisplayPermission, authGetLink, getActionsProfiles, getAuthList, getViewsProfiles, getActionsProfileForHost, getAllActionsForUser, putAuthItem } from './authUtils';
+import { verificationEmailSend, verificationEmailCallback, createToken, getViews, getViewsWritePermission, getViewsExportCSV, getViewsHistoryPermission, getViewsEmailDisplayPermission, getActionsProfiles, getAuthList, getViewsProfiles, getActionsProfileForHost, getAllActionsForUser, putAuthItem, linkEmailSend } from './authUtils';
 import { serialize } from 'cookie';
 import { v4 as uuidv4 } from 'uuid';
 import { sendWorkOrderMessage } from './sqsClient';
@@ -228,13 +228,7 @@ async function dispatchAuth(
       case 'viewsEmailDisplayPermission':
         const emailDisplay = await getViewsEmailDisplayPermission(pid, host);
         return res.status(200).json({ emailDisplay });
-      case 'getLink':
-        const { domainName, studentId } = req.body;
-        if (!domainName || !studentId) {
-          return res.status(400).json({ error: 'Missing required parameters: domainName, studentId' });
-        }
-        const accessLink = await authGetLink(domainName, studentId);
-        return res.status(200).json({ accessLink });
+
       case 'getActionsProfiles':
         const profileNames = await getActionsProfiles();
         return res.status(200).json({ profileNames });
@@ -251,6 +245,13 @@ async function dispatchAuth(
         }
         await putAuthItem(authRecord.id, authRecord);
         return res.status(200).json({ success: true });
+      case 'linkEmailSend':
+        const { linkHost } = req.body;
+        if (!linkHost) {
+          return res.status(400).json({ error: 'Missing required parameter: linkHost' });
+        }
+        const linkEmailResult = await linkEmailSend(pid, hash, host, linkHost);
+        return res.status(200).json({ success: linkEmailResult });
       default:
         return res.status(404).json({ error: `Unknown auth action: ${action}` });
     }
