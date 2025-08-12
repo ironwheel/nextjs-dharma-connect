@@ -1,4 +1,10 @@
-// packages/sharedFrontend/src/apiActions.ts
+/**
+ * @file packages/sharedFrontend/src/apiActions.ts
+ * @copyright Robert E. Taylor, Extropic Systems, 2025
+ * @license MIT
+ * @description Defines API actions for the application.
+ */
+
 import { api } from './httpClient';
 
 // Configuration
@@ -31,15 +37,15 @@ export interface RedirectedResponse {
 }
 
 /**
- * Table API helpers for CRUD operations on backend tables.
- *
- * - getTableItem:    Retrieve a single item by id
- * - getAllTableItems: Retrieve all items (with chunked pagination)
- * - putTableItem:    Insert or update an item by id
- * - deleteTableItem: Delete an item by id
- * - batchGetTableItems: Retrieve multiple items by their IDs
+ * @async
+ * @function getTableItem
+ * @description Retrieve a single item by id from a table.
+ * @param {string} resource - The resource to retrieve the item from.
+ * @param {string} id - The ID of the item to retrieve.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<any>} A promise that resolves to the item.
  */
-
 export async function getTableItem(
     resource: string,
     id: string,
@@ -60,6 +66,16 @@ export async function getTableItem(
     }
 }
 
+/**
+ * @async
+ * @function getTableItemOrNull
+ * @description Retrieve a single item by id from a table, or null if not found.
+ * @param {string} resource - The resource to retrieve the item from.
+ * @param {string} id - The ID of the item to retrieve.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<any | null>} A promise that resolves to the item or null.
+ */
 export async function getTableItemOrNull(
     resource: string,
     id: string,
@@ -94,6 +110,16 @@ export async function getTableItemOrNull(
     }
 }
 
+/**
+ * @async
+ * @function batchGetTableItems
+ * @description Retrieve multiple items by their IDs from a table.
+ * @param {string} resource - The resource to retrieve the items from.
+ * @param {string[]} ids - The IDs of the items to retrieve.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<any[] | RedirectedResponse>} A promise that resolves to an array of items.
+ */
 export async function batchGetTableItems(
     resource: string,
     ids: string[],
@@ -126,6 +152,16 @@ export async function batchGetTableItems(
     }
 }
 
+/**
+ * @async
+ * @function getAllTableItems
+ * @description Retrieve all items from a table (with chunked pagination).
+ * @param {string} resource - The resource to retrieve the items from.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @param {ProgressCallback} onProgress - A callback function to report progress.
+ * @returns {Promise<any[] | RedirectedResponse>} A promise that resolves to an array of items.
+ */
 export async function getAllTableItems(
     resource: string,
     pid: string,
@@ -184,6 +220,18 @@ export async function getAllTableItems(
     }
 }
 
+/**
+ * @async
+ * @function getAllTableItemsWithProjectionExpression
+ * @description Retrieve all items from a table with a projection expression.
+ * @param {string} resource - The resource to retrieve the items from.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @param {string} projectionExpression - The projection expression.
+ * @param {Record<string, string>} expressionAttributeNames - The expression attribute names.
+ * @param {ProgressCallback} onProgress - A callback function to report progress.
+ * @returns {Promise<any[] | RedirectedResponse>} A promise that resolves to an array of items.
+ */
 export async function getAllTableItemsWithProjectionExpression(
     resource: string,
     pid: string,
@@ -246,6 +294,15 @@ export async function getAllTableItemsWithProjectionExpression(
     }
 }
 
+/**
+ * @async
+ * @function sendSQSMessage
+ * @description Send a message to an SQS queue.
+ * @param {SQSMessageData} messageData - The data for the message.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<{ success: boolean; messageId?: string } | RedirectedResponse>} A promise that resolves to an object indicating success and the message ID.
+ */
 export async function sendSQSMessage(
     messageData: SQSMessageData,
     pid: string,
@@ -265,6 +322,15 @@ export async function sendSQSMessage(
     }
 }
 
+/**
+ * @async
+ * @function getWebSocketConnection
+ * @description Get the details for a WebSocket connection.
+ * @param {string} resource - The resource to get the WebSocket connection for.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<WebSocketConnectionDetails | RedirectedResponse>} A promise that resolves to the WebSocket connection details.
+ */
 export async function getWebSocketConnection(
     resource: string,
     pid: string,
@@ -294,6 +360,15 @@ export async function getWebSocketConnection(
     }
 }
 
+/**
+ * @async
+ * @function getWebSocketConnectionNoToken
+ * @description Get the details for a WebSocket connection without a token.
+ * @param {string} resource - The resource to get the WebSocket connection for.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<WebSocketConnectionDetails | RedirectedResponse>} A promise that resolves to the WebSocket connection details.
+ */
 export async function getWebSocketConnectionNoToken(
     resource: string,
     pid: string,
@@ -323,6 +398,17 @@ export async function getWebSocketConnectionNoToken(
     }
 }
 
+/**
+ * @async
+ * @function sendWorkOrderMessage
+ * @description Send a work order message to an SQS queue.
+ * @param {string} workOrderId - The ID of the work order.
+ * @param {string} stepName - The name of the step.
+ * @param {'start' | 'stop'} action - The action to perform.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<{ success: boolean; messageId?: string } | RedirectedResponse>} A promise that resolves to an object indicating success and the message ID.
+ */
 export async function sendWorkOrderMessage(
     workOrderId: string,
     stepName: string,
@@ -333,6 +419,17 @@ export async function sendWorkOrderMessage(
     return sendSQSMessage({ workOrderId, stepName, action }, pid, hash);
 }
 
+/**
+ * @async
+ * @function putTableItem
+ * @description Insert or update an item by id in a table.
+ * @param {string} resource - The resource to put the item in.
+ * @param {string} id - The ID of the item to put.
+ * @param {any} item - The item to put.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<any>} A promise that resolves to the response.
+ */
 export async function putTableItem(
     resource: string,
     id: string,
@@ -352,6 +449,16 @@ export async function putTableItem(
     }
 }
 
+/**
+ * @async
+ * @function deleteTableItem
+ * @description Delete an item by id from a table.
+ * @param {string} resource - The resource to delete the item from.
+ * @param {string} id - The ID of the item to delete.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<any>} A promise that resolves to the response.
+ */
 export async function deleteTableItem(
     resource: string,
     id: string,
@@ -370,6 +477,18 @@ export async function deleteTableItem(
     }
 }
 
+/**
+ * @async
+ * @function updateTableItem
+ * @description Update an item by id in a table.
+ * @param {string} resource - The resource to update the item in.
+ * @param {string} id - The ID of the item to update.
+ * @param {string} fieldName - The name of the field to update.
+ * @param {any} fieldValue - The new value of the field.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<any>} A promise that resolves to the response.
+ */
 export async function updateTableItem(
     resource: string,
     id: string,
@@ -393,6 +512,18 @@ export async function updateTableItem(
     }
 }
 
+/**
+ * @async
+ * @function getAllTableItemsFiltered
+ * @description Retrieve all items from a table that match a filter.
+ * @param {string} resource - The resource to retrieve the items from.
+ * @param {string} filterFieldName - The name of the field to filter on.
+ * @param {string | boolean} filterFieldValue - The value of the field to filter on.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @param {ProgressCallback} onProgress - A callback function to report progress.
+ * @returns {Promise<any[] | RedirectedResponse>} A promise that resolves to an array of items.
+ */
 export async function getAllTableItemsFiltered(
     resource: string,
     filterFieldName: string,
@@ -418,6 +549,18 @@ export async function getAllTableItemsFiltered(
     }
 }
 
+/**
+ * @async
+ * @function queryGetTableItems
+ * @description Retrieve items from a table using a query.
+ * @param {string} resource - The resource to retrieve the items from.
+ * @param {string} primaryKeyValue - The value of the primary key.
+ * @param {string} sortKeyValue - The value of the sort key.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @param {ProgressCallback} onProgress - A callback function to report progress.
+ * @returns {Promise<any[] | Record<string, any[]> | RedirectedResponse>} A promise that resolves to an array of items or a record of items.
+ */
 export async function queryGetTableItems(
     resource: string,
     primaryKeyValue: string,
@@ -448,6 +591,15 @@ export async function queryGetTableItems(
     }
 }
 
+/**
+ * @async
+ * @function getTableCount
+ * @description Get the number of items in a table.
+ * @param {string} resource - The resource to get the count from.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<{ count: number } | RedirectedResponse>} A promise that resolves to an object containing the count.
+ */
 export async function getTableCount(
     resource: string,
     pid: string,
@@ -475,6 +627,14 @@ export async function getTableCount(
     }
 }
 
+/**
+ * @async
+ * @function authGetViews
+ * @description Get the views for a participant.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<any[] | RedirectedResponse>} A promise that resolves to an array of views.
+ */
 export async function authGetViews(
     pid: string,
     hash: string
@@ -501,6 +661,14 @@ export async function authGetViews(
     }
 }
 
+/**
+ * @async
+ * @function authGetViewsWritePermission
+ * @description Get the write permission for the views of a participant.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<boolean | RedirectedResponse>} A promise that resolves to a boolean indicating the write permission.
+ */
 export async function authGetViewsWritePermission(
     pid: string,
     hash: string
@@ -522,6 +690,14 @@ export async function authGetViewsWritePermission(
     }
 }
 
+/**
+ * @async
+ * @function authGetViewsExportCSV
+ * @description Get the export CSV permission for the views of a participant.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<boolean | RedirectedResponse>} A promise that resolves to a boolean indicating the export CSV permission.
+ */
 export async function authGetViewsExportCSV(
     pid: string,
     hash: string
@@ -543,6 +719,14 @@ export async function authGetViewsExportCSV(
     }
 }
 
+/**
+ * @async
+ * @function authGetViewsHistoryPermission
+ * @description Get the history permission for the views of a participant.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<boolean | RedirectedResponse>} A promise that resolves to a boolean indicating the history permission.
+ */
 export async function authGetViewsHistoryPermission(
     pid: string,
     hash: string
@@ -564,6 +748,14 @@ export async function authGetViewsHistoryPermission(
     }
 }
 
+/**
+ * @async
+ * @function authGetViewsEmailDisplayPermission
+ * @description Get the email display permission for the views of a participant.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<boolean | RedirectedResponse>} A promise that resolves to a boolean indicating the email display permission.
+ */
 export async function authGetViewsEmailDisplayPermission(
     pid: string,
     hash: string
@@ -585,6 +777,16 @@ export async function authGetViewsEmailDisplayPermission(
     }
 }
 
+/**
+ * @async
+ * @function authGetLink
+ * @description Get an access link for a student.
+ * @param {string} domainName - The domain name to get the link for.
+ * @param {string} studentId - The ID of the student.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<string | RedirectedResponse>} A promise that resolves to the access link.
+ */
 export async function authGetLink(
     domainName: string,
     studentId: string,
@@ -611,6 +813,14 @@ export async function authGetLink(
     }
 }
 
+/**
+ * @async
+ * @function authGetActionsProfiles
+ * @description Get the actions profiles.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<string[] | RedirectedResponse>} A promise that resolves to an array of actions profiles.
+ */
 export async function authGetActionsProfiles(
     pid: string,
     hash: string
@@ -632,6 +842,14 @@ export async function authGetActionsProfiles(
     }
 }
 
+/**
+ * @async
+ * @function authGetAuthList
+ * @description Get the list of authentications.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<any[] | RedirectedResponse>} A promise that resolves to an array of authentications.
+ */
 export async function authGetAuthList(
     pid: string,
     hash: string
@@ -653,6 +871,14 @@ export async function authGetAuthList(
     }
 }
 
+/**
+ * @async
+ * @function authGetViewsProfiles
+ * @description Get the views profiles.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<string[] | RedirectedResponse>} A promise that resolves to an array of views profiles.
+ */
 export async function authGetViewsProfiles(
     pid: string,
     hash: string
@@ -674,6 +900,15 @@ export async function authGetViewsProfiles(
     }
 }
 
+/**
+ * @async
+ * @function authPutAuthItem
+ * @description Put an authentication item.
+ * @param {any} authRecord - The authentication record to put.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<any | RedirectedResponse>} A promise that resolves to the response.
+ */
 export async function authPutAuthItem(
     authRecord: any,
     pid: string,

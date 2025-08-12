@@ -1,4 +1,10 @@
-// packages/api/lib/websocketConfig.ts
+/**
+ * @file packages/api/lib/websocketConfig.ts
+ * @copyright Robert E. Taylor, Extropic Systems, 2025
+ * @license MIT
+ * @description Defines the configuration for the WebSockets used in the application.
+ */
+
 export interface WebSocketConfig {
     resource: string;
     envVar: string;
@@ -16,10 +22,11 @@ export const websockets: WebSocketConfig[] = [
 ];
 
 /**
- * Looks up a websocket config by resource name and returns the related config object
- * @param resource - The resource name to look up (e.g., 'workorders', 'students')
- * @returns The websocket config object
- * @throws Error if the websocket config is not found
+ * @function websocketGetConfig
+ * @description Looks up a websocket config by resource name and returns the related config object.
+ * @param {string} resource - The resource name to look up (e.g., 'workorders', 'students').
+ * @returns {WebSocketConfig & { websocketUrl: string }} The websocket config object.
+ * @throws {Error} If the websocket config is not found.
  */
 export function websocketGetConfig(resource: string): WebSocketConfig & { websocketUrl: string } {
     const cfg = websockets.find((w: WebSocketConfig) => w.resource === resource);
@@ -34,4 +41,4 @@ export function websocketGetConfig(resource: string): WebSocketConfig & { websoc
     }
 
     return { ...cfg, websocketUrl };
-} 
+}

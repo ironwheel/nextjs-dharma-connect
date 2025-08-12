@@ -1,10 +1,18 @@
-// --- auth-test/login.tsx (Example Usage) ---
-// This would be your application-specific login file.
-// It imports the shared AuthVerification component.
+/**
+ * @file apps/auth-test/pages/login.tsx
+ * @copyright Robert E. Taylor, Extropic Systems, 2025
+ * @license MIT
+ * @description The login page for the auth-test application.
+ */
 
 import { AuthVerification } from 'sharedFrontend';
 import { useRouter } from 'next/router';
 
+/**
+ * @component Login
+ * @description The login page for the auth-test application.
+ * @returns {React.FC} The Login component.
+ */
 const Login: React.FC = () => {
     const router = useRouter();
     const { pid, hash } = router.query;

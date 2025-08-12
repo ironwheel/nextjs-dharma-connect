@@ -1,4 +1,10 @@
-// packages/backend/src/dynamoClient.ts
+/**
+ * @file packages/api/lib/dynamoClient.ts
+ * @copyright Robert E. Taylor, Extropic Systems, 2025
+ * @license MIT
+ * @description Defines a client for interacting with DynamoDB.
+ */
+
 import {
   DynamoDBClient,
 } from '@aws-sdk/client-dynamodb';
@@ -21,10 +27,10 @@ const IDENTITY_POOL_ID = process.env.AWS_COGNITO_IDENTITY_POOL_ID; // No default
 
 // Cache docClientInstance per identityPoolId
 const docClientInstances: Record<string, DynamoDBDocumentClient> = {};
+
 /**
- * Initializes and returns a singleton DynamoDBDocumentClient instance.
- * Checks for required environment variables (AWS_REGION, AWS_COGNITO_IDENTITY_POOL_ID).
  * @function getDocClient
+ * @description Initializes and returns a singleton DynamoDBDocumentClient instance.
  * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable
  * @returns {DynamoDBDocumentClient} The initialized document client.
  * @throws {Error} If essential AWS configuration environment variables are not set or client fails to initialize.
@@ -58,9 +64,13 @@ function getDocClient(identityPoolIdOverride?: string) {
   }
 }
 
-
 /**
- * Scan entire table and return all items.
+ * @async
+ * @function listAll
+ * @description Scan entire table and return all items.
+ * @param {string} tableName - The name of the table to scan.
+ * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @returns {Promise<any[]>} A promise that resolves to an array of items.
  */
 export async function listAll(tableName: string, identityPoolIdOverride?: string) {
   const client = getDocClient(identityPoolIdOverride);
@@ -80,7 +90,12 @@ export async function listAll(tableName: string, identityPoolIdOverride?: string
 }
 
 /**
- * Count all items in a table efficiently without loading them into memory.
+ * @async
+ * @function countAll
+ * @description Count all items in a table efficiently without loading them into memory.
+ * @param {string} tableName - The name of the table to count.
+ * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @returns {Promise<number>} A promise that resolves to the total number of items.
  */
 export async function countAll(tableName: string, identityPoolIdOverride?: string) {
   const client = getDocClient(identityPoolIdOverride);
@@ -101,8 +116,17 @@ export async function countAll(tableName: string, identityPoolIdOverride?: strin
 }
 
 /**
- * Scan table in chunks and return items with lastEvaluatedKey for pagination.
- * Modeled after handleChunkedScanTable from packages/backend-core/src/db-actions.js
+ * @async
+ * @function listAllChunked
+ * @description Scan table in chunks and return items with lastEvaluatedKey for pagination.
+ * @param {string} tableName - The name of the table to scan.
+ * @param {Record<string, any>} scanParams - Optional scan parameters.
+ * @param {Record<string, any>} lastEvaluatedKey - Optional last evaluated key for pagination.
+ * @param {number} limit - Optional limit for the number of items to return.
+ * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @param {string} projectionExpression - Optional projection expression.
+ * @param {Record<string, string>} expressionAttributeNames - Optional expression attribute names.
+ * @returns {Promise<any>} A promise that resolves to an object containing the items and the last evaluated key.
  */
 export async function listAllChunked(
   tableName: string,
@@ -137,7 +161,14 @@ export async function listAllChunked(
 }
 
 /**
- * Scan entire table with a filter and return all matching items.
+ * @async
+ * @function listAllFiltered
+ * @description Scan entire table with a filter and return all matching items.
+ * @param {string} tableName - The name of the table to scan.
+ * @param {string} fieldName - The name of the field to filter on.
+ * @param {string} fieldValue - The value of the field to filter on.
+ * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @returns {Promise<any[]>} A promise that resolves to an array of matching items.
  */
 export async function listAllFiltered(
   tableName: string,
@@ -170,7 +201,14 @@ export async function listAllFiltered(
 }
 
 /**
- * Get a single item by partition key.
+ * @async
+ * @function getOne
+ * @description Get a single item by partition key.
+ * @param {string} tableName - The name of the table to get the item from.
+ * @param {string} pkName - The name of the partition key.
+ * @param {string} id - The ID of the item to get.
+ * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @returns {Promise<any>} A promise that resolves to the item.
  */
 export async function getOne(
   tableName: string,
@@ -189,7 +227,16 @@ export async function getOne(
 }
 
 /**
- * Get a single item by composite key (partition + sort key).
+ * @async
+ * @function getOneWithSort
+ * @description Get a single item by composite key (partition + sort key).
+ * @param {string} tableName - The name of the table to get the item from.
+ * @param {string} pkName - The name of the partition key.
+ * @param {string} pkValue - The value of the partition key.
+ * @param {string} skName - The name of the sort key.
+ * @param {string} skValue - The value of the sort key.
+ * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @returns {Promise<any>} A promise that resolves to the item.
  */
 export async function getOneWithSort(
   tableName: string,
@@ -213,7 +260,13 @@ export async function getOneWithSort(
 }
 
 /**
- * Put a single item into the table.
+ * @async
+ * @function putOne
+ * @description Put a single item into the table.
+ * @param {string} tableName - The name of the table to put the item into.
+ * @param {Record<string, any>} item - The item to put into the table.
+ * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @returns {Promise<void>}
  */
 export async function putOne(
   tableName: string,
@@ -230,7 +283,16 @@ export async function putOne(
 }
 
 /**
- * Update specific attributes of an item in the table.
+ * @async
+ * @function updateItem
+ * @description Update specific attributes of an item in the table.
+ * @param {string} tableName - The name of the table to update the item in.
+ * @param {Record<string, any>} key - The key of the item to update.
+ * @param {string} updateExpression - The update expression.
+ * @param {Record<string, any>} expressionAttributeValues - The expression attribute values.
+ * @param {Record<string, string>} expressionAttributeNames - The expression attribute names.
+ * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @returns {Promise<void>}
  */
 export async function updateItem(
   tableName: string,
@@ -253,8 +315,16 @@ export async function updateItem(
 }
 
 /**
- * Update specific attributes of an item in the table with condition expression.
- * This version includes a condition to ensure the item exists before updating.
+ * @async
+ * @function updateItemWithCondition
+ * @description Update specific attributes of an item in the table with condition expression.
+ * @param {string} tableName - The name of the table to update the item in.
+ * @param {Record<string, any>} key - The key of the item to update.
+ * @param {string} updateExpression - The update expression.
+ * @param {Record<string, any>} expressionAttributeValues - The expression attribute values.
+ * @param {Record<string, string>} expressionAttributeNames - The expression attribute names.
+ * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @returns {Promise<void>}
  */
 export async function updateItemWithCondition(
   tableName: string,
@@ -278,7 +348,14 @@ export async function updateItemWithCondition(
 }
 
 /**
- * Delete a single item by partition key.
+ * @async
+ * @function deleteOne
+ * @description Delete a single item by partition key.
+ * @param {string} tableName - The name of the table to delete the item from.
+ * @param {string} pkName - The name of the partition key.
+ * @param {string} id - The ID of the item to delete.
+ * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @returns {Promise<void>}
  */
 export async function deleteOne(
   tableName: string,
@@ -296,7 +373,16 @@ export async function deleteOne(
 }
 
 /**
- * Delete a single item by composite key (partition + sort key).
+ * @async
+ * @function deleteOneWithSort
+ * @description Delete a single item by composite key (partition + sort key).
+ * @param {string} tableName - The name of the table to delete the item from.
+ * @param {string} pkName - The name of the partition key.
+ * @param {string} pkValue - The value of the partition key.
+ * @param {string} skName - The name of the sort key.
+ * @param {string} skValue - The value of the sort key.
+ * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @returns {Promise<void>}
  */
 export async function deleteOneWithSort(
   tableName: string,
@@ -319,8 +405,14 @@ export async function deleteOneWithSort(
 }
 
 /**
- * Batch get items by their primary keys.
- * DynamoDB BatchGet has a limit of 100 items per request, so this function handles larger batches by chunking.
+ * @async
+ * @function batchGetItems
+ * @description Batch get items by their primary keys.
+ * @param {string} tableName - The name of the table to get the items from.
+ * @param {string} pkName - The name of the primary key.
+ * @param {string[]} ids - An array of IDs to get.
+ * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @returns {Promise<any[]>} A promise that resolves to an array of items.
  */
 export async function batchGetItems(
   tableName: string,
@@ -358,6 +450,18 @@ export async function batchGetItems(
   return items;
 }
 
+/**
+ * @async
+ * @function listAllQueryBeginsWithSortKey
+ * @description Query items by a partition key and a sort key that begins with a certain value.
+ * @param {string} tableName - The name of the table to query.
+ * @param {string} primaryKeyName - The name of the primary key.
+ * @param {string} primaryKeyValue - The value of the primary key.
+ * @param {string} sortKeyName - The name of the sort key.
+ * @param {string} sortKeyValue - The value the sort key should begin with.
+ * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @returns {Promise<any[]>} A promise that resolves to an array of items.
+ */
 async function listAllQueryBeginsWithSortKey(
   tableName: string,
   primaryKeyName: string,
@@ -390,8 +494,16 @@ async function listAllQueryBeginsWithSortKey(
 }
 
 /**
- * Query items by multiple partition keys with a begins_with condition on the sort key.
- * This function handles comma-separated primary key values and returns results organized by primary key.
+ * @async
+ * @function listAllQueryBeginsWithSortKeyMultiple
+ * @description Query items by multiple partition keys with a begins_with condition on the sort key.
+ * @param {string} tableName - The name of the table to query.
+ * @param {string} primaryKeyName - The name of the primary key.
+ * @param {string} primaryKeyValues - A comma-separated string of primary key values.
+ * @param {string} sortKeyName - The name of the sort key.
+ * @param {string} sortKeyValue - The value the sort key should begin with.
+ * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @returns {Promise<Record<string, any[]>>} A promise that resolves to a record of items, where the keys are the primary key values.
  */
 export async function listAllQueryBeginsWithSortKeyMultiple(
   tableName: string,

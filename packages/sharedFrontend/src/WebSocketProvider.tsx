@@ -1,3 +1,10 @@
+/**
+ * @file packages/sharedFrontend/src/WebSocketProvider.tsx
+ * @copyright Robert E. Taylor, Extropic Systems, 2025
+ * @license MIT
+ * @description Defines the WebSocketProvider component for handling WebSocket connections.
+ */
+
 import React, { createContext, useContext, useRef, useState, useCallback, useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/router';
 import { getWebSocketConnection } from './apiActions';
@@ -19,8 +26,10 @@ interface WebSocketProviderProps {
 }
 
 /**
- * Checks if the current route is an authentication-related route where WebSocket connections
- * should be skipped to avoid interfering with the auth flow.
+ * @function isAuthRoute
+ * @description Checks if the current route is an authentication-related route.
+ * @param {string} pathname - The current route pathname.
+ * @returns {boolean} True if the route is an authentication-related route, false otherwise.
  */
 function isAuthRoute(pathname: string): boolean {
     // Define patterns for auth-related routes
@@ -36,6 +45,12 @@ function isAuthRoute(pathname: string): boolean {
     return authRoutePatterns.some(pattern => pattern.test(pathname));
 }
 
+/**
+ * @component WebSocketProvider
+ * @description This component provides a WebSocket connection to its children.
+ * @param {WebSocketProviderProps} props - The props for the component.
+ * @returns {React.FC} The WebSocketProvider component.
+ */
 export function WebSocketProvider({ children, resource = 'work-orders' }: WebSocketProviderProps) {
     const router = useRouter();
     const [status, setStatus] = useState<'connecting' | 'open' | 'closed'>('closed');
@@ -54,6 +69,11 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
     const periodicReconnectIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const periodicReconnectDelay = 60000; // 1 minute
 
+    /**
+     * @function connect
+     * @description Connects to the WebSocket server.
+     * @param {string} url - The URL of the WebSocket server.
+     */
     const connect = useCallback((url: string) => {
         if (ws.current?.readyState === WebSocket.OPEN) {
             console.log('[WebSocket] Already connected');
@@ -149,7 +169,10 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
         };
     }, []);
 
-    // Exponential backoff reconnection function
+    /**
+     * @function attemptReconnection
+     * @description Attempts to reconnect to the WebSocket server with exponential backoff.
+     */
     const attemptReconnection = useCallback(async () => {
         if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
             console.log('[WebSocket] Max reconnection attempts reached, stopping automatic reconnection');
@@ -199,7 +222,10 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
         }, delay);
     }, [connect, resource, router.pathname]);
 
-    // Periodic reconnection function
+    /**
+     * @function startPeriodicReconnection
+     * @description Starts a periodic reconnection attempt.
+     */
     const startPeriodicReconnection = useCallback(() => {
         if (periodicReconnectIntervalRef.current) {
             clearInterval(periodicReconnectIntervalRef.current);
@@ -215,6 +241,10 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
         }, periodicReconnectDelay);
     }, [status, router.pathname, attemptReconnection]);
 
+    /**
+     * @function disconnect
+     * @description Disconnects from the WebSocket server.
+     */
     const disconnect = useCallback(() => {
         console.log('[WebSocket] Disconnecting...');
 
@@ -242,6 +272,11 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
         setConnectionId(null);
     }, []);
 
+    /**
+     * @function sendMessage
+     * @description Sends a message to the WebSocket server.
+     * @param {any} message - The message to send.
+     */
     const sendMessage = useCallback((message: any) => {
         if (ws.current?.readyState === WebSocket.OPEN && isReady) {
             ws.current.send(JSON.stringify(message));
@@ -351,6 +386,12 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
     );
 }
 
+/**
+ * @function useWebSocket
+ * @description A custom hook to use the WebSocket context.
+ * @returns {WebSocketContextType} The WebSocket context.
+ * @throws {Error} If used outside of a WebSocketProvider.
+ */
 export function useWebSocket() {
     const context = useContext(WebSocketContext);
     if (context === undefined) {

@@ -1,15 +1,8 @@
-#!/usr/bin/env python3
 """
-Utility script to find students missing a specific campaign in their emails folder.
-
-This script scans the student DynamoDB table and checks if each student has the specified
-campaign in their emails field. If a student is missing the campaign, their ID is printed.
-
-Usage:
-    python missing_campaign.py --campaign "campaign-name"
-    python missing_campaign.py --campaign "vt2024-retreat-reminder" --id "student-123"
-    python missing_campaign.py --campaign "campaign-name" --ignore-unsubscribed
-    python missing_campaign.py --campaign "campaign-name" --ignore-missing-email
+@file utils/missing_campaign.py
+@copyright Robert E. Taylor, Extropic Systems, 2025
+@license MIT
+@description Utility script to find students missing a specific campaign in their emails folder.
 """
 
 import argparse
@@ -25,12 +18,23 @@ sys.path.append(str(Path(__file__).parent.parent / 'src'))
 from config import STUDENT_TABLE, AWS_REGION, AWS_PROFILE
 
 def get_dynamodb_client():
-    """Get DynamoDB client using the configured AWS profile."""
+    """
+    @function get_dynamodb_client
+    @description Get DynamoDB client using the configured AWS profile.
+    @returns A DynamoDB client.
+    """
     session = boto3.Session(profile_name=AWS_PROFILE, region_name=AWS_REGION)
     return session.resource('dynamodb')
 
 def scan_student_table(dynamodb, table_name: str, student_id: Optional[str] = None) -> list:
-    """Scan the student table and return all records or a specific record by ID."""
+    """
+    @function scan_student_table
+    @description Scan the student table and return all records or a specific record by ID.
+    @param dynamodb - The DynamoDB client.
+    @param table_name - The name of the table to scan.
+    @param student_id - The ID of the student to retrieve.
+    @returns A list of students.
+    """
     table = dynamodb.Table(table_name)
     
     if student_id:
@@ -71,16 +75,13 @@ def scan_student_table(dynamodb, table_name: str, student_id: Optional[str] = No
 
 def check_student_campaign(student: Dict[str, Any], campaign: str, ignore_unsubscribed: bool = False, ignore_missing_email: bool = False) -> bool:
     """
-    Check if a student has the specified campaign in their emails field.
-    
-    Args:
-        student: The student record from DynamoDB
-        campaign: The campaign name to check for
-        ignore_unsubscribed: If True, skip students who have unsubscribed
-        ignore_missing_email: If True, skip students with blank email fields
-    
-    Returns:
-        True if the student has the campaign, False otherwise
+    @function check_student_campaign
+    @description Check if a student has the specified campaign in their emails field.
+    @param student - The student record from DynamoDB.
+    @param campaign - The campaign name to check for.
+    @param ignore_unsubscribed - If True, skip students who have unsubscribed.
+    @param ignore_missing_email - If True, skip students with blank email fields.
+    @returns True if the student has the campaign, False otherwise.
     """
     student_id = student.get('id', 'unknown')
     
@@ -108,6 +109,10 @@ def check_student_campaign(student: Dict[str, Any], campaign: str, ignore_unsubs
     return campaign in emails
 
 def main():
+    """
+    @function main
+    @description The main function for the script.
+    """
     parser = argparse.ArgumentParser(
         description='Find students missing a specific campaign in their emails folder',
         formatter_class=argparse.RawDescriptionHelpFormatter,
