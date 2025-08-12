@@ -1,4 +1,10 @@
-// packages/api/lib/apiMiddleware.ts
+/**
+ * @file packages/api/lib/apiMiddleware.ts
+ * @copyright Robert E. Taylor, Extropic Systems, 2025
+ * @license MIT
+ * @description Defines the API middleware for the application.
+ */
+
 import { NextApiRequest, NextApiResponse } from 'next';
 import nextConnect from 'next-connect';
 import { serialize } from 'cookie';
@@ -33,7 +39,12 @@ try {
 }
 // console.log('API allowedOrigins:', allowedOrigins);
 
-// CORS origin function to check against allowed origins
+/**
+ * @function corsOrigin
+ * @description CORS origin function to check against allowed origins.
+ * @param {string | undefined} origin - The origin of the request.
+ * @param {(err: Error | null, allow?: boolean) => void} callback - The callback to invoke after checking the origin.
+ */
 const corsOrigin = (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
   // console.log('API CORS check:', { origin, allowedOrigins });
   if (!origin || allowedOrigins.includes(origin)) {
@@ -45,6 +56,12 @@ const corsOrigin = (origin: string | undefined, callback: (err: Error | null, al
   }
 };
 
+/**
+ * @export
+ * @const apiMiddleware
+ * @description The main API middleware for the application.
+ * @type {nextConnect.NextConnect<NextApiRequest, NextApiResponse>}
+ */
 export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
   .use(cookieParser())
   .use(cors({ origin: corsOrigin, credentials: true }))

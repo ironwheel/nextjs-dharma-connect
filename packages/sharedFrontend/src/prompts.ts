@@ -1,4 +1,9 @@
-// packages/sharedFrontend/src/prompts.ts
+/**
+ * @file packages/sharedFrontend/src/prompts.ts
+ * @copyright Robert E. Taylor, Extropic Systems, 2025
+ * @license MIT
+ * @description Defines the prompts used in the application.
+ */
 
 // Types for prompts
 export interface Prompt {
@@ -35,20 +40,38 @@ let prompts: Record<string, Record<string, Record<string, string>>> = {}; // eve
 let student: Student = {};
 let event: Event = { aid: 'dashboard' };
 
-// Setter functions for the consuming apps to use
+/**
+ * @function setPrompts
+ * @description Sets the prompts for the application.
+ * @param {Record<string, Record<string, Record<string, string>>>} newPrompts - The new prompts.
+ */
 export const setPrompts = (newPrompts: Record<string, Record<string, Record<string, string>>>) => {
     prompts = newPrompts;
 };
 
+/**
+ * @function setStudent
+ * @description Sets the student for the application.
+ * @param {Student} newStudent - The new student.
+ */
 export const setStudent = (newStudent: Student) => {
     student = newStudent;
 };
 
+/**
+ * @function setEvent
+ * @description Sets the event for the application.
+ * @param {Event} newEvent - The new event.
+ */
 export const setEvent = (newEvent: Event) => {
     event = newEvent;
 };
 
-// Function to update language preference
+/**
+ * @function updateLanguage
+ * @description Updates the language preference for the student.
+ * @param {string} newLanguage - The new language.
+ */
 export const updateLanguage = (newLanguage: string) => {
     if (student) {
         student.writtenLangPref = newLanguage;
@@ -72,13 +95,23 @@ const dbgPrompt = () => {
     }
 };
 
+/**
+ * @function dbgout
+ * @description Logs a debug message to the console if debugging is enabled.
+ * @param {any[]} args - The arguments to log.
+ */
 export const dbgout = (...args: any[]) => {
     if (dbgOut()) {
         console.log(...args);
     }
 };
 
-// Main prompt lookup function
+/**
+ * @function promptLookup
+ * @description Looks up a prompt in the prompts object.
+ * @param {string} prompt - The name of the prompt to look up.
+ * @returns {string} The text of the prompt.
+ */
 export const promptLookup = (prompt: string): string => {
 
     if (dbgPrompt()) {
@@ -111,7 +144,14 @@ export const promptLookup = (prompt: string): string => {
     return `${event.aid}-${prompt}-${language}-unknown`;
 };
 
-// Aid-specific prompt lookup
+/**
+ * @function promptLookupAIDSpecific
+ * @description Looks up an AID-specific prompt in the prompts object.
+ * @param {string} aid - The AID of the event.
+ * @param {string | undefined} aidAlias - The alias for the AID.
+ * @param {string} prompt - The name of the prompt to look up.
+ * @returns {string} The text of the prompt.
+ */
 export const promptLookupAIDSpecific = (aid: string, aidAlias: string | undefined, prompt: string): string => {
     if (dbgPrompt()) {
         dbgout("PROMPT*** LOOKUP:", prompt);
@@ -148,7 +188,12 @@ export const promptLookupAIDSpecific = (aid: string, aidAlias: string | undefine
     return `${aid}-${prompt}-${language}-unknown`;
 };
 
-// HTML prompt lookup
+/**
+ * @function promptLookupHTML
+ * @description Looks up an HTML prompt in the prompts object.
+ * @param {string} prompt - The name of the prompt to look up.
+ * @returns {{ __html: string }} An object with an __html property containing the HTML text of the prompt.
+ */
 export const promptLookupHTML = (prompt: string): { __html: string } => {
     if (dbgPrompt()) {
         dbgout("PROMPTHTML*** LOOKUP:", prompt);
@@ -178,7 +223,13 @@ export const promptLookupHTML = (prompt: string): { __html: string } => {
     return { __html: `${event.aid}-${prompt}-${language}-unknown` };
 };
 
-// Aid-specific HTML prompt lookup
+/**
+ * @function promptLookupHTMLAIDSpecific
+ * @description Looks up an AID-specific HTML prompt in the prompts object.
+ * @param {string} laid - The AID of the event.
+ * @param {string} prompt - The name of the prompt to look up.
+ * @returns {{ __html: string }} An object with an __html property containing the HTML text of the prompt.
+ */
 export const promptLookupHTMLAIDSpecific = (laid: string, prompt: string): { __html: string } => {
     if (dbgPrompt()) {
         dbgout("PROMPTHTML*** LOOKUP:", prompt);
@@ -208,7 +259,12 @@ export const promptLookupHTMLAIDSpecific = (laid: string, prompt: string): { __h
     return { __html: `${laid}-${prompt}-${language}-unknown` };
 };
 
-// Description prompt lookup
+/**
+ * @function promptLookupDescription
+ * @description Looks up a description prompt in the prompts object.
+ * @param {string} prompt - The name of the prompt to look up.
+ * @returns {{ __html: string } | null} An object with an __html property containing the HTML text of the prompt, or null if the prompt is not found.
+ */
 export const promptLookupDescription = (prompt: string): { __html: string } | null => {
     if (dbgPrompt()) {
         dbgout("PROMPTDESCRIPTION LOOKUP:", prompt);
@@ -239,7 +295,15 @@ export const promptLookupDescription = (prompt: string): { __html: string } | nu
     return null;
 };
 
-// HTML prompt lookup with arguments
+/**
+ * @function promptLookupHTMLWithArgs
+ * @description Looks up an HTML prompt in the prompts object and replaces placeholders with arguments.
+ * @param {string} prompt - The name of the prompt to look up.
+ * @param {string} arg1 - The first argument.
+ * @param {string} arg2 - The second argument.
+ * @param {string} arg3 - The third argument.
+ * @returns {{ __html: string }} An object with an __html property containing the HTML text of the prompt.
+ */
 export const promptLookupHTMLWithArgs = (prompt: string, arg1?: string, arg2?: string, arg3?: string): { __html: string } => {
     let language = "English";
     if (typeof student.writtenLangPref !== 'undefined') {
@@ -264,7 +328,16 @@ export const promptLookupHTMLWithArgs = (prompt: string, arg1?: string, arg2?: s
     return { __html: `${event.aid}-${prompt}-${language}-unknown` };
 };
 
-// Aid-specific HTML prompt lookup with arguments
+/**
+ * @function promptLookupHTMLWithArgsAIDSpecific
+ * @description Looks up an AID-specific HTML prompt in the prompts object and replaces placeholders with arguments.
+ * @param {string} laid - The AID of the event.
+ * @param {string} prompt - The name of the prompt to look up.
+ * @param {string} arg1 - The first argument.
+ * @param {string} arg2 - The second argument.
+ * @param {string} arg3 - The third argument.
+ * @returns {{ __html: string }} An object with an __html property containing the HTML text of the prompt.
+ */
 export const promptLookupHTMLWithArgsAIDSpecific = (laid: string, prompt: string, arg1?: string, arg2?: string, arg3?: string): { __html: string } => {
     let language = "English";
     if (typeof student.writtenLangPref !== 'undefined') {
@@ -302,24 +375,49 @@ let tier1Loaded = false;
 let tier2Loaded = false;
 let currentLanguage = "English";
 
-// Setter functions for the new cache system
+/**
+ * @function setPromptCache
+ * @description Sets the prompt cache.
+ * @param {Record<string, Record<string, string>>} newCache - The new prompt cache.
+ */
 export const setPromptCache = (newCache: Record<string, Record<string, string>>) => {
     promptCache = newCache;
 };
 
+/**
+ * @function setTier1Loaded
+ * @description Sets the tier 1 loaded flag.
+ * @param {boolean} loaded - The new value for the flag.
+ */
 export const setTier1Loaded = (loaded: boolean) => {
     tier1Loaded = loaded;
 };
 
+/**
+ * @function setTier2Loaded
+ * @description Sets the tier 2 loaded flag.
+ * @param {boolean} loaded - The new value for the flag.
+ */
 export const setTier2Loaded = (loaded: boolean) => {
     tier2Loaded = loaded;
 };
 
+/**
+ * @function setCurrentLanguage
+ * @description Sets the current language.
+ * @param {string} language - The new language.
+ */
 export const setCurrentLanguage = (language: string) => {
     currentLanguage = language;
 };
 
-// New prompt lookup function for the cache system
+/**
+ * @function promptLookupCache
+ * @description Looks up a prompt in the prompt cache.
+ * @param {string} eventCode - The event code.
+ * @param {string} promptName - The name of the prompt to look up.
+ * @returns {string} The text of the prompt.
+ */
 export const promptLookupCache = (eventCode: string, promptName: string): string => {
 
     if (!promptCache[eventCode]) {
@@ -337,13 +435,26 @@ export const promptLookupCache = (eventCode: string, promptName: string): string
     return `${eventCode}-${promptName}-${currentLanguage}-unknown`;
 };
 
-// Aid-specific prompt lookup for the cache system
+/**
+ * @function promptLookupCacheAIDSpecific
+ * @description Looks up an AID-specific prompt in the prompt cache.
+ * @param {string} aid - The AID of the event.
+ * @param {string | undefined} aidAlias - The alias for the AID.
+ * @param {string} promptName - The name of the prompt to look up.
+ * @returns {string} The text of the prompt.
+ */
 export const promptLookupCacheAIDSpecific = (aid: string, aidAlias: string | undefined, promptName: string): string => {
     const eventCode = aidAlias || aid;
     return promptLookupCache(eventCode, promptName);
 };
 
-// HTML prompt lookup for the cache system
+/**
+ * @function promptLookupHTMLCache
+ * @description Looks up an HTML prompt in the prompt cache.
+ * @param {string} eventCode - The event code.
+ * @param {string} promptName - The name of the prompt to look up.
+ * @returns {{ __html: string }} An object with an __html property containing the HTML text of the prompt.
+ */
 export const promptLookupHTMLCache = (eventCode: string, promptName: string): { __html: string } => {
     const text = promptLookupCache(eventCode, promptName);
     let processedText = text;
@@ -356,13 +467,29 @@ export const promptLookupHTMLCache = (eventCode: string, promptName: string): { 
     return { __html: processedText };
 };
 
-// Aid-specific HTML prompt lookup for the cache system
+/**
+ * @function promptLookupHTMLCacheAIDSpecific
+ * @description Looks up an AID-specific HTML prompt in the prompt cache.
+ * @param {string} aid - The AID of the event.
+ * @param {string | undefined} aidAlias - The alias for the AID.
+ * @param {string} promptName - The name of the prompt to look up.
+ * @returns {{ __html: string }} An object with an __html property containing the HTML text of the prompt.
+ */
 export const promptLookupHTMLCacheAIDSpecific = (aid: string, aidAlias: string | undefined, promptName: string): { __html: string } => {
     const eventCode = aidAlias || aid;
     return promptLookupHTMLCache(eventCode, promptName);
 };
 
-// HTML prompt lookup with arguments for the cache system
+/**
+ * @function promptLookupHTMLWithArgsCache
+ * @description Looks up an HTML prompt in the prompt cache and replaces placeholders with arguments.
+ * @param {string} eventCode - The event code.
+ * @param {string} promptName - The name of the prompt to look up.
+ * @param {string} arg1 - The first argument.
+ * @param {string} arg2 - The second argument.
+ * @param {string} arg3 - The third argument.
+ * @returns {{ __html: string }} An object with an __html property containing the HTML text of the prompt.
+ */
 export const promptLookupHTMLWithArgsCache = (eventCode: string, promptName: string, arg1?: string, arg2?: string, arg3?: string): { __html: string } => {
     const text = promptLookupCache(eventCode, promptName);
     let processedText = text;
@@ -380,13 +507,28 @@ export const promptLookupHTMLWithArgsCache = (eventCode: string, promptName: str
     return { __html: processedText };
 };
 
-// Aid-specific HTML prompt lookup with arguments for the cache system
+/**
+ * @function promptLookupHTMLWithArgsCacheAIDSpecific
+ * @description Looks up an AID-specific HTML prompt in the prompt cache and replaces placeholders with arguments.
+ * @param {string} aid - The AID of the event.
+ * @param {string | undefined} aidAlias - The alias for the AID.
+ * @param {string} promptName - The name of the prompt to look up.
+ * @param {string} arg1 - The first argument.
+ * @param {string} arg2 - The second argument.
+ * @param {string} arg3 - The third argument.
+ * @returns {{ __html: string }} An object with an __html property containing the HTML text of the prompt.
+ */
 export const promptLookupHTMLWithArgsCacheAIDSpecific = (aid: string, aidAlias: string | undefined, promptName: string, arg1?: string, arg2?: string, arg3?: string): { __html: string } => {
     const eventCode = aidAlias || aid;
     return promptLookupHTMLWithArgsCache(eventCode, promptName, arg1, arg2, arg3);
 };
 
-// Helper function to convert cache results to the new internal format
+/**
+ * @function processPromptCacheResults
+ * @description Converts cache results to the new internal format.
+ * @param {any} results - The results to convert.
+ * @returns {Record<string, Record<string, Record<string, string>>>} The converted results.
+ */
 export const processPromptCacheResults = (results: any): Record<string, Record<string, Record<string, string>>> => {
     const processed: Record<string, Record<string, Record<string, string>>> = {};
 

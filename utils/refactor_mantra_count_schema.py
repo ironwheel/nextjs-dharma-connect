@@ -1,22 +1,8 @@
-#!/usr/bin/env python3
 """
-Utility script to refactor mantra count schema from old table to new table.
-
-This script reads the entire student table and old mantra count table, then writes
-records to a new mantra count table with transformed field names and student IDs.
-
-The script uses multiple methods to match old mantra count records to student records:
-1. Pre-mapped IDs from idmap.csv file
-2. Match by 'mid' field in student table
-3. Match by email field
-4. Match by case-folded name search
-
-Field mappings are retrieved from a mantra-config table.
-
-Usage:
-    python refactor_mantra_count_schema.py
-    python refactor_mantra_count_schema.py --dry-run
-    python refactor_mantra_count_schema.py --delete-all
+@file utils/refactor_mantra_count_schema.py
+@copyright Robert E. Taylor, Extropic Systems, 2025
+@license MIT
+@description Utility script to refactor mantra count schema from old table to new table.
 """
 
 import argparse
@@ -46,12 +32,22 @@ if not MANTRA_COUNT_TABLE or not NEW_MANTRA_COUNT_TABLE:
     sys.exit(1)
 
 def get_dynamodb_client():
-    """Get DynamoDB client using the configured AWS profile."""
+    """
+    @function get_dynamodb_client
+    @description Get DynamoDB client using the configured AWS profile.
+    @returns A DynamoDB client.
+    """
     session = boto3.Session(profile_name=AWS_PROFILE, region_name=AWS_REGION)
     return session.resource('dynamodb')
 
 def load_field_mappings(dynamodb, table_name: str) -> Dict[str, str]:
-    """Load field mappings from mantra-config table."""
+    """
+    @function load_field_mappings
+    @description Load field mappings from mantra-config table.
+    @param dynamodb - The DynamoDB client.
+    @param table_name - The name of the table to load from.
+    @returns A dictionary of field mappings.
+    """
     if not table_name:
         print("WARNING: MANTRA_CONFIG_TABLE not set, using default field mappings")
         return {
@@ -106,7 +102,12 @@ def load_field_mappings(dynamodb, table_name: str) -> Dict[str, str]:
         }
 
 def load_id_mappings(csv_file: str = 'idmap.csv') -> Dict[str, str]:
-    """Load pre-mapped IDs from CSV file."""
+    """
+    @function load_id_mappings
+    @description Load pre-mapped IDs from CSV file.
+    @param csv_file - The path to the CSV file.
+    @returns A dictionary of ID mappings.
+    """
     mappings = {}
     
     if not os.path.exists(csv_file):
@@ -129,7 +130,13 @@ def load_id_mappings(csv_file: str = 'idmap.csv') -> Dict[str, str]:
         return mappings
 
 def delete_all_records(dynamodb, table_name: str, dry_run: bool = False):
-    """Delete all records from the specified table."""
+    """
+    @function delete_all_records
+    @description Delete all records from the specified table.
+    @param dynamodb - The DynamoDB client.
+    @param table_name - The name of the table to delete from.
+    @param dry_run - If True, only print what would be done without writing to DynamoDB.
+    """
     if dry_run:
         print(f"[DRYRUN] Would delete all records from {table_name}")
         return
@@ -165,7 +172,13 @@ def delete_all_records(dynamodb, table_name: str, dry_run: bool = False):
         raise
 
 def scan_table(dynamodb, table_name: str) -> List[Dict[str, Any]]:
-    """Scan a DynamoDB table and return all records."""
+    """
+    @function scan_table
+    @description Scan a DynamoDB table and return all records.
+    @param dynamodb - The DynamoDB client.
+    @param table_name - The name of the table to scan.
+    @returns A list of records.
+    """
     table = dynamodb.Table(table_name)
     items = []
     last_evaluated_key = None
@@ -190,14 +203,26 @@ def scan_table(dynamodb, table_name: str) -> List[Dict[str, Any]]:
     return items
 
 def find_student_by_mid(students: List[Dict[str, Any]], mantra_id: str) -> Optional[Dict[str, Any]]:
-    """Find student by matching 'mid' field to mantra count record ID."""
+    """
+    @function find_student_by_mid
+    @description Find student by matching 'mid' field to mantra count record ID.
+    @param students - A list of students.
+    @param mantra_id - The mantra ID to match.
+    @returns The matching student, or None if not found.
+    """
     for student in students:
         if student.get('mid') == mantra_id:
             return student
     return None
 
 def find_student_by_email(students: List[Dict[str, Any]], email: str) -> Optional[Dict[str, Any]]:
-    """Find student by matching email field."""
+    """
+    @function find_student_by_email
+    @description Find student by matching email field.
+    @param students - A list of students.
+    @param email - The email to match.
+    @returns The matching student, or None if not found.
+    """
     if not email:
         return None
     
@@ -207,7 +232,13 @@ def find_student_by_email(students: List[Dict[str, Any]], email: str) -> Optiona
     return None
 
 def find_student_by_name(students: List[Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
-    """Find student by case-folded name search."""
+    """
+    @function find_student_by_name
+    @description Find student by case-folded name search.
+    @param students - A list of students.
+    @param name - The name to match.
+    @returns The matching student, or None if not found.
+    """
     if not name:
         return None
     
@@ -252,14 +283,27 @@ def find_student_by_name(students: List[Dict[str, Any]], name: str) -> Optional[
     return None
 
 def find_student_by_id(students: List[Dict[str, Any]], student_id: str) -> Optional[Dict[str, Any]]:
-    """Find student by ID."""
+    """
+    @function find_student_by_id
+    @description Find student by ID.
+    @param students - A list of students.
+    @param student_id - The ID of the student to find.
+    @returns The matching student, or None if not found.
+    """
     for student in students:
         if student.get('id') == student_id:
             return student
     return None
 
 def transform_mantra_record(mantra_record: Dict[str, Any], student: Dict[str, Any], field_mappings: Dict[str, str]) -> Dict[str, Any]:
-    """Transform mantra count record to new schema."""
+    """
+    @function transform_mantra_record
+    @description Transform mantra count record to new schema.
+    @param mantra_record - The old mantra count record.
+    @param student - The student record.
+    @param field_mappings - A dictionary of field mappings.
+    @returns The transformed mantra count record.
+    """
     # Create new record with student ID
     new_record = {'id': student['id']}
     
@@ -288,7 +332,14 @@ def transform_mantra_record(mantra_record: Dict[str, Any], student: Dict[str, An
     return new_record
 
 def write_mantra_record(dynamodb, table_name: str, record: Dict[str, Any], dry_run: bool = False):
-    """Write a mantra count record to the new table."""
+    """
+    @function write_mantra_record
+    @description Write a mantra count record to the new table.
+    @param dynamodb - The DynamoDB client.
+    @param table_name - The name of the table to write to.
+    @param record - The record to write.
+    @param dry_run - If True, only print what would be done without writing to DynamoDB.
+    """
     if dry_run:
         print(f"[DRYRUN] Would write record to {table_name}: {record}")
         return
@@ -301,6 +352,10 @@ def write_mantra_record(dynamodb, table_name: str, record: Dict[str, Any], dry_r
         print(f"Error writing record to {table_name}: {e}")
 
 def main():
+    """
+    @function main
+    @description The main function for the script.
+    """
     parser = argparse.ArgumentParser(
         description='Refactor mantra count schema from old table to new table',
         formatter_class=argparse.RawDescriptionHelpFormatter,

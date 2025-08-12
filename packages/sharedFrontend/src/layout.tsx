@@ -1,4 +1,10 @@
-// packages/sharedFrontend/src/layout.ts
+/**
+ * @file packages/sharedFrontend/src/layout.tsx
+ * @copyright Robert E. Taylor, Extropic Systems, 2025
+ * @license MIT
+ * @description Defines the layout components for the application.
+ */
+
 import React, { useState, createContext, useContext, useEffect } from 'react';
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faGlobe, faChevronDown } from "@fortawesome/free-solid-svg-icons";
@@ -13,6 +19,12 @@ interface LanguageContextType {
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
+/**
+ * @function useLanguage
+ * @description A custom hook to use the Language context.
+ * @returns {LanguageContextType} The Language context.
+ * @throws {Error} If used outside of a LanguageProvider.
+ */
 export const useLanguage = () => {
     const context = useContext(LanguageContext);
     if (!context) {
@@ -21,6 +33,14 @@ export const useLanguage = () => {
     return context;
 };
 
+/**
+ * @component LanguageProvider
+ * @description This component provides a Language context to its children.
+ * @param {object} props - The props for the component.
+ * @param {React.ReactNode} props.children - The children to render.
+ * @param {string} props.initialLanguage - The initial language.
+ * @returns {React.FC} The LanguageProvider component.
+ */
 export const LanguageProvider: React.FC<{ children: React.ReactNode; initialLanguage?: string }> = ({ children, initialLanguage = 'English' }) => {
     const [currentLanguage, setCurrentLanguage] = useState(initialLanguage);
 
@@ -43,6 +63,13 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode; initialLang
     );
 };
 
+/**
+ * @component ColoredLine
+ * @description A colored horizontal line.
+ * @param {object} props - The props for the component.
+ * @param {string} props.color - The color of the line.
+ * @returns {React.FC} The ColoredLine component.
+ */
 export const ColoredLine = ({ color }: { color: string }) => (
     <hr
         style={{
@@ -53,6 +80,13 @@ export const ColoredLine = ({ color }: { color: string }) => (
     />
 );
 
+/**
+ * @component ThickColoredLine
+ * @description A thick colored horizontal line.
+ * @param {object} props - The props for the component.
+ * @param {string} props.color - The color of the line.
+ * @returns {React.FC} The ThickColoredLine component.
+ */
 export const ThickColoredLine = ({ color }: { color: string }) => (
     <hr
         style={{
@@ -63,6 +97,13 @@ export const ThickColoredLine = ({ color }: { color: string }) => (
     />
 );
 
+/**
+ * @component WrittenTranslationSelection
+ * @description A component for selecting the written translation language.
+ * @param {object} props - The props for the component.
+ * @param {boolean} props.icon - Whether to display the icon.
+ * @returns {React.FC} The WrittenTranslationSelection component.
+ */
 export const WrittenTranslationSelection = (props: {
     icon?: boolean;
 }) => {
@@ -119,6 +160,13 @@ export const WrittenTranslationSelection = (props: {
     );
 };
 
+/**
+ * @component TopNavBar
+ * @description The top navigation bar.
+ * @param {object} props - The props for the component.
+ * @param {string} props.title - The title to display.
+ * @returns {React.FC} The TopNavBar component.
+ */
 export const TopNavBar = (props: { title?: string }) => {
     return (
         <div className="sticky top-0 z-50 bg-gray-900 border border-gray-700 rounded-lg p-4 mb-4 flex items-center justify-between shadow-lg max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -132,6 +180,13 @@ export const TopNavBar = (props: { title?: string }) => {
     );
 };
 
+/**
+ * @component BottomNavBar
+ * @description The bottom navigation bar.
+ * @param {object} props - The props for the component.
+ * @param {string} props.scrollMsg - The message to display.
+ * @returns {React.FC} The BottomNavBar component.
+ */
 export const BottomNavBar = (props: { scrollMsg?: string }) => {
     const ConditionalMsg = () => {
         if (typeof props.scrollMsg !== 'undefined' && props.scrollMsg.length !== 0) {

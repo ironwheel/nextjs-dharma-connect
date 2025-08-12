@@ -1,4 +1,10 @@
-// packages/sharedFrontend/src/httpClient.ts
+/**
+ * @file packages/sharedFrontend/src/httpClient.ts
+ * @copyright Robert E. Taylor, Extropic Systems, 2025
+ * @license MIT
+ * @description Defines an HTTP client for making API requests.
+ */
+
 import Router from 'next/router';
 import { getFingerprint } from './fingerprint';
 
@@ -13,7 +19,12 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL;
 // at module scope
 let cachedCsrfToken: string | null = null;
 
-// Ensure we have a valid CSRF token
+/**
+ * @async
+ * @function ensureCsrfToken
+ * @description Ensures that a valid CSRF token is available.
+ * @returns {Promise<string>} A promise that resolves to the CSRF token.
+ */
 async function ensureCsrfToken(): Promise<string> {
   if (cachedCsrfToken) {
     return cachedCsrfToken
@@ -27,6 +38,16 @@ async function ensureCsrfToken(): Promise<string> {
   return token!;
 }
 
+/**
+ * @async
+ * @function apiFetch
+ * @description Makes an API request.
+ * @param {string} path - The path to make the request to.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @param {RequestInit} opts - The options for the request.
+ * @returns {Promise<any>} A promise that resolves to the response from the API.
+ */
 async function apiFetch(
   path: string,
   pid: string,

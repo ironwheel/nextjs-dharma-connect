@@ -1,14 +1,8 @@
-#!/usr/bin/env python3
 """
-Utility script to rename campaign keys in student records.
-
-This script scans the student DynamoDB table and renames campaign keys in the emails field
-while preserving the timestamp values associated with each campaign.
-
-Usage:
-    python rename_campaign.py --from-campaign "old-campaign" --to-campaign "new-campaign"
-    python rename_campaign.py --from-campaign "old-campaign" --to-campaign "new-campaign" --dryrun
-    python rename_campaign.py --from-campaign "old-campaign" --to-campaign "new-campaign" --id "student-id"
+@file utils/rename_campaign.py
+@copyright Robert E. Taylor, Extropic Systems, 2025
+@license MIT
+@description Utility script to rename campaign keys in student records.
 """
 
 import argparse
@@ -24,12 +18,23 @@ sys.path.append(str(Path(__file__).parent.parent / 'src'))
 from config import STUDENT_TABLE, AWS_REGION, AWS_PROFILE
 
 def get_dynamodb_client():
-    """Get DynamoDB client using the configured AWS profile."""
+    """
+    @function get_dynamodb_client
+    @description Get DynamoDB client using the configured AWS profile.
+    @returns A DynamoDB client.
+    """
     session = boto3.Session(profile_name=AWS_PROFILE, region_name=AWS_REGION)
     return session.resource('dynamodb')
 
 def scan_student_table(dynamodb, table_name: str, student_id: Optional[str] = None) -> list:
-    """Scan the student table and return all records or a specific record by ID."""
+    """
+    @function scan_student_table
+    @description Scan the student table and return all records or a specific record by ID.
+    @param dynamodb - The DynamoDB client.
+    @param table_name - The name of the table to scan.
+    @param student_id - The ID of the student to retrieve.
+    @returns A list of students.
+    """
     table = dynamodb.Table(table_name)
     
     if student_id:
@@ -70,16 +75,13 @@ def scan_student_table(dynamodb, table_name: str, student_id: Optional[str] = No
 
 def process_student_record(student: Dict[str, Any], from_campaign: str, to_campaign: str, dryrun: bool = False) -> bool:
     """
-    Process a single student record to rename campaign keys.
-    
-    Args:
-        student: The student record from DynamoDB
-        from_campaign: The campaign key to rename from
-        to_campaign: The campaign key to rename to
-        dryrun: If True, only count matches without making changes
-    
-    Returns:
-        True if changes were made (or would be made in dryrun), False otherwise
+    @function process_student_record
+    @description Process a single student record to rename campaign keys.
+    @param student - The student record from DynamoDB.
+    @param from_campaign - The campaign key to rename from.
+    @param to_campaign - The campaign key to rename to.
+    @param dryrun - If True, only count matches without making changes.
+    @returns True if changes were made (or would be made in dryrun), False otherwise.
     """
     student_id = student.get('id', 'unknown')
     emails = student.get('emails', {})
@@ -122,6 +124,10 @@ def process_student_record(student: Dict[str, Any], from_campaign: str, to_campa
             return False
 
 def main():
+    """
+    @function main
+    @description The main function for the script.
+    """
     parser = argparse.ArgumentParser(
         description='Rename campaign keys in student records',
         formatter_class=argparse.RawDescriptionHelpFormatter,
