@@ -273,6 +273,193 @@ export function verifyToken(token: string, pid: string, clientFingerprint: strin
     return VerifyResult.VERIFY_OK;
 }
 
+
+/**
+ * @function generateAuthHash
+ * @description Generates an HMAC hash of a UUID using a secret key.
+ * @param {string} guid - UUID string in standard uuid4 format
+ * @param {string} secretKeyHex - 64-character hexadecimal secret key
+ * @returns {string} HMAC-SHA256 hash as a hex string
+ */
+function generateAuthHash(guid: string, secretKeyHex: string): string {
+    if (!/^[0-9a-f]{64}$/i.test(secretKeyHex)) {
+        throw new Error('Secret key must be a 64-character hexadecimal string');
+    }
+    const secretKeyBuffer = Buffer.from(secretKeyHex, 'hex');
+    const hmac = crypto.createHmac('sha256', secretKeyBuffer);
+    hmac.update(guid);
+    return hmac.digest('hex');
+}
+
+/**
+ * @async
+    * @function authGetLink
+ * @description Generates an access link for a student to a specific domain.
+ * @param { string } domainName - The domain name for the app.
+ * @param { string } studentId - The student ID.
+ * @returns { Promise<string> } The access link in format: https://${domainName}/?pid=${studentId}&hash=${appSpecificHash}
+ * @throws { Error } If the student doesn't have access to the domain or configuration is missing.
+    */
+async function authGetLink(studentId: string, linkHost: string): Promise<string> {
+    // Parse and validate APP_ACCESS_JSON
+    const accessJson = process.env.APP_ACCESS_JSON;
+    if (!accessJson) {
+        throw new Error('APP_ACCESS_JSON environment variable not set');
+    }
+
+    let accessList: any[];
+    try {
+        accessList = JSON.parse(accessJson);
+    } catch (e) {
+        throw new Error('APP_ACCESS_JSON is not valid JSON');
+    }
+
+    // Find domain configuration
+    const entry = accessList.find((e: any) => e.host === linkHost);
+    if (!entry) {
+        throw new Error(`Link host '${linkHost}' not found in APP_ACCESS_JSON`);
+    }
+
+    // Check if student has access to this domain
+    let tableCfg = tableGetConfig('auth');
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, studentId, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+
+    if (!data) {
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        if (!data) {
+            throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
+        }
+    }
+
+    // Check if student has access to this domain
+    const permittedHosts: string[] = data['permitted-hosts'] || [];
+    const hasPermission = permittedHosts.includes(linkHost);
+    if (!hasPermission) {
+        throw new Error(`Student ${studentId} does not have access to link host '${linkHost}'`);
+    }
+
+    // Generate the app-specific hash
+    const appSpecificHash = generateAuthHash(studentId, entry.secret);
+
+    // Return the access link
+    return `https://${linkHost}/?pid=${studentId}&hash=${appSpecificHash}`;
+}
+
+
+
+/**
+ * @async
+ * @function linkEmailSend
+ * @description Sends an email with an app-specific link to the participant.
+ * @param {string} pid - Participant ID.
+ * @param {string} hash - The hash value to verify.
+ * @param {string} host - The host of the calling app.
+ * @param {string} linkHost - The host of the link to send.
+ * @returns {Promise<boolean>} Resolves with true on success.
+ * @throws {Error} If configuration is missing or sending fails.
+ */
+export async function linkEmailSend(pid: string, hash: string, host: string, linkHost: string): Promise<boolean> {
+    // Validate inputs
+    if (!pid || !hash || !host || !linkHost) {
+        throw new Error('linkEmailSend(): Missing required parameters');
+    }
+
+    // Parse and validate APP_ACCESS_JSON
+    const accessJson = process.env.APP_ACCESS_JSON;
+    if (!accessJson) throw new Error('APP_ACCESS_JSON environment variable not set');
+
+    let accessList: any[];
+    try {
+        accessList = JSON.parse(accessJson);
+    } catch (e) {
+        throw new Error('APP_ACCESS_JSON is not valid JSON');
+    }
+
+    // Find host configuration
+    const entry = accessList.find((e: any) => e.host === host);
+    if (!entry) throw new Error('UNKNOWN_HOST');
+
+    // If secret found, verify hash
+    if (entry.secret !== 'none') {
+        const expectedHash = generateAuthHash(pid, entry.secret);
+        // Bad hash here means the host requires an app-specific hash
+        // and the user either doesn't have or has the wrong hash
+        if (expectedHash !== hash) throw new Error('AUTHUSER_ACCESS_NOT_ALLOWED_BAD_HASH');
+    }
+
+    // Does this user have access?
+    let tableCfg = tableGetConfig('auth');
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+
+    if (!data) {
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
+    }
+
+    // Does this user have access to the originating host?
+    const permittedHosts: string[] = data['permitted-hosts'] || [];
+    const hasPermission = permittedHosts.includes(host);
+    if (!hasPermission) throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
+
+    // Does this user have access to the specified link host?
+    const permittedLinkHosts: string[] = data['permitted-hosts'] || [];
+    const hasLinkPermission = permittedLinkHosts.includes(linkHost);
+    if (!hasLinkPermission) throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_LINK_HOST_NOT_PERMITTED');
+
+    // Check necessary configs at the start
+    if (!SMTP_USERNAME || !SMTP_PASSWORD) throw new Error("SMTP credentials not configured for email sending.");
+    if (!EMAIL_FROM || !EMAIL_REPLY_TO) throw new Error("Sender email addresses not configured for email sending.");
+
+    // Find participant data internally
+    const participantData = await findParticipantForAuth(pid);
+    if (!participantData) {
+        throw new Error('AUTH_PID_NOT_FOUND');
+    }
+
+    const language = participantData.writtenLangPref || 'English';
+    const localPrompts = await getPromptsForAid('link');
+    const getLinkPrompt = (promptId: string, lang: string): string => {
+        const found = localPrompts.find((p: any) => p.prompt === `link-${promptId}` && p.language === lang);
+        if (found) return found.text;
+        const englishFallback = localPrompts.find((p: any) => p.prompt === `link-${promptId}` && p.language === 'English');
+        return englishFallback ? englishFallback.text : `link-${promptId}-${lang}-unknown`;
+    };
+
+    const link = await authGetLink(pid, linkHost);
+
+    let emailBody = getLinkPrompt('email', language)
+        .replace(/\|\|name\|\|/g, `${participantData.first} ${participantData.last}`)
+        .replace(/\|\|linkDescription\|\|/g, getLinkPrompt('subject-' + linkHost, language))
+        .replace(/\|\|link\|\|/g, link);
+
+    const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+            user: SMTP_USERNAME,
+            pass: SMTP_PASSWORD
+        },
+        // Ensure proper encoding to avoid quoted-printable encoding issues
+        encoding: 'utf8'
+    });
+
+    const mailOptions = {
+        from: EMAIL_FROM,
+        replyTo: EMAIL_REPLY_TO,
+        to: participantData.email,
+        subject: getLinkPrompt('subject-' + linkHost, language),
+        html: emailBody
+    };
+
+    try {
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`auth-logic: Link email sent successfully to: ${participantData.email}, Info: ${info.messageId}`);
+        return true;
+    } catch (emailError: any) {
+        console.error("auth-logic: Failed to send confirmation email:", emailError);
+        throw new Error('AUTH_LINK_EMAIL_SEND_FAILED');
+    }
+}
+
 /**
  * @async
  * @function verificationEmailSend
@@ -344,13 +531,6 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
     }
 
     // User has access to this HOST - send the verification email   
-
-    let hostNameWithProtocol = '';
-    if (host.includes('localhost')) {
-        hostNameWithProtocol = 'http://localhost:3000';
-    } else {
-        hostNameWithProtocol = 'https://' + host;
-    }
 
     // Check necessary configs at the start
     if (!SMTP_USERNAME || !SMTP_PASSWORD) throw new Error("SMTP credentials not configured for email sending.");
@@ -653,23 +833,6 @@ export function getPermissionsLogic(pid: string): any {
 }
 
 /**
- * @function generateAuthHash
- * @description Generates an HMAC hash of a UUID using a secret key.
- * @param {string} guid - UUID string in standard uuid4 format
- * @param {string} secretKeyHex - 64-character hexadecimal secret key
- * @returns {string} HMAC-SHA256 hash as a hex string
- */
-export function generateAuthHash(guid: string, secretKeyHex: string): string {
-    if (!/^[0-9a-f]{64}$/i.test(secretKeyHex)) {
-        throw new Error('Secret key must be a 64-character hexadecimal string');
-    }
-    const secretKeyBuffer = Buffer.from(secretKeyHex, 'hex');
-    const hmac = crypto.createHmac('sha256', secretKeyBuffer);
-    hmac.update(guid);
-    return hmac.digest('hex');
-}
-
-/**
  * @async
  * @function checkAccess
  * @description Checks access for a participant and host using a hash and a secret from APP_ACCESS_JSON.
@@ -951,60 +1114,6 @@ export async function getViewsEmailDisplayPermission(pid: string, host: string):
         }
     }
     return !!data.eventDashboardConfig?.emailDisplay;
-}
-
-/**
- * @async
- * @function authGetLink
- * @description Generates an access link for a student to a specific domain.
- * @param {string} domainName - The domain name for the app.
- * @param {string} studentId - The student ID.
- * @returns {Promise<string>} The access link in format: https://${domainName}/?pid=${studentId}&hash=${appSpecificHash}
- * @throws {Error} If the student doesn't have access to the domain or configuration is missing.
- */
-export async function authGetLink(domainName: string, studentId: string): Promise<string> {
-    // Parse and validate APP_ACCESS_JSON
-    const accessJson = process.env.APP_ACCESS_JSON;
-    if (!accessJson) {
-        throw new Error('APP_ACCESS_JSON environment variable not set');
-    }
-
-    let accessList: any[];
-    try {
-        accessList = JSON.parse(accessJson);
-    } catch (e) {
-        throw new Error('APP_ACCESS_JSON is not valid JSON');
-    }
-
-    // Find domain configuration
-    const entry = accessList.find((e: any) => e.host === domainName);
-    if (!entry) {
-        throw new Error(`Domain '${domainName}' not found in APP_ACCESS_JSON`);
-    }
-
-    // Check if student has access to this domain
-    let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, studentId, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
-
-    if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
-        if (!data) {
-            throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
-        }
-    }
-
-    // Check if student has access to this domain
-    const permittedHosts: string[] = data['permitted-hosts'] || [];
-    const hasPermission = permittedHosts.includes(domainName);
-    if (!hasPermission) {
-        throw new Error(`Student ${studentId} does not have access to domain '${domainName}'`);
-    }
-
-    // Generate the app-specific hash
-    const appSpecificHash = generateAuthHash(studentId, entry.secret);
-
-    // Return the access link
-    return `https://${domainName}/?pid=${studentId}&hash=${appSpecificHash}`;
 }
 
 /**

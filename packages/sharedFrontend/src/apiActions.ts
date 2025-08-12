@@ -777,39 +777,38 @@ export async function authGetViewsEmailDisplayPermission(
     }
 }
 
+
+
 /**
  * @async
- * @function authGetLink
- * @description Get an access link for a student.
- * @param {string} domainName - The domain name to get the link for.
- * @param {string} studentId - The ID of the student.
+ * @function authLinkEmailSend
+ * @description Send a link email to a student for a specific app.
  * @param {string} pid - The participant ID.
  * @param {string} hash - The verification hash.
- * @returns {Promise<string | RedirectedResponse>} A promise that resolves to the access link.
+ * @param {string} linkHost - The host to send the link for.
+ * @returns {Promise<boolean | RedirectedResponse>} A promise that resolves to true if the email was sent successfully.
  */
-export async function authGetLink(
-    domainName: string,
-    studentId: string,
+export async function authLinkEmailSend(
     pid: string,
-    hash: string
-): Promise<string | RedirectedResponse> {
+    hash: string,
+    linkHost: string
+): Promise<boolean | RedirectedResponse> {
     try {
-        const response = await api.post(`${API_BASE_URL}/auth/getLink`, pid, hash, {
-            domainName,
-            studentId
+        const response = await api.post(`${API_BASE_URL}/auth/linkEmailSend`, pid, hash, {
+            linkHost
         });
         if (response && response.redirected) {
-            console.log('[API] authGetLink redirected - authentication required');
+            console.log('[API] authLinkEmailSend redirected - authentication required');
             return { redirected: true };
         }
-        return response?.accessLink || '';
+        return response?.success || false;
     } catch (error: any) {
-        console.error('[API] authGetLink failed:', error);
+        console.error('[API] authLinkEmailSend failed:', error);
         if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
-            console.log('[API] authGetLink authentication failed - returning redirected response');
+            console.log('[API] authLinkEmailSend authentication failed - returning redirected response');
             return { redirected: true };
         }
-        throw new Error(error.message || 'Failed to get access link');
+        throw new Error(error.message || 'Failed to send link email');
     }
 }
 
