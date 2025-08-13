@@ -30,147 +30,172 @@ async function dispatchTable(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
-  const cfg = tables.find((t: TableConfig) => t.resource === resource);
-  if (!cfg) {
-    return res.status(404).json({ error: `Unknown resource: ${resource}` });
-  }
-
-  const tableName = process.env[cfg.envVar]!;
-  if (!tableName) throw new Error(`Missing env var: ${cfg.envVar}`);
-
-  // LIST
-  if (req.method === 'GET' && !id && cfg.ops.includes('list')) {
-    const items = await listAll(tableName);
-    return res.status(200).json(items);
-  }
-
-  // LIST CHUNKED (POST method for chunked scanning)
-  if (req.method === 'POST' && !id && req.body && req.body.limit) {
-    const { limit, lastEvaluatedKey, scanParams = {}, projectionExpression, expressionAttributeNames } = req.body;
-    const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit, undefined, projectionExpression, expressionAttributeNames);
-    return res.status(200).json(result);
-  }
-
-  // LIST CHUNKED (special case when id is "chunked")
-  if (req.method === 'POST' && id === 'chunked' && req.body && req.body.limit) {
-    const { limit, lastEvaluatedKey, scanParams = {}, projectionExpression, expressionAttributeNames } = req.body;
-    const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit, undefined, projectionExpression, expressionAttributeNames);
-    return res.status(200).json(result);
-  }
-
-  // LIST FILTERED (POST method for filtered scanning)
-  if (req.method === 'POST' && id === 'filtered' && req.body && req.body.filterFieldName && req.body.filterFieldValue) {
-    const { filterFieldName, filterFieldValue } = req.body;
-    const items = await listAllFiltered(tableName, filterFieldName, filterFieldValue);
-    return res.status(200).json({ items });
-  }
-
-  // QUERY (POST method for querying with begins_with on sort key)
-  if (req.method === 'POST' && id === 'query' && req.body && req.body.primaryKeyValue && req.body.sortKeyValue && cfg.ops.includes('query')) {
-    const { primaryKeyValue, sortKeyValue } = req.body;
-
-    const results = await listAllQueryBeginsWithSortKeyMultiple(tableName, cfg.pk, primaryKeyValue, cfg.sk, sortKeyValue);
-    return res.status(200).json({ results });
-  }
-
-  // BATCH GET (POST method for batch retrieval by IDs)
-  if (req.method === 'POST' && id === 'batch' && req.body && req.body.ids && Array.isArray(req.body.ids)) {
-    const { ids } = req.body;
-    const items = await batchGetItems(tableName, cfg.pk, ids);
-    return res.status(200).json(items);
-  }
-
-  // COUNT (POST method for counting items)
-  if (req.method === 'POST' && id === 'count' && cfg.ops.includes('count')) {
-    const count = await countAll(tableName);
-    return res.status(200).json({ count });
-  }
-
-  // GET ONE
-  if (req.method === 'GET' && id && cfg.ops.includes('get')) {
-    const item = await getOne(tableName, cfg.pk, id);
-    return item ? res.status(200).json(item) : res.status(404).json({ error: `${resource} ${id} not found` });
-  }
-
-  // PUT ONE (upsert)
-  if (req.method === 'PUT' && id && cfg.ops.includes('put')) {
-    if (!req.body || typeof req.body !== 'object') {
-      return res.status(400).json({ error: 'Missing or invalid request body for PUT' });
-    }
-    // Upsert the item using the provided body
-    await putOne(tableName, req.body);
-    return res.status(200).json({ success: true });
-  }
-
-  // UPDATE ITEM (POST method for updating specific fields)
-  if (req.method === 'POST' && id && req.body && req.body.fieldName && req.body.fieldValue !== undefined) {
-    const { fieldName, fieldValue } = req.body;
-
-    // Handle nested field updates (e.g., "programs.sw2025.accepted")
-    let expressionAttributeNames: Record<string, string>;
-    let updateExpression: string;
-    const expressionAttributeValues = { ':fieldValue': fieldValue };
-
-    if (fieldName.includes('.')) {
-      const pathParts = fieldName.split('.');
-      expressionAttributeNames = {};
-
-      // Create expression attribute names for each path part
-      pathParts.forEach((part, index) => {
-        expressionAttributeNames[`#part${index}`] = part;
-      });
-
-      // Build the update expression for nested path
-      updateExpression = 'SET ';
-      for (let i = 0; i < pathParts.length; i++) {
-        if (i === 0) {
-          updateExpression += `#part${i}`;
-        } else {
-          updateExpression += `.#part${i}`;
-        }
-      }
-      updateExpression += ' = :fieldValue';
-    } else {
-      // Handle simple field updates
-      expressionAttributeNames = { '#fieldName': fieldName };
-      updateExpression = `SET #fieldName = :fieldValue`;
+  try {
+    const cfg = tables.find((t: TableConfig) => t.resource === resource);
+    if (!cfg) {
+      return res.status(404).json({ error: `Unknown resource: ${resource}` });
     }
 
-    // Use conditional update for work-orders to prevent recreating deleted items
-    if (resource === 'work-orders') {
-      try {
-        await updateItemWithCondition(tableName, { [cfg.pk]: id }, updateExpression, expressionAttributeValues, expressionAttributeNames);
-        return res.status(200).json({ success: true });
-      } catch (error: any) {
-        // If the item doesn't exist, return success since the goal (unlocked state) is achieved
-        if (error.name === 'ConditionalCheckFailedException') {
-          console.log(`[API] Work order ${id} does not exist, skipping update`);
-          return res.status(200).json({ success: true });
-        }
-        throw error;
+    const tableName = process.env[cfg.envVar]!;
+    if (!tableName) throw new Error(`Missing env var: ${cfg.envVar}`);
+
+    // LIST
+    if (req.method === 'GET' && !id && cfg.ops.includes('list')) {
+      const items = await listAll(tableName);
+      return res.status(200).json(items);
+    }
+
+    // LIST CHUNKED (POST method for chunked scanning)
+    if (req.method === 'POST' && !id && req.body && req.body.limit) {
+      const { limit, lastEvaluatedKey, scanParams = {}, projectionExpression, expressionAttributeNames } = req.body;
+      const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit, undefined, projectionExpression, expressionAttributeNames);
+      return res.status(200).json(result);
+    }
+
+    // LIST CHUNKED (special case when id is "chunked")
+    if (req.method === 'POST' && id === 'chunked' && req.body && req.body.limit) {
+      const { limit, lastEvaluatedKey, scanParams = {}, projectionExpression, expressionAttributeNames } = req.body;
+      const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit, undefined, projectionExpression, expressionAttributeNames);
+      return res.status(200).json(result);
+    }
+
+    // LIST FILTERED (POST method for filtered scanning)
+    if (req.method === 'POST' && id === 'filtered' && req.body && req.body.filterFieldName && req.body.filterFieldValue) {
+      const { filterFieldName, filterFieldValue } = req.body;
+      const items = await listAllFiltered(tableName, filterFieldName, filterFieldValue);
+      return res.status(200).json({ items });
+    }
+
+    // QUERY (POST method for querying with begins_with on sort key)
+    if (req.method === 'POST' && id === 'query' && req.body && req.body.primaryKeyValue && req.body.sortKeyValue && cfg.ops.includes('query')) {
+      const { primaryKeyValue, sortKeyValue } = req.body;
+
+      const results = await listAllQueryBeginsWithSortKeyMultiple(tableName, cfg.pk, primaryKeyValue, cfg.sk, sortKeyValue);
+      return res.status(200).json({ results });
+    }
+
+    // BATCH GET (POST method for batch retrieval by IDs)
+    if (req.method === 'POST' && id === 'batch' && req.body && req.body.ids && Array.isArray(req.body.ids)) {
+      const { ids } = req.body;
+      const items = await batchGetItems(tableName, cfg.pk, ids);
+      return res.status(200).json(items);
+    }
+
+    // COUNT (POST method for counting items)
+    if (req.method === 'POST' && id === 'count' && cfg.ops.includes('count')) {
+      const count = await countAll(tableName);
+      return res.status(200).json({ count });
+    }
+
+    // GET ONE
+    if (req.method === 'GET' && id && cfg.ops.includes('get')) {
+      const item = await getOne(tableName, cfg.pk, id);
+      return item ? res.status(200).json(item) : res.status(404).json({ error: `${resource} ${id} not found` });
+    }
+
+    // PUT ONE (upsert)
+    if (req.method === 'PUT' && id && cfg.ops.includes('put')) {
+      if (!req.body || typeof req.body !== 'object') {
+        return res.status(400).json({ error: 'Missing or invalid request body for PUT' });
       }
-    } else {
-      await updateItem(tableName, { [cfg.pk]: id }, updateExpression, expressionAttributeValues, expressionAttributeNames);
+      // Upsert the item using the provided body
+      await putOne(tableName, req.body);
       return res.status(200).json({ success: true });
     }
-  }
 
-  // DELETE
-  if (req.method === 'DELETE' && id && cfg.ops.includes('delete')) {
-    await deleteOne(tableName, cfg.pk, id);
-    return res.status(204).end();
-  }
+    // UPDATE ITEM (POST method for updating specific fields)
+    if (req.method === 'POST' && id && req.body && req.body.fieldName && req.body.fieldValue !== undefined) {
+      const { fieldName, fieldValue } = req.body;
 
-  // Method Not Allowed
-  const allowed: string[] = [];
-  if (cfg.ops.includes('list')) allowed.push('GET');
-  if (cfg.ops.includes('get')) allowed.push('GET');
-  if (cfg.ops.includes('delete')) allowed.push('DELETE');
-  if (cfg.ops.includes('put')) allowed.push('PUT');
-  if (cfg.ops.includes('count')) allowed.push('POST'); // Allow POST for count operations
-  allowed.push('POST'); // Allow POST for updates and filtered queries
-  res.setHeader('Allow', allowed);
-  return res.status(405).end(`Method ${req.method} Not Allowed`);
+      // Handle nested field updates (e.g., "programs.sw2025.accepted")
+      let expressionAttributeNames: Record<string, string>;
+      let updateExpression: string;
+      const expressionAttributeValues = { ':fieldValue': fieldValue };
+
+      if (fieldName.includes('.')) {
+        const pathParts = fieldName.split('.');
+        expressionAttributeNames = {};
+
+        // Create expression attribute names for each path part
+        pathParts.forEach((part, index) => {
+          expressionAttributeNames[`#part${index}`] = part;
+        });
+
+        // Build the update expression for nested path
+        updateExpression = 'SET ';
+        for (let i = 0; i < pathParts.length; i++) {
+          if (i === 0) {
+            updateExpression += `#part${i}`;
+          } else {
+            updateExpression += `.#part${i}`;
+          }
+        }
+        updateExpression += ' = :fieldValue';
+      } else {
+        // Handle simple field updates
+        expressionAttributeNames = { '#fieldName': fieldName };
+        updateExpression = `SET #fieldName = :fieldValue`;
+      }
+
+      // Use conditional update for work-orders to prevent recreating deleted items
+      if (resource === 'work-orders') {
+        try {
+          await updateItemWithCondition(tableName, { [cfg.pk]: id }, updateExpression, expressionAttributeValues, expressionAttributeNames);
+          return res.status(200).json({ success: true });
+        } catch (error: any) {
+          // If the item doesn't exist, return success since the goal (unlocked state) is achieved
+          if (error.name === 'ConditionalCheckFailedException') {
+            console.log(`[API] Work order ${id} does not exist, skipping update`);
+            return res.status(200).json({ success: true });
+          }
+          throw error;
+        }
+      } else {
+        await updateItem(tableName, { [cfg.pk]: id }, updateExpression, expressionAttributeValues, expressionAttributeNames);
+        return res.status(200).json({ success: true });
+      }
+    }
+
+    // DELETE
+    if (req.method === 'DELETE' && id && cfg.ops.includes('delete')) {
+      await deleteOne(tableName, cfg.pk, id);
+      return res.status(204).end();
+    }
+
+    // Method Not Allowed
+    const allowed: string[] = [];
+    if (cfg.ops.includes('list')) allowed.push('GET');
+    if (cfg.ops.includes('get')) allowed.push('GET');
+    if (cfg.ops.includes('delete')) allowed.push('DELETE');
+    if (cfg.ops.includes('put')) allowed.push('PUT');
+    if (cfg.ops.includes('count')) allowed.push('POST'); // Allow POST for count operations
+    allowed.push('POST'); // Allow POST for updates and filtered queries
+    res.setHeader('Allow', allowed);
+    return res.status(405).end(`Method ${req.method} Not Allowed`);
+  } catch (error: any) {
+    console.error(`Table operation failed for resource ${resource}:`, error);
+
+    // Handle specific AWS error types
+    if (error.name === 'ConditionalCheckFailedException') {
+      return res.status(400).json({ error: 'Condition check failed: Item does not exist or condition not met' });
+    }
+    if (error.name === 'ResourceNotFoundException') {
+      return res.status(404).json({ error: 'Table not found' });
+    }
+    if (error.name === 'ProvisionedThroughputExceededException') {
+      return res.status(429).json({ error: 'Request rate exceeded. Please try again later.' });
+    }
+    if (error.name === 'ThrottlingException') {
+      return res.status(429).json({ error: 'Request throttled. Please try again later.' });
+    }
+    if (error.name === 'ValidationException') {
+      return res.status(400).json({ error: `Validation error: ${error.message}` });
+    }
+
+    // Generic error handling
+    const errorMessage = error.message || 'An unexpected error occurred';
+    return res.status(500).json({ error: errorMessage });
+  }
 }
 
 /**

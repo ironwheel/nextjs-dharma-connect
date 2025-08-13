@@ -71,22 +71,31 @@ function getDocClient(identityPoolIdOverride?: string) {
  * @param {string} tableName - The name of the table to scan.
  * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
  * @returns {Promise<any[]>} A promise that resolves to an array of items.
+ * @throws {Error} When AWS operation fails or table cannot be scanned.
  */
 export async function listAll(tableName: string, identityPoolIdOverride?: string) {
   const client = getDocClient(identityPoolIdOverride);
   const items: any[] = [];
   let ExclusiveStartKey;
-  do {
-    const response = await client.send(
-      new ScanCommand({
-        TableName: tableName,
-        ExclusiveStartKey,
-      })
-    );
-    if (response.Items) items.push(...response.Items);
-    ExclusiveStartKey = response.LastEvaluatedKey;
-  } while (ExclusiveStartKey);
-  return items;
+  try {
+    do {
+      const response = await client.send(
+        new ScanCommand({
+          TableName: tableName,
+          ExclusiveStartKey,
+        })
+      );
+      if (response.Items) items.push(...response.Items);
+      ExclusiveStartKey = response.LastEvaluatedKey;
+    } while (ExclusiveStartKey);
+    return items;
+  } catch (error) {
+    console.error(`Failed to scan table ${tableName}:`, error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to scan table ${tableName}: ${error.message}`);
+    }
+    throw new Error(`Failed to scan table ${tableName}: Unknown error occurred`);
+  }
 }
 
 /**
@@ -96,23 +105,32 @@ export async function listAll(tableName: string, identityPoolIdOverride?: string
  * @param {string} tableName - The name of the table to count.
  * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
  * @returns {Promise<number>} A promise that resolves to the total number of items.
+ * @throws {Error} When AWS operation fails or table cannot be counted.
  */
 export async function countAll(tableName: string, identityPoolIdOverride?: string) {
   const client = getDocClient(identityPoolIdOverride);
   let totalCount = 0;
   let ExclusiveStartKey;
-  do {
-    const response = await client.send(
-      new ScanCommand({
-        TableName: tableName,
-        Select: 'COUNT',
-        ExclusiveStartKey,
-      })
-    );
-    totalCount += response.Count || 0;
-    ExclusiveStartKey = response.LastEvaluatedKey;
-  } while (ExclusiveStartKey);
-  return totalCount;
+  try {
+    do {
+      const response = await client.send(
+        new ScanCommand({
+          TableName: tableName,
+          Select: 'COUNT',
+          ExclusiveStartKey,
+        })
+      );
+      totalCount += response.Count || 0;
+      ExclusiveStartKey = response.LastEvaluatedKey;
+    } while (ExclusiveStartKey);
+    return totalCount;
+  } catch (error) {
+    console.error(`Failed to count items in table ${tableName}:`, error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to count items in table ${tableName}: ${error.message}`);
+    }
+    throw new Error(`Failed to count items in table ${tableName}: Unknown error occurred`);
+  }
 }
 
 /**
@@ -127,6 +145,7 @@ export async function countAll(tableName: string, identityPoolIdOverride?: strin
  * @param {string} projectionExpression - Optional projection expression.
  * @param {Record<string, string>} expressionAttributeNames - Optional expression attribute names.
  * @returns {Promise<any>} A promise that resolves to an object containing the items and the last evaluated key.
+ * @throws {Error} When AWS operation fails or table cannot be scanned.
  */
 export async function listAllChunked(
   tableName: string,
@@ -146,18 +165,26 @@ export async function listAllChunked(
     ...(expressionAttributeNames && { ExpressionAttributeNames: expressionAttributeNames })
   };
 
-  const response = await client.send(
-    new ScanCommand({
-      ...baseParams,
-      ...(lastEvaluatedKey && { ExclusiveStartKey: lastEvaluatedKey })
-    })
-  );
+  try {
+    const response = await client.send(
+      new ScanCommand({
+        ...baseParams,
+        ...(lastEvaluatedKey && { ExclusiveStartKey: lastEvaluatedKey })
+      })
+    );
 
-  return {
-    items: response.Items || [],
-    lastEvaluatedKey: response.LastEvaluatedKey,
-    Count: response.Count
-  };
+    return {
+      items: response.Items || [],
+      lastEvaluatedKey: response.LastEvaluatedKey,
+      Count: response.Count
+    };
+  } catch (error) {
+    console.error(`Failed to scan table ${tableName} in chunks:`, error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to scan table ${tableName} in chunks: ${error.message}`);
+    }
+    throw new Error(`Failed to scan table ${tableName} in chunks: Unknown error occurred`);
+  }
 }
 
 /**
@@ -169,6 +196,7 @@ export async function listAllChunked(
  * @param {string} fieldValue - The value of the field to filter on.
  * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
  * @returns {Promise<any[]>} A promise that resolves to an array of matching items.
+ * @throws {Error} When AWS operation fails or table cannot be filtered.
  */
 export async function listAllFiltered(
   tableName: string,
@@ -182,22 +210,30 @@ export async function listAllFiltered(
   console.log("listAllFiltered: tableName:", tableName);
   console.log("listAllFiltered: fieldName:", fieldName);
   console.log("listAllFiltered: fieldValue:", fieldValue);
-  do {
-    const response = await client.send(
-      new ScanCommand({
-        TableName: tableName,
-        FilterExpression: `${fieldName} = :fieldValue`,
-        ExpressionAttributeValues: {
-          ':fieldValue': fieldValue
-        },
-        ExclusiveStartKey,
-      })
-    );
-    if (response.Items) items.push(...response.Items);
-    ExclusiveStartKey = response.LastEvaluatedKey;
-  } while (ExclusiveStartKey);
-  console.log("listAllFiltered: items:", items.length);
-  return items;
+  try {
+    do {
+      const response = await client.send(
+        new ScanCommand({
+          TableName: tableName,
+          FilterExpression: `${fieldName} = :fieldValue`,
+          ExpressionAttributeValues: {
+            ':fieldValue': fieldValue
+          },
+          ExclusiveStartKey,
+        })
+      );
+      if (response.Items) items.push(...response.Items);
+      ExclusiveStartKey = response.LastEvaluatedKey;
+    } while (ExclusiveStartKey);
+    console.log("listAllFiltered: items:", items.length);
+    return items;
+  } catch (error) {
+    console.error(`Failed to filter table ${tableName}:`, error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to filter table ${tableName}: ${error.message}`);
+    }
+    throw new Error(`Failed to filter table ${tableName}: Unknown error occurred`);
+  }
 }
 
 /**
@@ -209,6 +245,7 @@ export async function listAllFiltered(
  * @param {string} id - The ID of the item to get.
  * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
  * @returns {Promise<any>} A promise that resolves to the item.
+ * @throws {Error} When AWS operation fails or item cannot be retrieved from the table.
  */
 export async function getOne(
   tableName: string,
@@ -217,13 +254,21 @@ export async function getOne(
   identityPoolIdOverride?: string
 ) {
   const client = getDocClient(identityPoolIdOverride);
-  const { Item } = await client.send(
-    new GetCommand({
-      TableName: tableName,
-      Key: { [pkName]: id },
-    })
-  );
-  return Item;
+  try {
+    const { Item } = await client.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: { [pkName]: id },
+      })
+    );
+    return Item;
+  } catch (error) {
+    console.error(`Failed to get item from table ${tableName}:`, error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to get item from table ${tableName}: ${error.message}`);
+    }
+    throw new Error(`Failed to get item from table ${tableName}: Unknown error occurred`);
+  }
 }
 
 /**
@@ -237,6 +282,7 @@ export async function getOne(
  * @param {string} skValue - The value of the sort key.
  * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
  * @returns {Promise<any>} A promise that resolves to the item.
+ * @throws {Error} When AWS operation fails or item cannot be retrieved from the table.
  */
 export async function getOneWithSort(
   tableName: string,
@@ -247,16 +293,24 @@ export async function getOneWithSort(
   identityPoolIdOverride?: string
 ) {
   const client = getDocClient(identityPoolIdOverride);
-  const { Item } = await client.send(
-    new GetCommand({
-      TableName: tableName,
-      Key: {
-        [pkName]: pkValue,
-        [skName]: skValue,
-      },
-    })
-  );
-  return Item;
+  try {
+    const { Item } = await client.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: {
+          [pkName]: pkValue,
+          [skName]: skValue,
+        },
+      })
+    );
+    return Item;
+  } catch (error) {
+    console.error(`Failed to get item with sort key from table ${tableName}:`, error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to get item with sort key from table ${tableName}: ${error.message}`);
+    }
+    throw new Error(`Failed to get item with sort key from table ${tableName}: Unknown error occurred`);
+  }
 }
 
 /**
@@ -267,6 +321,7 @@ export async function getOneWithSort(
  * @param {Record<string, any>} item - The item to put into the table.
  * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
  * @returns {Promise<void>}
+ * @throws {Error} When AWS operation fails or item cannot be put into the table.
  */
 export async function putOne(
   tableName: string,
@@ -274,12 +329,20 @@ export async function putOne(
   identityPoolIdOverride?: string
 ) {
   const client = getDocClient(identityPoolIdOverride);
-  await client.send(
-    new PutCommand({
-      TableName: tableName,
-      Item: item,
-    })
-  );
+  try {
+    await client.send(
+      new PutCommand({
+        TableName: tableName,
+        Item: item,
+      })
+    );
+  } catch (error) {
+    console.error(`Failed to put item into table ${tableName}:`, error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to put item into table ${tableName}: ${error.message}`);
+    }
+    throw new Error(`Failed to put item into table ${tableName}: Unknown error occurred`);
+  }
 }
 
 /**
@@ -293,6 +356,7 @@ export async function putOne(
  * @param {Record<string, string>} expressionAttributeNames - The expression attribute names.
  * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
  * @returns {Promise<void>}
+ * @throws {Error} When AWS operation fails or item cannot be updated in the table.
  */
 export async function updateItem(
   tableName: string,
@@ -303,15 +367,23 @@ export async function updateItem(
   identityPoolIdOverride?: string
 ) {
   const client = getDocClient(identityPoolIdOverride);
-  await client.send(
-    new UpdateCommand({
-      TableName: tableName,
-      Key: key,
-      UpdateExpression: updateExpression,
-      ExpressionAttributeValues: expressionAttributeValues,
-      ExpressionAttributeNames: expressionAttributeNames,
-    })
-  );
+  try {
+    await client.send(
+      new UpdateCommand({
+        TableName: tableName,
+        Key: key,
+        UpdateExpression: updateExpression,
+        ExpressionAttributeValues: expressionAttributeValues,
+        ExpressionAttributeNames: expressionAttributeNames,
+      })
+    );
+  } catch (error) {
+    console.error(`Failed to update item in table ${tableName}:`, error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to update item in table ${tableName}: ${error.message}`);
+    }
+    throw new Error(`Failed to update item in table ${tableName}: Unknown error occurred`);
+  }
 }
 
 /**
@@ -319,12 +391,13 @@ export async function updateItem(
  * @function updateItemWithCondition
  * @description Update specific attributes of an item in the table with condition expression.
  * @param {string} tableName - The name of the table to update the item in.
- * @param {Record<string, any>} key - The key of the item to update.
+ * @param {string} key - The key of the item to update.
  * @param {string} updateExpression - The update expression.
  * @param {Record<string, any>} expressionAttributeValues - The expression attribute values.
  * @param {Record<string, string>} expressionAttributeNames - The expression attribute names.
  * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
  * @returns {Promise<void>}
+ * @throws {Error} When AWS operation fails, item cannot be updated, or condition expression fails.
  */
 export async function updateItemWithCondition(
   tableName: string,
@@ -335,16 +408,28 @@ export async function updateItemWithCondition(
   identityPoolIdOverride?: string
 ) {
   const client = getDocClient(identityPoolIdOverride);
-  await client.send(
-    new UpdateCommand({
-      TableName: tableName,
-      Key: key,
-      UpdateExpression: updateExpression,
-      ExpressionAttributeValues: expressionAttributeValues,
-      ExpressionAttributeNames: expressionAttributeNames,
-      ConditionExpression: "attribute_exists(id)",
-    })
-  );
+  try {
+    await client.send(
+      new UpdateCommand({
+        TableName: tableName,
+        Key: key,
+        UpdateExpression: updateExpression,
+        ExpressionAttributeValues: expressionAttributeValues,
+        ExpressionAttributeNames: expressionAttributeNames,
+        ConditionExpression: "attribute_exists(id)",
+      })
+    );
+  } catch (error) {
+    console.error(`Failed to update item with condition in table ${tableName}:`, error);
+    if (error instanceof Error) {
+      // Check for specific AWS error types
+      if (error.name === 'ConditionalCheckFailedException') {
+        throw new Error(`Condition check failed for item in table ${tableName}: Item does not exist or condition not met`);
+      }
+      throw new Error(`Failed to update item with condition in table ${tableName}: ${error.message}`);
+    }
+    throw new Error(`Failed to update item with condition in table ${tableName}: Unknown error occurred`);
+  }
 }
 
 /**
@@ -356,6 +441,7 @@ export async function updateItemWithCondition(
  * @param {string} id - The ID of the item to delete.
  * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
  * @returns {Promise<void>}
+ * @throws {Error} When AWS operation fails or item cannot be deleted from the table.
  */
 export async function deleteOne(
   tableName: string,
@@ -364,12 +450,20 @@ export async function deleteOne(
   identityPoolIdOverride?: string
 ) {
   const client = getDocClient(identityPoolIdOverride);
-  await client.send(
-    new DeleteCommand({
-      TableName: tableName,
-      Key: { [pkName]: id },
-    })
-  );
+  try {
+    await client.send(
+      new DeleteCommand({
+        TableName: tableName,
+        Key: { [pkName]: id },
+      })
+    );
+  } catch (error) {
+    console.error(`Failed to delete item from table ${tableName}:`, error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to delete item from table ${tableName}: ${error.message}`);
+    }
+    throw new Error(`Failed to delete item from table ${tableName}: Unknown error occurred`);
+  }
 }
 
 /**
@@ -383,6 +477,7 @@ export async function deleteOne(
  * @param {string} skValue - The value of the sort key.
  * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
  * @returns {Promise<void>}
+ * @throws {Error} When AWS operation fails or item cannot be deleted from the table.
  */
 export async function deleteOneWithSort(
   tableName: string,
@@ -393,15 +488,23 @@ export async function deleteOneWithSort(
   identityPoolIdOverride?: string
 ) {
   const client = getDocClient(identityPoolIdOverride);
-  await client.send(
-    new DeleteCommand({
-      TableName: tableName,
-      Key: {
-        [pkName]: pkValue,
-        [skName]: skValue,
-      },
-    })
-  );
+  try {
+    await client.send(
+      new DeleteCommand({
+        TableName: tableName,
+        Key: {
+          [pkName]: pkValue,
+          [skName]: skValue,
+        },
+      })
+    );
+  } catch (error) {
+    console.error(`Failed to delete item with sort key from table ${tableName}:`, error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to delete item with sort key from table ${tableName}: ${error.message}`);
+    }
+    throw new Error(`Failed to delete item with sort key from table ${tableName}: Unknown error occurred`);
+  }
 }
 
 /**
@@ -413,6 +516,7 @@ export async function deleteOneWithSort(
  * @param {string[]} ids - An array of IDs to get.
  * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
  * @returns {Promise<any[]>} A promise that resolves to an array of items.
+ * @throws {Error} When AWS operation fails or items cannot be retrieved from the table.
  */
 export async function batchGetItems(
   tableName: string,
@@ -426,28 +530,36 @@ export async function batchGetItems(
   // DynamoDB BatchGet has a limit of 100 items per request
   const BATCH_SIZE = 100;
 
-  for (let i = 0; i < ids.length; i += BATCH_SIZE) {
-    const batch = ids.slice(i, i + BATCH_SIZE);
+  try {
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const batch = ids.slice(i, i + BATCH_SIZE);
 
-    const requestItems: Record<string, any> = {
-      [tableName]: {
-        Keys: batch.map(id => ({ [pkName]: id }))
+      const requestItems: Record<string, any> = {
+        [tableName]: {
+          Keys: batch.map(id => ({ [pkName]: id }))
+        }
+      };
+
+      const response = await client.send(new BatchGetCommand({ RequestItems: requestItems }));
+
+      if (response.Responses && response.Responses[tableName]) {
+        items.push(...response.Responses[tableName]);
       }
-    };
 
-    const response = await client.send(new BatchGetCommand({ RequestItems: requestItems }));
-
-    if (response.Responses && response.Responses[tableName]) {
-      items.push(...response.Responses[tableName]);
+      // Handle unprocessed keys (though this shouldn't happen with our batch size)
+      if (response.UnprocessedKeys && Object.keys(response.UnprocessedKeys).length > 0) {
+        console.warn('Some items were not processed in batch get:', response.UnprocessedKeys);
+      }
     }
 
-    // Handle unprocessed keys (though this shouldn't happen with our batch size)
-    if (response.UnprocessedKeys && Object.keys(response.UnprocessedKeys).length > 0) {
-      console.warn('Some items were not processed in batch get:', response.UnprocessedKeys);
+    return items;
+  } catch (error) {
+    console.error(`Failed to batch get items from table ${tableName}:`, error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to batch get items from table ${tableName}: ${error.message}`);
     }
+    throw new Error(`Failed to batch get items from table ${tableName}: Unknown error occurred`);
   }
-
-  return items;
 }
 
 /**
@@ -461,6 +573,7 @@ export async function batchGetItems(
  * @param {string} sortKeyValue - The value the sort key should begin with.
  * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
  * @returns {Promise<any[]>} A promise that resolves to an array of items.
+ * @throws {Error} When AWS operation fails or table cannot be queried.
  */
 async function listAllQueryBeginsWithSortKey(
   tableName: string,
@@ -474,23 +587,31 @@ async function listAllQueryBeginsWithSortKey(
   const items: any[] = [];
   let ExclusiveStartKey;
 
-  do {
-    const response = await client.send(
-      new QueryCommand({
-        TableName: tableName,
-        KeyConditionExpression: `${primaryKeyName} = :pk AND begins_with(${sortKeyName}, :sk_prefix)`,
-        ExpressionAttributeValues: {
-          ':pk': primaryKeyValue,
-          ':sk_prefix': sortKeyValue,
-        },
-        ExclusiveStartKey,
-      })
-    );
-    if (response.Items) items.push(...response.Items);
-    ExclusiveStartKey = response.LastEvaluatedKey;
-  } while (ExclusiveStartKey);
+  try {
+    do {
+      const response = await client.send(
+        new QueryCommand({
+          TableName: tableName,
+          KeyConditionExpression: `${primaryKeyName} = :pk AND begins_with(${sortKeyName}, :sk_prefix)`,
+          ExpressionAttributeValues: {
+            ':pk': primaryKeyValue,
+            ':sk_prefix': sortKeyValue,
+          },
+          ExclusiveStartKey,
+        })
+      );
+      if (response.Items) items.push(...response.Items);
+      ExclusiveStartKey = response.LastEvaluatedKey;
+    } while (ExclusiveStartKey);
 
-  return items;
+    return items;
+  } catch (error) {
+    console.error(`Failed to query table ${tableName}:`, error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to query table ${tableName}: ${error.message}`);
+    }
+    throw new Error(`Failed to query table ${tableName}: Unknown error occurred`);
+  }
 }
 
 /**
@@ -504,6 +625,7 @@ async function listAllQueryBeginsWithSortKey(
  * @param {string} sortKeyValue - The value the sort key should begin with.
  * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
  * @returns {Promise<Record<string, any[]>>} A promise that resolves to a record of items, where the keys are the primary key values.
+ * @throws {Error} When AWS operation fails or table cannot be queried.
  */
 export async function listAllQueryBeginsWithSortKeyMultiple(
   tableName: string,
@@ -539,7 +661,10 @@ export async function listAllQueryBeginsWithSortKeyMultiple(
     await Promise.all(queryPromises);
     return results;
   } catch (error) {
-    console.error('Error in listAllQueryBeginsWithSortKeyMultiple:', error);
-    throw error;
+    console.error(`Failed to query multiple partition keys in table ${tableName}:`, error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to query multiple partition keys in table ${tableName}: ${error.message}`);
+    }
+    throw new Error(`Failed to query multiple partition keys in table ${tableName}: Unknown error occurred`);
   }
 }
