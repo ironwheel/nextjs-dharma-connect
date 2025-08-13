@@ -697,17 +697,59 @@ const Home = () => {
         }
     };
 
+    // Cache for view definitions to avoid repeated backend calls
+    const viewCache = new Map<string, View | null>();
+
+    // Function to clear the view cache when needed
+    const clearViewCache = () => {
+        viewCache.clear();
+        console.log('View cache cleared');
+    };
+
+    // Function to clear cache for a specific view (useful for debugging or manual refresh)
+    const clearViewCacheForView = (viewName: string) => {
+        viewCache.delete(viewName);
+        console.log(`View cache cleared for: ${viewName}`);
+    };
+
+    // Function to get cache statistics (useful for debugging)
+    const getViewCacheStats = () => {
+        const stats = {
+            size: viewCache.size,
+            keys: Array.from(viewCache.keys()),
+            hitRate: 0 // This would need to be tracked separately if needed
+        };
+        console.log('View cache stats:', stats);
+        return stats;
+    };
+
     const fetchView = async (viewName: string) => {
+        // Check cache first
+        if (viewCache.has(viewName)) {
+            console.log(`View cache hit for: ${viewName} (cache size: ${viewCache.size})`);
+            return viewCache.get(viewName);
+        }
+
+        console.log(`View cache miss for: ${viewName} (cache size: ${viewCache.size})`);
+
         try {
             // Correct: look in 'views' table, use viewName as-is
             const view = await getTableItemOrNull('views', viewName, pid as string, hash as string);
             if (view && 'redirected' in view) {
                 console.log('View fetch redirected - authentication required');
+                // Cache the null result to avoid repeated failed requests
+                viewCache.set(viewName, null);
                 return null;
             }
+
+            // Cache the successful result
+            viewCache.set(viewName, view as View);
+            console.log(`View cached for: ${viewName} (cache size: ${viewCache.size})`);
             return view as View;
         } catch (error) {
             console.error('Error fetching view:', error);
+            // Cache the null result to avoid repeated failed requests
+            viewCache.set(viewName, null);
             return null;
         }
     };
@@ -924,6 +966,9 @@ const Home = () => {
 
         if (field.startsWith('currentAIDBool')) {
             dataField = columnMetaData[field]?.boolName || field;
+        }
+        if (field.startsWith('currentAIDMapBool')) {
+            dataField = `${columnMetaData[field]?.map}.${columnMetaData[field]?.boolName}` || field;
         }
 
         const success = await updateStudentEventField(studentId, dataField, checked);
@@ -1978,7 +2023,6 @@ const Home = () => {
             }
             // If no translation, just use the original viewName (do not show error)
         }
-        console.log('Effective view name:', effectiveViewName);
 
         // Fetch the view definition
         const viewConfig = await fetchView(effectiveViewName);
@@ -2184,6 +2228,8 @@ const Home = () => {
         if (!router.isReady || !pid || !hash) return;
         if (initialLoadStarted.current) return;
 
+        // Clear view cache when hash changes (new authentication session)
+        clearViewCache();
         initialLoadStarted.current = true;
 
         const loadInitialData = async () => {
@@ -2233,6 +2279,9 @@ const Home = () => {
                     fetchPools(),
                     fetchViews()
                 ]);
+
+                // Clear view cache when views are refreshed
+                clearViewCache();
 
                 // Defensive coding: ensure we have arrays before processing
                 const filteredEvents = Array.isArray(events) ? events.filter(e => !e.hide) : [];
