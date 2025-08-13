@@ -252,8 +252,6 @@ const Home = () => {
         }
     };
 
-
-
     const fetchViewsProfiles = async () => {
         try {
             const profileNames = await authGetViewsProfiles(pid as string, hash as string);

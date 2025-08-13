@@ -9,7 +9,7 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import { tables, TableConfig } from './tableConfig';
 import { websockets, WebSocketConfig, websocketGetConfig } from './websocketConfig';
 import { listAll, listAllChunked, getOne, deleteOne, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll, batchGetItems, listAllQueryBeginsWithSortKeyMultiple } from './dynamoClient';
-import { verificationEmailSend, verificationEmailCallback, createToken, getActionsProfiles, getAuthList, getViewsProfiles, getActionsProfileForHost, getAllActionsForUser, putAuthItem, linkEmailSend, getConfigValue } from './authUtils';
+import { verificationEmailSend, verificationEmailCallback, createToken, getActionsProfiles, getAuthList, getViews, getViewsProfiles, getActionsProfileForHost, putAuthItem, linkEmailSend, getConfigValue } from './authUtils';
 import { serialize } from 'cookie';
 import { v4 as uuidv4 } from 'uuid';
 import { sendWorkOrderMessage } from './sqsClient';
@@ -221,6 +221,10 @@ async function dispatchAuth(
       case 'getViewsProfiles':
         const viewsProfileNames = await getViewsProfiles();
         return res.status(200).json({ viewsProfileNames });
+      case 'getViews':
+        const viewsListData = await getViews(pid, host);
+        console.log('dispatchAuth getViews: returning views data:', { views: viewsListData });
+        return res.status(200).json({ views: viewsListData });
       case 'getActionsProfileForHost':
         const actionsProfile = await getActionsProfileForHost(host);
         return res.status(200).json({ actionsProfile });
@@ -243,7 +247,7 @@ async function dispatchAuth(
         if (!key) {
           return res.status(400).json({ error: 'Missing required parameter: key' });
         }
-        const configValue = await getConfigValue(pid, hash, host, key);
+        const configValue = await getConfigValue(pid, host, key);
         return res.status(200).json({ value: configValue });
       default:
         return res.status(404).json({ error: `Unknown auth action: ${action}` });
