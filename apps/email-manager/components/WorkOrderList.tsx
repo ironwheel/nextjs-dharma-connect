@@ -54,9 +54,10 @@ interface WorkOrderListProps {
     userPid: string
     userHash: string
     newlyCreatedWorkOrder?: WorkOrder
+    writePermission: boolean
 }
 
-export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userPid, userHash, newlyCreatedWorkOrder }: WorkOrderListProps) {
+export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userPid, userHash, newlyCreatedWorkOrder, writePermission }: WorkOrderListProps) {
     const [workOrders, setWorkOrders] = useState<WorkOrder[]>([])
     const [loading, setLoading] = useState(true)
     const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
@@ -703,6 +704,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                             <Button
                                 variant="primary"
                                 onClick={onNew}
+                                disabled={!writePermission}
                                 style={{
                                     borderRadius: '50%',
                                     width: 40,
@@ -794,10 +796,9 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                 return (
                                     <React.Fragment key={workOrder.id}>
                                         <tr
-                                            onClick={() => handleRowClick(workOrder)}
                                             onMouseEnter={() => setHoveredRow(workOrder.id)}
                                             onMouseLeave={() => setHoveredRow(null)}
-                                            style={{ cursor: workOrder.locked ? 'not-allowed' : 'pointer' }}
+                                            style={{ cursor: 'default' }}
                                         >
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
                                                 <div className="d-flex align-items-center">
@@ -812,6 +813,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                                 handleRowClick(workOrder)
                                                             }
                                                         }}
+                                                        disabled={!writePermission}
                                                         className="px-3 py-2"
                                                         title={workOrder.locked ? 'Click to unlock work order' : 'Click to edit work order'}
                                                     >
@@ -827,6 +829,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                                     archiveWorkOrder(workOrder.id)
                                                                 }
                                                             }}
+                                                            disabled={!writePermission}
                                                             style={{ marginLeft: 8 }}
                                                             title="Archive completed work order"
                                                         >
@@ -964,7 +967,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                                                 e.stopPropagation()
                                                                                 handleStepAction(workOrder.id, 'Count', stepStatus !== 'working')
                                                                             }}
-                                                                            disabled={status === 'closed'}
+                                                                            disabled={status === 'closed' || !writePermission}
                                                                         >
                                                                             {buttonLabel}
                                                                         </Button>
@@ -980,7 +983,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                                                     e.stopPropagation()
                                                                                     handleStepAction(workOrder.id, 'Prepare', stepStatus !== 'working')
                                                                                 }}
-                                                                                disabled={status === 'closed'}
+                                                                                disabled={status === 'closed' || !writePermission}
                                                                             >
                                                                                 {buttonLabel}
                                                                             </Button>
@@ -1033,7 +1036,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                                                         e.stopPropagation()
                                                                                         handleStepAction(workOrder.id, 'Dry-Run', stepStatus !== 'working')
                                                                                     }}
-                                                                                    disabled={status === 'closed'}
+                                                                                    disabled={status === 'closed' || !writePermission}
                                                                                 >
                                                                                     {buttonLabel}
                                                                                 </Button>
@@ -1051,7 +1054,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                                                     e.stopPropagation()
                                                                                     handleStepAction(workOrder.id, 'Test', stepStatus !== 'working')
                                                                                 }}
-                                                                                disabled={status === 'closed'}
+                                                                                disabled={status === 'closed' || !writePermission}
                                                                             >
                                                                                 {buttonLabel}
                                                                             </Button>
@@ -1101,7 +1104,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                                                         e.stopPropagation()
                                                                                         handleStepAction(workOrder.id, 'Send', stepStatus !== 'working')
                                                                                     }}
-                                                                                    disabled={status === 'closed'}
+                                                                                    disabled={status === 'closed' || !writePermission}
                                                                                 >
                                                                                     {buttonLabel}
                                                                                 </Button>
@@ -1248,6 +1251,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                                     variant="outline-success"
                                                     size="sm"
                                                     onClick={() => unarchiveWorkOrder(workOrder.id)}
+                                                    disabled={!writePermission}
                                                     title="Restore work order"
                                                 >
                                                     🔄 Restore

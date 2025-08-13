@@ -3,7 +3,7 @@ import React, { useState } from 'react'
 import { Container, Modal } from 'react-bootstrap'
 import WorkOrderList from '../components/WorkOrderList'
 import WorkOrderForm from '../components/WorkOrderForm'
-import { updateTableItem } from 'sharedFrontend'
+import { updateTableItem, authGetConfigValue } from 'sharedFrontend'
 
 // Define interface for work order
 interface WorkOrder {
@@ -48,6 +48,7 @@ export default function Home() {
     const [refreshCounter, setRefreshCounter] = useState(0)
     const [newlyCreatedWorkOrder, setNewlyCreatedWorkOrder] = useState<WorkOrder | undefined>(undefined)
     const [isClient, setIsClient] = useState(false)
+    const [writePermission, setWritePermission] = useState(false)
 
     // Set isClient to true after component mounts
     React.useEffect(() => {
@@ -56,6 +57,29 @@ export default function Home() {
         }, 100) // Small delay to ensure proper rendering
         return () => clearTimeout(timer)
     }, [])
+
+    // Fetch write permission
+    React.useEffect(() => {
+        const fetchWritePermission = async () => {
+            if (!pid || !hash) return;
+
+            try {
+                const permissionResponse = await authGetConfigValue(pid as string, hash as string, 'writePermission');
+                if (permissionResponse && typeof permissionResponse === 'boolean') {
+                    setWritePermission(permissionResponse);
+                    console.log('Write permission:', permissionResponse);
+                } else {
+                    console.log('Write permission fetch redirected or failed, using default (false)');
+                    setWritePermission(false);
+                }
+            } catch (error) {
+                console.error('Error fetching write permission:', error);
+                setWritePermission(false);
+            }
+        };
+
+        fetchWritePermission();
+    }, [pid, hash]);
 
     const handleNewWorkOrder = () => {
         setEditingWorkOrderId(undefined)
@@ -122,6 +146,7 @@ export default function Home() {
                 userHash={userHash}
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 newlyCreatedWorkOrder={newlyCreatedWorkOrder as any}
+                writePermission={writePermission}
             />
 
             <Modal show={showForm} onHide={handleFormClose} size="lg">
@@ -137,6 +162,7 @@ export default function Home() {
                         onCancel={handleFormClose}
                         userPid={userPid}
                         userHash={userHash}
+                        writePermission={writePermission}
                     />
                 </Modal.Body>
             </Modal>
