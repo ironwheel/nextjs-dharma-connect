@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { Table, Button, Badge, Modal, Spinner } from 'react-bootstrap'
 import { toast } from 'react-toastify'
-import { getAllTableItems, useWebSocket, getTableItem, getTableItemOrNull, updateTableItem, getAllTableItemsFiltered, sendSQSMessage, putTableItem } from 'sharedFrontend'
+import { getAllTableItems, useWebSocket, getTableItem, getTableItemOrNull, updateTableItem, getAllTableItemsFiltered, sendSQSMessage, putTableItem, authGetConfigValue } from 'sharedFrontend'
 import { unmarshall } from '@aws-sdk/util-dynamodb'
 
 interface WorkOrder {
@@ -77,6 +77,8 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
     const [recipientSearch, setRecipientSearch] = useState('');
     const [currentCampaignString, setCurrentCampaignString] = useState<string>('');
     const [eventNames, setEventNames] = useState<Record<string, string>>({});
+    const [emailDisplayPermission, setEmailDisplayPermission] = useState<boolean>(true);
+    const [exportCSVPermission, setExportCSVPermission] = useState<boolean>(true);
 
     // Navigation functions
     const goToNextWorkOrder = () => {
@@ -136,9 +138,15 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
     }, [currentWorkOrderIndex, workOrders.length])
 
     const downloadRecipientsCSV = (recipients: RecipientEntry[]) => {
+        // Additional safety check - prevent download if permission is false
+        if (!exportCSVPermission) {
+            toast.error('CSV export is not permitted');
+            return;
+        }
+
         const csvContent = [
             'Name,Email,Send Time',
-            ...recipients.map(r => `"${r.name}","${r.email}","${r.sendtime || ''}"`)
+            ...recipients.map(r => `"${r.name}","${emailDisplayPermission ? r.email : '**********'}","${r.sendtime || ''}"`)
         ].join('\n')
 
         const blob = new Blob([csvContent], { type: 'text/csv' })
@@ -293,6 +301,27 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
         loadWorkOrders()
     }, [refreshTrigger])
 
+    // Load email display permission
+    useEffect(() => {
+        const loadEmailDisplayPermission = async () => {
+            try {
+                const permissionResponse = await authGetConfigValue(userPid, userHash, 'emailDisplay');
+                setEmailDisplayPermission(permissionResponse === true);
+
+                const exportCSVResponse = await authGetConfigValue(userPid, userHash, 'exportCSV');
+                setExportCSVPermission(exportCSVResponse === true);
+            } catch (error) {
+                console.error('Failed to load permissions:', error);
+                // Default to showing emails and allowing CSV export if permission check fails
+                setEmailDisplayPermission(true);
+                setExportCSVPermission(true);
+            }
+        };
+
+        if (userPid && userHash) {
+            loadEmailDisplayPermission();
+        }
+    }, [userPid, userHash]);
 
 
     useEffect(() => {
@@ -1148,6 +1177,8 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                             variant="outline-success"
                             size="sm"
                             onClick={() => downloadRecipientsCSV(currentRecipients)}
+                            disabled={!exportCSVPermission}
+                            title={exportCSVPermission ? 'Download recipients as CSV' : 'CSV export is not permitted'}
                         >
                             📥 Download CSV
                         </Button>
@@ -1189,7 +1220,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                                         <tr key={recipient.sendtime || index}>
                                             <td>{index + 1}</td>
                                             <td><strong>{recipient.name}</strong></td>
-                                            <td>{recipient.email}</td>
+                                            <td>{emailDisplayPermission ? recipient.email : '**********'}</td>
                                             <td style={{ fontSize: '0.95em', color: '#666' }}>{recipient.sendtime ? new Date(recipient.sendtime).toLocaleString() : ''}</td>
                                         </tr>
                                     ))}
