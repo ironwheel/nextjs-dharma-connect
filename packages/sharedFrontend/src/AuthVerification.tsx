@@ -54,6 +54,14 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
                         if (inputRefs.current[lastFilledIndex]) {
                             inputRefs.current[lastFilledIndex]?.focus();
                         }
+
+                        // Auto-verify if we have exactly 6 digits
+                        if (digitsOnly.length === 6) {
+                            // Use setTimeout to ensure state update completes before verification
+                            setTimeout(() => {
+                                verifyCodeWithCode(digitsOnly);
+                            }, 100);
+                        }
                     }
                 }
             };
@@ -125,6 +133,14 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
             if (inputRefs.current[lastFilledIndex]) {
                 inputRefs.current[lastFilledIndex]?.focus();
             }
+
+            // Auto-verify if we have exactly 6 digits
+            if (digitsOnly.length === 6) {
+                // Use setTimeout to ensure state update completes before verification
+                setTimeout(() => {
+                    verifyCodeWithCode(digitsOnly);
+                }, 100);
+            }
         } else {
             // Handle single digit input
             const newCode = [...code];
@@ -173,6 +189,63 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
             if (inputRefs.current[lastFilledIndex]) {
                 inputRefs.current[lastFilledIndex]?.focus();
             }
+
+            // Auto-verify if we have exactly 6 digits
+            if (digitsOnly.length === 6) {
+                // Use setTimeout to ensure state update completes before verification
+                setTimeout(() => {
+                    verifyCodeWithCode(digitsOnly);
+                }, 100);
+            }
+        }
+    };
+
+    /**
+     * @function verifyCodeWithCode
+     * @description Verifies a specific code string (used for auto-verification).
+     * @param {string} codeToVerify - The 6-digit code string to verify.
+     */
+    const verifyCodeWithCode = async (codeToVerify: string) => {
+        if (codeToVerify.length !== 6 || !/^\d{6}$/.test(codeToVerify)) {
+            setError('Please enter a valid 6-digit code.');
+            return;
+        }
+
+        if (!pid || !hash) {
+            setError('Missing required verification information.');
+            return;
+        }
+
+        setIsVerifying(true);
+        setError(null);
+
+        try {
+            const result = await api.post(`/api/auth/verificationEmailCallback/${codeToVerify}`, pid, hash, {});
+
+            if (result.status === 'authenticated') {
+                // Success - set redirecting state to prevent UI changes
+                setIsRedirecting(true);
+                // Redirect to main app
+                const redirectUrl = `/?pid=${pid}&hash=${hash}`;
+                window.location.href = redirectUrl;
+            } else {
+                setError('You have entered an invalid code.');
+                setAttempts(attempts + 1);
+            }
+        } catch (err: any) {
+            if (err.message?.includes('expired') || err.message?.includes('not found')) {
+                setError('The verification code has expired. Please request a new one.');
+                setIsSent(false); // Show the send button again
+            } else if (err.message?.includes('RATE_LIMIT_EXCEEDED')) {
+                setError('Too many failed attempts. Please wait 5 minutes before trying again.');
+            } else if (err.message?.includes('INVALID_FORMAT')) {
+                setError('Please enter a valid 6-digit code.');
+            } else {
+                setError('Please try again later.');
+            }
+            setAttempts(attempts + 1);
+        } finally {
+            setIsVerifying(false);
         }
     };
 
@@ -181,8 +254,10 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
      * @description Verifies the entered 6-digit code.
      */
     const verifyCode = async () => {
+        console.log('verifyCode: Verifying code:', code);
         const codeString = code.join('');
         if (codeString.length !== 6 || !/^\d{6}$/.test(codeString)) {
+            console.log('verifyCode: Invalid code length:', codeString);
             setError('Please enter a valid 6-digit code.');
             return;
         }
