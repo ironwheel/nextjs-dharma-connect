@@ -15,10 +15,7 @@ import {
     batchGetTableItems,
     putTableItem,
     authGetViews,
-    authGetViewsWritePermission,
-    authGetViewsExportCSV,
-    authGetViewsHistoryPermission,
-    authGetViewsEmailDisplayPermission,
+    authGetConfigValue,
     useWebSocket,
     getTableCount,
     checkEligibility,
@@ -2194,13 +2191,13 @@ const Home = () => {
                 console.log('Starting initial data load, demoMode initial value:', demoMode);
 
                 // Fetch write permission
-                const writePermission = await authGetViewsWritePermission(pid as string, hash as string);
+                const writePermission = await authGetConfigValue(pid as string, hash as string, 'writePermission');
                 setCanWriteViews(writePermission === true);
                 // Fetch export CSV permission
-                const exportCSV = await authGetViewsExportCSV(pid as string, hash as string);
+                const exportCSV = await authGetConfigValue(pid as string, hash as string, 'exportCSV');
                 setCanExportCSV(exportCSV === true);
                 // Fetch student history permission
-                const historyPermission = await authGetViewsHistoryPermission(pid as string, hash as string);
+                const historyPermission = await authGetConfigValue(pid as string, hash as string, 'studentHistory');
                 setCanViewStudentHistory(historyPermission === true);
 
                 // Fetch demo mode config
@@ -2214,7 +2211,7 @@ const Home = () => {
 
                 // Fetch email display permission
                 try {
-                    const emailDisplayPermissionResult = await authGetViewsEmailDisplayPermission(pid as string, hash as string);
+                    const emailDisplayPermissionResult = await authGetConfigValue(pid as string, hash as string, 'emailDisplay');
                     if (emailDisplayPermissionResult && typeof emailDisplayPermissionResult === 'boolean') {
                         console.log('Email display permission:', emailDisplayPermissionResult);
                         setEmailDisplayPermission(emailDisplayPermissionResult);

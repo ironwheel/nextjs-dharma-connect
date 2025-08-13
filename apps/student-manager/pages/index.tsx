@@ -18,7 +18,7 @@ import {
     authGetAuthList,
     authGetViewsProfiles,
     authPutAuthItem,
-    authGetViewsEmailDisplayPermission,
+    authGetConfigValue,
     Pool
 } from 'sharedFrontend';
 
@@ -42,12 +42,10 @@ interface Student {
 
 interface AuthRecord {
     id: string;
-    eventDashboardConfig: {
-        exportCSV: boolean;
-        studentHistory: boolean;
-        viewsProfile: string;
-        writePermission: boolean;
-        emailDisplay: boolean;
+    config?: {
+        [host: string]: {
+            [key: string]: any;
+        };
     };
     'permitted-hosts': string[]; // Now just an array of host strings
 }
@@ -57,10 +55,7 @@ interface ViewsProfile {
     views: string[];
 }
 
-interface Config {
-    value: string;
-    [key: string]: any;
-}
+
 
 // Module-level variables
 let allStudents: Student[] = [];
@@ -69,7 +64,7 @@ let allPools: Pool[] = [];
 let eligibleStudents: Student[] = [];
 
 let allViewsProfiles: ViewsProfile[] = [];
-let studentManagerAppList: string[] = [];
+
 
 // Language options for the dropdown
 const LANGUAGE_OPTIONS = [
@@ -97,8 +92,15 @@ const Home = () => {
     const [currentUserName, setCurrentUserName] = useState<string>("Unknown");
     const [version, setVersion] = useState<string>("dev");
     const [canWriteViews, setCanWriteViews] = useState<boolean>(true);
-    const [demoMode, setDemoMode] = useState<boolean>(false);
     const [emailDisplayPermission, setEmailDisplayPermission] = useState<boolean>(false);
+
+    // Dynamic config schema state
+    const [configSchema, setConfigSchema] = useState<{
+        [host: string]: {
+            [key: string]: any;
+        };
+    }>({});
+    const [availableHosts, setAvailableHosts] = useState<string[]>([]);
 
     // Modal state
     const [showEditModal, setShowEditModal] = useState(false);
@@ -106,8 +108,38 @@ const Home = () => {
     const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
     const [originalStudent, setOriginalStudent] = useState<Student | null>(null);
 
+    // Link email confirmation modal state
+    const [showLinkEmailModal, setShowLinkEmailModal] = useState(false);
+    const [linkEmailData, setLinkEmailData] = useState<{
+        domainName: string;
+        studentId: string;
+        student: Student | { first: string; last: string };
+    } | null>(null);
+
     // Form state for add/edit
-    const [formData, setFormData] = useState({
+    const [formData, setFormData] = useState<{
+        studentId: string;
+        studentProfile: {
+            first: string;
+            last: string;
+            email: string;
+            writtenLangPref: string;
+            spokenLangPref: string;
+        };
+        shadowValues: {
+            first: string;
+            last: string;
+            email: string;
+            writtenLangPref: string;
+            spokenLangPref: string;
+        };
+        config: {
+            [host: string]: {
+                [key: string]: any;
+            };
+        };
+        permittedHosts: string[];
+    }>({
         studentId: '',
         // Student profile fields (students table)
         studentProfile: {
@@ -125,15 +157,9 @@ const Home = () => {
             writtenLangPref: '',
             spokenLangPref: ''
         },
-        // Auth fields (auth table)
-        eventDashboardConfig: {
-            exportCSV: false,
-            studentHistory: false,
-            viewsProfile: '',
-            writePermission: false,
-            emailDisplay: false
-        },
-        permittedHosts: [] as string[] // Now just an array of host strings
+        // Auth fields (auth table) - will be dynamically populated based on permitted hosts
+        config: {},
+        permittedHosts: [] // Now just an array of host strings
     });
 
     const initialLoadStarted = useRef(false);
@@ -269,19 +295,27 @@ const Home = () => {
         }
     };
 
-    const fetchConfig = async (configName: string) => {
-        try {
-            const config = await getTableItemOrNull('config', configName, pid as string, hash as string);
 
-            if (config && 'redirected' in config) {
-                console.log(`Config fetch redirected for ${configName} - authentication required`);
-                return null;
+
+    const discoverConfigSchema = () => {
+        try {
+            const defaultAuthRecord = allAuthRecords.find(ar => ar.id === 'default');
+            if (!defaultAuthRecord || !defaultAuthRecord.config) {
+                throw new Error('No default auth record or config found for schema discovery');
             }
 
-            return config as Config;
+            // Extract the config schema and available hosts
+            const schema = defaultAuthRecord.config;
+            const hosts = Object.keys(schema);
+
+            setConfigSchema(schema);
+            setAvailableHosts(hosts);
+
+            console.log('Discovered config schema:', schema);
+            console.log('Available hosts:', hosts);
         } catch (error) {
-            console.error('Error fetching config:', error);
-            return null;
+            console.error('Error discovering config schema:', error);
+            throw error; // Re-throw the error to be handled by the caller
         }
     };
 
@@ -464,13 +498,26 @@ const Home = () => {
                         writtenLangPref: student?.writtenLangPref || 'English',
                         spokenLangPref: student?.spokenLangPref || 'English'
                     },
-                    eventDashboardConfig: {
-                        exportCSV: rowData.authRecord?.eventDashboardConfig?.exportCSV || false,
-                        studentHistory: rowData.authRecord?.eventDashboardConfig?.studentHistory || false,
-                        viewsProfile: rowData.authRecord?.eventDashboardConfig?.viewsProfile || '',
-                        writePermission: rowData.authRecord?.eventDashboardConfig?.writePermission || false,
-                        emailDisplay: rowData.authRecord?.eventDashboardConfig?.emailDisplay || false
-                    },
+                    // Initialize config with discovered schema
+                    config: (() => {
+                        const initialConfig: { [host: string]: { [key: string]: any } } = {};
+
+                        // For each available host, initialize with current values or defaults
+                        availableHosts.forEach(host => {
+                            initialConfig[host] = {};
+                            const hostSchema = configSchema[host];
+                            if (hostSchema) {
+                                Object.keys(hostSchema).forEach(key => {
+                                    // Use current value if available, otherwise use default from schema
+                                    const currentValue = rowData.authRecord?.config?.[host]?.[key];
+                                    const defaultValue = hostSchema[key];
+                                    initialConfig[host][key] = currentValue !== undefined ? currentValue : defaultValue;
+                                });
+                            }
+                        });
+
+                        return initialConfig;
+                    })(),
                     permittedHosts: permittedHosts
                 });
                 setShowEditModal(true);
@@ -488,7 +535,7 @@ const Home = () => {
                     const [firstName, lastName] = rowData.studentName.split(' ');
                     const fallbackStudent = { first: firstName, last: lastName || '' };
                     const appName = rowData.appName;
-                    const fullDomain = studentManagerAppList.find(app =>
+                    const fullDomain = availableHosts.find(app =>
                         formatDomainForDisplay(app) === appName
                     );
 
@@ -505,8 +552,8 @@ const Home = () => {
             if (student && !student.unsubscribe) {
                 // Convert display name back to full domain name
                 const appName = rowData.appName;
-                console.log('Looking for app:', appName, 'in list:', studentManagerAppList);
-                const fullDomain = studentManagerAppList.find(app =>
+                console.log('Looking for app:', appName, 'in list:', availableHosts);
+                const fullDomain = availableHosts.find(app =>
                     formatDomainForDisplay(app) === appName
                 );
 
@@ -523,7 +570,7 @@ const Home = () => {
                     const [firstName, lastName] = rowData.studentName.split(' ');
                     const fallbackStudent = { first: firstName, last: lastName || '' };
                     const appName = rowData.appName;
-                    const fullDomain = studentManagerAppList.find(app =>
+                    const fullDomain = availableHosts.find(app =>
                         formatDomainForDisplay(app) === appName
                     );
 
@@ -643,13 +690,26 @@ const Home = () => {
                     writtenLangPref: student?.writtenLangPref || 'English',
                     spokenLangPref: student?.spokenLangPref || 'English'
                 },
-                eventDashboardConfig: {
-                    exportCSV: authRecord?.eventDashboardConfig?.exportCSV || false,
-                    studentHistory: authRecord?.eventDashboardConfig?.studentHistory || false,
-                    viewsProfile: authRecord?.eventDashboardConfig?.viewsProfile || '',
-                    writePermission: authRecord?.eventDashboardConfig?.writePermission || false,
-                    emailDisplay: authRecord?.eventDashboardConfig?.emailDisplay || false
-                },
+                // Initialize config with discovered schema
+                config: (() => {
+                    const initialConfig: { [host: string]: { [key: string]: any } } = {};
+
+                    // For each available host, initialize with current values or defaults
+                    availableHosts.forEach(host => {
+                        initialConfig[host] = {};
+                        const hostSchema = configSchema[host];
+                        if (hostSchema) {
+                            Object.keys(hostSchema).forEach(key => {
+                                // Use current value if available, otherwise use default from schema
+                                const currentValue = authRecord?.config?.[host]?.[key];
+                                const defaultValue = hostSchema[key];
+                                initialConfig[host][key] = currentValue !== undefined ? currentValue : defaultValue;
+                            });
+                        }
+                    });
+
+                    return initialConfig;
+                })(),
                 permittedHosts: permittedHosts
             });
             setShowEditModal(true);
@@ -668,7 +728,7 @@ const Home = () => {
                 toast.success('Auth record deleted successfully');
 
                 // Refresh data
-                const [cl, rd] = buildColumnLabelsAndRowData(demoMode);
+                const [cl, rd] = buildColumnLabelsAndRowData(emailDisplayPermission);
                 setColumnLabels(cl);
                 setRowData(rd);
             } catch (error) {
@@ -682,22 +742,37 @@ const Home = () => {
         const studentName = student ? `${student.first} ${student.last}` : 'Student';
         const appName = formatDomainForDisplay(domainName);
 
-        // Show confirmation dialog
-        if (window.confirm(`Are you sure you want to email a ${appName} link to ${studentName}?`)) {
-            try {
-                const result = await authLinkEmailSend(pid as string, hash as string, domainName);
-                if (result === true) {
-                    toast.success(`Link email sent successfully to ${studentName} for ${appName}`);
-                } else if (result && 'redirected' in result) {
-                    toast.error('Authentication required');
-                } else {
-                    toast.error('Failed to send link email');
-                }
-            } catch (error) {
-                console.error('Error sending link email:', error);
+        // Set modal data and show confirmation modal
+        setLinkEmailData({ domainName, studentId, student: student || { first: 'Student', last: '' } });
+        setShowLinkEmailModal(true);
+    };
+
+    const confirmSendLinkEmail = async () => {
+        if (!linkEmailData) return;
+
+        try {
+            const result = await authLinkEmailSend(pid as string, hash as string, linkEmailData.domainName);
+            if (result === true) {
+                const studentName = linkEmailData.student ? `${linkEmailData.student.first} ${linkEmailData.student.last}` : 'Student';
+                const appName = formatDomainForDisplay(linkEmailData.domainName);
+                toast.success(`Link email sent successfully to ${studentName} for ${appName}`);
+            } else if (result && 'redirected' in result) {
+                toast.error('Authentication required');
+            } else {
                 toast.error('Failed to send link email');
             }
+        } catch (error) {
+            console.error('Error sending link email:', error);
+            toast.error('Failed to send link email');
+        } finally {
+            setShowLinkEmailModal(false);
+            setLinkEmailData(null);
         }
+    };
+
+    const cancelSendLinkEmail = () => {
+        setShowLinkEmailModal(false);
+        setLinkEmailData(null);
     };
 
     const handleSaveAuthRecord = async () => {
@@ -743,7 +818,7 @@ const Home = () => {
             const currentAuthRecord = allAuthRecords.find(ar => ar.id === formData.studentId);
             const authRecord: AuthRecord = {
                 id: formData.studentId,
-                eventDashboardConfig: formData.eventDashboardConfig,
+                config: formData.config,
                 'permitted-hosts': formData.permittedHosts
             };
 
@@ -751,15 +826,25 @@ const Home = () => {
             if (!currentAuthRecord) {
                 authChanged = true;
             } else {
-                // Compare eventDashboardConfig
-                const currentConfig = currentAuthRecord.eventDashboardConfig;
-                const newConfig = formData.eventDashboardConfig;
-                if (currentConfig.exportCSV !== newConfig.exportCSV ||
-                    currentConfig.studentHistory !== newConfig.studentHistory ||
-                    currentConfig.viewsProfile !== newConfig.viewsProfile ||
-                    currentConfig.writePermission !== newConfig.writePermission ||
-                    currentConfig.emailDisplay !== newConfig.emailDisplay) {
-                    authChanged = true;
+                // Compare config dynamically for all hosts
+                for (const host of availableHosts) {
+                    const currentConfig = currentAuthRecord.config?.[host];
+                    const newConfig = formData.config?.[host];
+
+                    if (currentConfig && newConfig) {
+                        // Compare all keys for this host
+                        for (const key of Object.keys(configSchema[host] || {})) {
+                            if (currentConfig[key] !== newConfig[key]) {
+                                authChanged = true;
+                                break;
+                            }
+                        }
+                        if (authChanged) break;
+                    } else if (currentConfig !== newConfig) {
+                        // One config exists but the other doesn't
+                        authChanged = true;
+                        break;
+                    }
                 }
 
                 // Compare permitted hosts
@@ -802,7 +887,7 @@ const Home = () => {
             setShowEditModal(false);
 
             // Refresh data
-            const [cl, rd] = buildColumnLabelsAndRowData(demoMode);
+            const [cl, rd] = buildColumnLabelsAndRowData(emailDisplayPermission);
             setColumnLabels(cl);
             setRowData(rd);
         } catch (error) {
@@ -818,6 +903,16 @@ const Home = () => {
                 ? prev.permittedHosts.filter(h => h !== host)
                 : [...prev.permittedHosts, host]
         }));
+
+        // Force re-render of config sections when permitted hosts change
+        setTimeout(() => {
+            try {
+                discoverConfigSchema();
+            } catch (error) {
+                console.error('Failed to re-discover config schema after host toggle:', error);
+                // Don't throw here as this is a user action, just log the error
+            }
+        }, 100);
     };
 
     const handleCancelEdit = () => {
@@ -871,7 +966,7 @@ const Home = () => {
         }
 
         // Refresh table data
-        const [cl, rd] = buildColumnLabelsAndRowData(demoMode);
+        const [cl, rd] = buildColumnLabelsAndRowData(emailDisplayPermission);
         setColumnLabels(cl);
         setRowData(rd);
     };
@@ -964,29 +1059,22 @@ const Home = () => {
 
                 console.log('Data loaded - Students:', studentsArray.length, 'Auth Records:', authRecordsArray.length);
 
-                // Fetch config values
-                const appListConfig = await fetchConfig('studentManagerAppList');
-                const demoModeConfig = await fetchConfig('demoMode');
-
-                if (appListConfig) {
-                    studentManagerAppList = Array.isArray(appListConfig.value) ? appListConfig.value : [];
+                // Discover config schema from default auth record
+                try {
+                    discoverConfigSchema();
+                } catch (error) {
+                    console.error('Failed to discover config schema:', error);
+                    throw new Error(`Configuration discovery failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
                 }
 
-                // Calculate demo mode value
-                let isDemoMode = false;
-                if (demoModeConfig) {
-                    console.log('Demo mode config:', demoModeConfig);
-                    console.log('Demo mode value:', demoModeConfig.value);
-                    console.log('Demo mode value type:', typeof demoModeConfig.value);
-                    isDemoMode = demoModeConfig.value === 'true';
-                    console.log('Setting demo mode to:', isDemoMode);
-                    setDemoMode(isDemoMode);
-                }
+
+
+
 
                 // Fetch email display permission
                 let emailDisplayPermissionResult = false;
                 try {
-                    const permissionResponse = await authGetViewsEmailDisplayPermission(pid as string, hash as string);
+                    const permissionResponse = await authGetConfigValue(pid as string, hash as string, 'emailDisplay');
                     if (permissionResponse && typeof permissionResponse === 'boolean') {
                         emailDisplayPermissionResult = permissionResponse;
                         console.log('Email display permission:', emailDisplayPermissionResult);
@@ -1301,108 +1389,128 @@ const Home = () => {
                             </div>
                         )}
 
-                        <div style={{
-                            border: '1px solid #555',
-                            borderRadius: '8px',
-                            padding: '20px',
-                            marginBottom: '30px',
-                            backgroundColor: '#1a1a1a'
-                        }}>
-                            <h5 style={{ marginBottom: '20px' }}>Event Dashboard Configuration</h5>
-                            <Row>
-                                <Col md={6}>
-                                    <Form.Group className="mb-3">
-                                        <Form.Label>Views Profile</Form.Label>
-                                        <Form.Select
-                                            value={formData.eventDashboardConfig.viewsProfile}
-                                            onChange={(e) => setFormData(prev => ({
-                                                ...prev,
-                                                eventDashboardConfig: {
-                                                    ...prev.eventDashboardConfig,
-                                                    viewsProfile: e.target.value
-                                                }
-                                            }))}
-                                            disabled={!formData.permittedHosts.includes('event-dashboard.slsupport.link')}
-                                            style={{
-                                                backgroundColor: formData.permittedHosts.includes('event-dashboard.slsupport.link') ? '#2b2b2b' : '#1a1a1a',
-                                                color: 'white',
-                                                border: '1px solid #555'
-                                            }}
-                                        >
-                                            <option value="">Select a views profile...</option>
-                                            {allViewsProfiles.map(profile => (
-                                                <option key={profile.id} value={profile.id}>
-                                                    {profile.id}
-                                                </option>
-                                            ))}
-                                        </Form.Select>
-                                    </Form.Group>
-                                </Col>
-                            </Row>
+                        {/* Dynamic App Configuration Sections */}
+                        {availableHosts.map(host => {
+                            const hostSchema = configSchema[host];
+                            if (!hostSchema) return null;
 
-                            <Row>
-                                <Col md={3}>
-                                    <Form.Check
-                                        type="checkbox"
-                                        label="Write Permission"
-                                        checked={formData.eventDashboardConfig.writePermission}
-                                        onChange={(e) => setFormData(prev => ({
-                                            ...prev,
-                                            eventDashboardConfig: {
-                                                ...prev.eventDashboardConfig,
-                                                writePermission: e.target.checked
-                                            }
-                                        }))}
-                                        disabled={!formData.permittedHosts.includes('event-dashboard.slsupport.link')}
-                                    />
-                                </Col>
-                                <Col md={3}>
-                                    <Form.Check
-                                        type="checkbox"
-                                        label="Export CSV"
-                                        checked={formData.eventDashboardConfig.exportCSV}
-                                        onChange={(e) => setFormData(prev => ({
-                                            ...prev,
-                                            eventDashboardConfig: {
-                                                ...prev.eventDashboardConfig,
-                                                exportCSV: e.target.checked
-                                            }
-                                        }))}
-                                        disabled={!formData.permittedHosts.includes('event-dashboard.slsupport.link')}
-                                    />
-                                </Col>
-                                <Col md={3}>
-                                    <Form.Check
-                                        type="checkbox"
-                                        label="Student History"
-                                        checked={formData.eventDashboardConfig.studentHistory}
-                                        onChange={(e) => setFormData(prev => ({
-                                            ...prev,
-                                            eventDashboardConfig: {
-                                                ...prev.eventDashboardConfig,
-                                                studentHistory: e.target.checked
-                                            }
-                                        }))}
-                                        disabled={!formData.permittedHosts.includes('event-dashboard.slsupport.link')}
-                                    />
-                                </Col>
-                                <Col md={3}>
-                                    <Form.Check
-                                        type="checkbox"
-                                        label="Email Display"
-                                        checked={formData.eventDashboardConfig.emailDisplay}
-                                        onChange={(e) => setFormData(prev => ({
-                                            ...prev,
-                                            eventDashboardConfig: {
-                                                ...prev.eventDashboardConfig,
-                                                emailDisplay: e.target.checked
-                                            }
-                                        }))}
-                                        disabled={!formData.permittedHosts.includes('event-dashboard.slsupport.link')}
-                                    />
-                                </Col>
-                            </Row>
-                        </div>
+                            const isPermitted = formData.permittedHosts.includes(host);
+                            const hostDisplayName = formatDomainForDisplay(host);
+
+                            return (
+                                <div key={host} style={{
+                                    border: '1px solid #555',
+                                    borderRadius: '8px',
+                                    padding: '20px',
+                                    marginBottom: '30px',
+                                    backgroundColor: '#1a1a1a',
+                                    opacity: isPermitted ? 1 : 0.6
+                                }}>
+                                    <h5 style={{ marginBottom: '20px' }}>
+                                        {hostDisplayName} Configuration
+                                        {!isPermitted && <span style={{ color: '#888', fontSize: '0.9em' }}> (Not Permitted)</span>}
+                                    </h5>
+
+                                    {Object.entries(hostSchema).map(([key, defaultValue]) => {
+                                        const currentValue = formData.config?.[host]?.[key];
+                                        const value = currentValue !== undefined ? currentValue : defaultValue;
+
+                                        // Determine field type and render appropriate input
+                                        if (typeof defaultValue === 'boolean') {
+                                            return (
+                                                <Row key={key}>
+                                                    <Col md={3}>
+                                                        <Form.Check
+                                                            type="checkbox"
+                                                            label={key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
+                                                            checked={value}
+                                                            onChange={(e) => setFormData(prev => ({
+                                                                ...prev,
+                                                                config: {
+                                                                    ...prev.config,
+                                                                    [host]: {
+                                                                        ...prev.config[host],
+                                                                        [key]: e.target.checked
+                                                                    }
+                                                                }
+                                                            }))}
+                                                            disabled={!isPermitted}
+                                                        />
+                                                    </Col>
+                                                </Row>
+                                            );
+                                        } else if (key === 'viewsProfile') {
+                                            return (
+                                                <Row key={key}>
+                                                    <Col md={6}>
+                                                        <Form.Group className="mb-3">
+                                                            <Form.Label>Views Profile</Form.Label>
+                                                            <Form.Select
+                                                                value={value || ''}
+                                                                onChange={(e) => setFormData(prev => ({
+                                                                    ...prev,
+                                                                    config: {
+                                                                        ...prev.config,
+                                                                        [host]: {
+                                                                            ...prev.config[host],
+                                                                            [key]: e.target.value
+                                                                        }
+                                                                    }
+                                                                }))}
+                                                                disabled={!isPermitted}
+                                                                style={{
+                                                                    backgroundColor: isPermitted ? '#2b2b2b' : '#1a1a1a',
+                                                                    color: 'white',
+                                                                    border: '1px solid #555'
+                                                                }}
+                                                            >
+                                                                <option value="">Select a views profile...</option>
+                                                                {allViewsProfiles.map(profile => (
+                                                                    <option key={profile.id} value={profile.id}>
+                                                                        {profile.id}
+                                                                    </option>
+                                                                ))}
+                                                            </Form.Select>
+                                                        </Form.Group>
+                                                    </Col>
+                                                </Row>
+                                            );
+                                        } else {
+                                            // Default to text input for other types
+                                            return (
+                                                <Row key={key}>
+                                                    <Col md={6}>
+                                                        <Form.Group className="mb-3">
+                                                            <Form.Label>{key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</Form.Label>
+                                                            <Form.Control
+                                                                type="text"
+                                                                value={value || ''}
+                                                                onChange={(e) => setFormData(prev => ({
+                                                                    ...prev,
+                                                                    config: {
+                                                                        ...prev.config,
+                                                                        [host]: {
+                                                                            ...prev.config[host],
+                                                                            [key]: e.target.value
+                                                                        }
+                                                                    }
+                                                                }))}
+                                                                disabled={!isPermitted}
+                                                                style={{
+                                                                    backgroundColor: isPermitted ? '#2b2b2b' : '#1a1a1a',
+                                                                    color: 'white',
+                                                                    border: '1px solid #555'
+                                                                }}
+                                                            />
+                                                        </Form.Group>
+                                                    </Col>
+                                                </Row>
+                                            );
+                                        }
+                                    })}
+                                </div>
+                            );
+                        })}
 
                         <div style={{
                             border: '1px solid #555',
@@ -1412,13 +1520,13 @@ const Home = () => {
                         }}>
                             <h5 style={{ marginBottom: '20px' }}>Permitted Apps</h5>
                             <Row>
-                                {studentManagerAppList.map(app => (
-                                    <Col md={6} key={app} className="mb-2">
+                                {availableHosts.map(host => (
+                                    <Col md={6} key={host} className="mb-2">
                                         <Form.Check
                                             type="checkbox"
-                                            label={formatDomainForDisplay(app)}
-                                            checked={formData.permittedHosts.includes(app)}
-                                            onChange={() => handleTogglePermittedHost(app)}
+                                            label={formatDomainForDisplay(host)}
+                                            checked={formData.permittedHosts.includes(host)}
+                                            onChange={() => handleTogglePermittedHost(host)}
                                         />
                                     </Col>
                                 ))}
@@ -1435,6 +1543,36 @@ const Home = () => {
                     </Button>
                 </Modal.Footer>
             </Modal >
+
+            {/* Link Email Confirmation Modal */}
+            <Modal show={showLinkEmailModal} onHide={cancelSendLinkEmail} size="sm" centered>
+                <Modal.Header closeButton style={{ borderBottom: '1px solid #555', backgroundColor: '#1a1a1a' }}>
+                    <Modal.Title style={{ color: 'white' }}>
+                        Confirm Link Email
+                    </Modal.Title>
+                </Modal.Header>
+                <Modal.Body style={{ backgroundColor: '#1a1a1a', padding: '30px' }}>
+                    <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+                        <div style={{ fontSize: '18px', color: 'white', marginBottom: '15px' }}>
+                            Are you sure you want to email a{' '}
+                            <strong style={{ color: '#ffc107' }}>{linkEmailData ? formatDomainForDisplay(linkEmailData.domainName) : ''}</strong>
+                            {' '}link to{' '}
+                            <strong style={{ color: '#ffc107' }}>{linkEmailData ? `${linkEmailData.student.first} ${linkEmailData.student.last}` : ''}</strong>?
+                        </div>
+                        <div style={{ fontSize: '14px', color: '#ccc', fontStyle: 'italic' }}>
+                            This will send an access link email to the student's registered email address.
+                        </div>
+                    </div>
+                </Modal.Body>
+                <Modal.Footer style={{ borderTop: '1px solid #555', backgroundColor: '#1a1a1a', padding: '20px 30px' }}>
+                    <Button variant="secondary" onClick={cancelSendLinkEmail} style={{ minWidth: '100px' }}>
+                        Cancel
+                    </Button>
+                    <Button variant="warning" onClick={confirmSendLinkEmail} style={{ minWidth: '100px' }}>
+                        Send Link
+                    </Button>
+                </Modal.Footer>
+            </Modal>
         </>
     );
 };
