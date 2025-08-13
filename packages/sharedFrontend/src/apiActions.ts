@@ -629,220 +629,6 @@ export async function getTableCount(
 
 /**
  * @async
- * @function authGetViews
- * @description Get the views for a participant.
- * @param {string} pid - The participant ID.
- * @param {string} hash - The verification hash.
- * @returns {Promise<any[] | RedirectedResponse>} A promise that resolves to an array of views.
- */
-export async function authGetViews(
-    pid: string,
-    hash: string
-): Promise<any[] | RedirectedResponse> {
-    try {
-        const response = await api.post(`${API_BASE_URL}/auth/getViews/${pid}`, pid, hash, {});
-
-        if (response && response.redirected) {
-            console.log('[API] authGetViews redirected - authentication required');
-            return { redirected: true };
-        }
-
-        return response?.views || [];
-    } catch (error: any) {
-        console.error('[API] authGetViews failed:', error);
-
-        // Check if this is an authentication error and return redirected response
-        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
-            console.log('[API] authGetViews authentication failed - returning redirected response');
-            return { redirected: true };
-        }
-
-        throw new Error(error.message || 'Failed to get views');
-    }
-}
-
-/**
- * @async
- * @function authGetViewsWritePermission
- * @description Get the write permission for the views of a participant.
- * @param {string} pid - The participant ID.
- * @param {string} hash - The verification hash.
- * @returns {Promise<boolean | RedirectedResponse>} A promise that resolves to a boolean indicating the write permission.
- */
-export async function authGetViewsWritePermission(
-    pid: string,
-    hash: string
-): Promise<boolean | RedirectedResponse> {
-    try {
-        const response = await api.post(`${API_BASE_URL}/auth/viewsWritePermission/${pid}`, pid, hash, {});
-        if (response && response.redirected) {
-            console.log('[API] authGetViewsWritePermission redirected - authentication required');
-            return { redirected: true };
-        }
-        return !!response?.viewsWritePermission;
-    } catch (error: any) {
-        console.error('[API] authGetViewsWritePermission failed:', error);
-        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
-            console.log('[API] authGetViewsWritePermission authentication failed - returning redirected response');
-            return { redirected: true };
-        }
-        throw new Error(error.message || 'Failed to get views write permission');
-    }
-}
-
-/**
- * @async
- * @function authGetViewsExportCSV
- * @description Get the export CSV permission for the views of a participant.
- * @param {string} pid - The participant ID.
- * @param {string} hash - The verification hash.
- * @returns {Promise<boolean | RedirectedResponse>} A promise that resolves to a boolean indicating the export CSV permission.
- */
-export async function authGetViewsExportCSV(
-    pid: string,
-    hash: string
-): Promise<boolean | RedirectedResponse> {
-    try {
-        const response = await api.post(`${API_BASE_URL}/auth/viewsExportCSV/${pid}`, pid, hash, {});
-        if (response && response.redirected) {
-            console.log('[API] authGetViewsExportCSV redirected - authentication required');
-            return { redirected: true };
-        }
-        return !!response?.exportCSV;
-    } catch (error: any) {
-        console.error('[API] authGetViewsExportCSV failed:', error);
-        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
-            console.log('[API] authGetViewsExportCSV authentication failed - returning redirected response');
-            return { redirected: true };
-        }
-        throw new Error(error.message || 'Failed to get export CSV permission');
-    }
-}
-
-/**
- * @async
- * @function authGetViewsHistoryPermission
- * @description Get the history permission for the views of a participant.
- * @param {string} pid - The participant ID.
- * @param {string} hash - The verification hash.
- * @returns {Promise<boolean | RedirectedResponse>} A promise that resolves to a boolean indicating the history permission.
- */
-export async function authGetViewsHistoryPermission(
-    pid: string,
-    hash: string
-): Promise<boolean | RedirectedResponse> {
-    try {
-        const response = await api.post(`${API_BASE_URL}/auth/viewsHistoryPermission/${pid}`, pid, hash, {});
-        if (response && response.redirected) {
-            console.log('[API] authGetViewsHistoryPermission redirected - authentication required');
-            return { redirected: true };
-        }
-        return !!response?.studentHistory;
-    } catch (error: any) {
-        console.error('[API] authGetViewsHistoryPermission failed:', error);
-        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
-            console.log('[API] authGetViewsHistoryPermission authentication failed - returning redirected response');
-            return { redirected: true };
-        }
-        throw new Error(error.message || 'Failed to get views history permission');
-    }
-}
-
-/**
- * @async
- * @function authGetViewsEmailDisplayPermission
- * @description Get the email display permission for the views of a participant.
- * @param {string} pid - The participant ID.
- * @param {string} hash - The verification hash.
- * @returns {Promise<boolean | RedirectedResponse>} A promise that resolves to a boolean indicating the email display permission.
- */
-export async function authGetViewsEmailDisplayPermission(
-    pid: string,
-    hash: string
-): Promise<boolean | RedirectedResponse> {
-    try {
-        const response = await api.post(`${API_BASE_URL}/auth/viewsEmailDisplayPermission/${pid}`, pid, hash, {});
-        if (response && response.redirected) {
-            console.log('[API] authGetViewsEmailDisplayPermission redirected - authentication required');
-            return { redirected: true };
-        }
-        return !!response?.emailDisplay;
-    } catch (error: any) {
-        console.error('[API] authGetViewsEmailDisplayPermission failed:', error);
-        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
-            console.log('[API] authGetViewsEmailDisplayPermission authentication failed - returning redirected response');
-            return { redirected: true };
-        }
-        throw new Error(error.message || 'Failed to get views email display permission');
-    }
-}
-
-
-
-/**
- * @async
- * @function authLinkEmailSend
- * @description Send a link email to a student for a specific app.
- * @param {string} pid - The participant ID.
- * @param {string} hash - The verification hash.
- * @param {string} linkHost - The host to send the link for.
- * @returns {Promise<boolean | RedirectedResponse>} A promise that resolves to true if the email was sent successfully.
- */
-export async function authLinkEmailSend(
-    pid: string,
-    hash: string,
-    linkHost: string
-): Promise<boolean | RedirectedResponse> {
-    try {
-        const response = await api.post(`${API_BASE_URL}/auth/linkEmailSend`, pid, hash, {
-            linkHost
-        });
-        if (response && response.redirected) {
-            console.log('[API] authLinkEmailSend redirected - authentication required');
-            return { redirected: true };
-        }
-        return response?.success || false;
-    } catch (error: any) {
-        console.error('[API] authLinkEmailSend failed:', error);
-        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
-            console.log('[API] authLinkEmailSend authentication failed - returning redirected response');
-            return { redirected: true };
-        }
-        throw new Error(error.message || 'Failed to send link email');
-    }
-}
-
-/**
- * @async
- * @function authGetActionsProfiles
- * @description Get the actions profiles.
- * @param {string} pid - The participant ID.
- * @param {string} hash - The verification hash.
- * @returns {Promise<string[] | RedirectedResponse>} A promise that resolves to an array of actions profiles.
- */
-export async function authGetActionsProfiles(
-    pid: string,
-    hash: string
-): Promise<string[] | RedirectedResponse> {
-    try {
-        const response = await api.post(`${API_BASE_URL}/auth/getActionsProfiles`, pid, hash, {});
-        if (response && response.redirected) {
-            console.log('[API] authGetActionsProfiles redirected - authentication required');
-            return { redirected: true };
-        }
-        return response?.profileNames || [];
-    } catch (error: any) {
-        console.error('[API] authGetActionsProfiles failed:', error);
-        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
-            console.log('[API] authGetActionsProfiles authentication failed - returning redirected response');
-            return { redirected: true };
-        }
-        throw new Error(error.message || 'Failed to get actions profiles');
-    }
-}
-
-/**
- * @async
  * @function authGetAuthList
  * @description Get the list of authentications.
  * @param {string} pid - The participant ID.
@@ -927,5 +713,132 @@ export async function authPutAuthItem(
             return { redirected: true };
         }
         throw new Error(error.message || 'Failed to put auth item');
+    }
+}
+
+/**
+ * @async
+ * @function authGetConfigValue
+ * @description Get a config value for a specific participant and app/host
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @param {string} key - The config key to retrieve.
+ * @returns {Promise<any | RedirectedResponse>} A promise that resolves to the config value.
+ */
+export async function authGetConfigValue(
+    pid: string,
+    hash: string,
+    key: string
+): Promise<any | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/auth/getConfigValue`, pid, hash, { key });
+        if (response && response.redirected) {
+            console.log('[API] authGetConfigValue redirected - authentication required');
+            return { redirected: true };
+        }
+        return response?.value;
+    } catch (error: any) {
+        console.error('[API] authGetConfigValue failed:', error);
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log('[API] authGetConfigValue authentication failed - returning redirected response');
+            return { redirected: true };
+        }
+        throw new Error(error.message || 'Failed to get config value');
+    }
+}
+
+/**
+ * @async
+ * @function authLinkEmailSend
+ * @description Send a link email to a student for a specific app.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @param {string} linkHost - The host to send the link for.
+ * @returns {Promise<boolean | RedirectedResponse>} A promise that resolves to true if the email was sent successfully.
+ */
+export async function authLinkEmailSend(
+    pid: string,
+    hash: string,
+    linkHost: string
+): Promise<boolean | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/auth/linkEmailSend`, pid, hash, {
+            linkHost
+        });
+        if (response && response.redirected) {
+            console.log('[API] authLinkEmailSend redirected - authentication required');
+            return { redirected: true };
+        }
+        return response?.success || false;
+    } catch (error: any) {
+        console.error('[API] authLinkEmailSend failed:', error);
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log('[API] authLinkEmailSend authentication failed - returning redirected response');
+            return { redirected: true };
+        }
+        throw new Error(error.message || 'Failed to send link email');
+    }
+}
+
+/**
+ * @async
+ * @function authGetActionsProfiles
+ * @description Get the actions profiles.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<string[] | RedirectedResponse>} A promise that resolves to an array of actions profiles.
+ */
+export async function authGetActionsProfiles(
+    pid: string,
+    hash: string
+): Promise<string[] | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/auth/getActionsProfiles`, pid, hash, {});
+        if (response && response.redirected) {
+            console.log('[API] authGetActionsProfiles redirected - authentication required');
+            return { redirected: true };
+        }
+        return response?.profileNames || [];
+    } catch (error: any) {
+        console.error('[API] authGetActionsProfiles failed:', error);
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log('[API] authGetActionsProfiles authentication failed - returning redirected response');
+            return { redirected: true };
+        }
+        throw new Error(error.message || 'Failed to get actions profiles');
+    }
+}
+
+/**
+ * @async
+ * @function authGetViews
+ * @description Get the views for a participant.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<any[] | RedirectedResponse>} A promise that resolves to an array of views.
+ */
+export async function authGetViews(
+    pid: string,
+    hash: string
+): Promise<any[] | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/auth/getViews/${pid}`, pid, hash, {});
+
+        if (response && response.redirected) {
+            console.log('[API] authGetViews redirected - authentication required');
+            return { redirected: true };
+        }
+
+        return response?.views || [];
+    } catch (error: any) {
+        console.error('[API] authGetViews failed:', error);
+
+        // Check if this is an authentication error and return redirected response
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log('[API] authGetViews authentication failed - returning redirected response');
+            return { redirected: true };
+        }
+
+        throw new Error(error.message || 'Failed to get views');
     }
 } 

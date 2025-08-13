@@ -9,7 +9,7 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import { tables, TableConfig } from './tableConfig';
 import { websockets, WebSocketConfig, websocketGetConfig } from './websocketConfig';
 import { listAll, listAllChunked, getOne, deleteOne, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll, batchGetItems, listAllQueryBeginsWithSortKeyMultiple } from './dynamoClient';
-import { verificationEmailSend, verificationEmailCallback, createToken, getViews, getViewsWritePermission, getViewsExportCSV, getViewsHistoryPermission, getViewsEmailDisplayPermission, getActionsProfiles, getAuthList, getViewsProfiles, getActionsProfileForHost, getAllActionsForUser, putAuthItem, linkEmailSend } from './authUtils';
+import { verificationEmailSend, verificationEmailCallback, createToken, getActionsProfiles, getAuthList, getViewsProfiles, getActionsProfileForHost, getAllActionsForUser, putAuthItem, linkEmailSend, getConfigValue } from './authUtils';
 import { serialize } from 'cookie';
 import { v4 as uuidv4 } from 'uuid';
 import { sendWorkOrderMessage } from './sqsClient';
@@ -212,23 +212,6 @@ async function dispatchAuth(
         }
         const callbackResult = await verificationEmailCallback(pid, hash, host, deviceFingerprint, id);
         return res.status(200).json(callbackResult);
-      case 'getViews':
-        const viewsListData = await getViews(pid, host);
-        console.log('dispatchAuth getViews: returning views data:', { views: viewsListData });
-        return res.status(200).json({ views: viewsListData });
-      case 'viewsWritePermission':
-        const viewsWritePermission = await getViewsWritePermission(pid, host);
-        return res.status(200).json({ viewsWritePermission });
-      case 'viewsExportCSV':
-        const exportCSV = await getViewsExportCSV(pid, host);
-        return res.status(200).json({ exportCSV });
-      case 'viewsHistoryPermission':
-        const studentHistory = await getViewsHistoryPermission(pid, host);
-        return res.status(200).json({ studentHistory });
-      case 'viewsEmailDisplayPermission':
-        const emailDisplay = await getViewsEmailDisplayPermission(pid, host);
-        return res.status(200).json({ emailDisplay });
-
       case 'getActionsProfiles':
         const profileNames = await getActionsProfiles();
         return res.status(200).json({ profileNames });
@@ -238,6 +221,9 @@ async function dispatchAuth(
       case 'getViewsProfiles':
         const viewsProfileNames = await getViewsProfiles();
         return res.status(200).json({ viewsProfileNames });
+      case 'getActionsProfileForHost':
+        const actionsProfile = await getActionsProfileForHost(host);
+        return res.status(200).json({ actionsProfile });
       case 'putAuthItem':
         const { authRecord } = req.body;
         if (!authRecord || !authRecord.id) {
@@ -252,6 +238,13 @@ async function dispatchAuth(
         }
         const linkEmailResult = await linkEmailSend(pid, hash, host, linkHost);
         return res.status(200).json({ success: linkEmailResult });
+      case 'getConfigValue':
+        const { key } = req.body;
+        if (!key) {
+          return res.status(400).json({ error: 'Missing required parameter: key' });
+        }
+        const configValue = await getConfigValue(pid, hash, host, key);
+        return res.status(200).json({ value: configValue });
       default:
         return res.status(404).json({ error: `Unknown auth action: ${action}` });
     }
