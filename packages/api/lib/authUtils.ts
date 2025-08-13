@@ -983,8 +983,6 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     };
 }
 
-
-
 /**
  * @async
  * @function getConfigValue
@@ -996,8 +994,8 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
  * @returns {Promise<any>} Resolves with the config value
  * @throws {Error} If configuration is missing or host is not permitted
  */
-export async function getConfigValue(pid: string, hash: string, host: string, key: string): Promise<any> {
-    console.log("getConfigValue: pid:", pid, "hash:", hash, "host:", host, "key:", key);
+export async function getConfigValue(pid: string, host: string, key: string): Promise<any> {
+    console.log("getConfigValue: pid:", pid, "host:", host, "key:", key);
 
     // Does this user have access to the host they're trying to get the config value for?
     let tableCfg = tableGetConfig('auth');
@@ -1083,6 +1081,39 @@ export async function getAuthList(): Promise<any[]> {
 export async function putAuthItem(id: string, authRecord: any): Promise<void> {
     const tableCfg = tableGetConfig('auth');
     await putOne(tableCfg.tableName, authRecord, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+}
+
+/**
+ * @async
+ * @function getViews
+ * @description Get views for a specified participant
+ * @param {string} pid - Participant ID.
+ * @param {string} host - The host of the calling app.
+ * @returns {Promise<string[]>} Resolves with a list of views the participant has access to
+ * @throws {Error} If configuration is missing
+ */
+export async function getViews(pid: string, host: string): Promise<string[]> {
+
+    // Get the views profile name from the config
+    const viewsProfile = await getConfigValue(pid, host, 'viewsProfile');
+    if (!viewsProfile) {
+        throw new Error('AUTH_VIEWS_NO_PROFILE');
+    }
+
+    // Lookup related views profile, throw config error if not found
+    const tableCfg = tableGetConfig('views-profiles');
+    console.log('getViews(): Got views-profiles table config:', tableCfg);
+
+    const viewsListData = await getOne(tableCfg.tableName, tableCfg.pk, viewsProfile as string, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    console.log('getViews(): Retrieved views list data for profile:', viewsProfile, 'data:', viewsListData);
+
+    if (!viewsListData) {
+        console.log('getViews(): ERROR - No views list data found for profile:', viewsProfile);
+        throw new Error('AUTH_VIEWS_LIST_NOT_FOUND');
+    }
+
+    console.log('getViews(): Returning views:', viewsListData.views);
+    return viewsListData.views;
 }
 
 /**
