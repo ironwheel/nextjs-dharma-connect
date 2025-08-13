@@ -61,6 +61,7 @@ interface WorkOrderFormProps {
     onCancel: () => void
     userPid: string
     userHash: string
+    writePermission: boolean
 }
 
 /**
@@ -134,7 +135,7 @@ async function getExistingWorkOrders(
     }
 }
 
-export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash }: WorkOrderFormProps) {
+export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash, writePermission }: WorkOrderFormProps) {
     const [loading, setLoading] = useState(false)
     const [events, setEvents] = useState<Event[]>([])
     const [eventCode, setEventCode] = useState('')
@@ -577,7 +578,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash 
                         }}
                         style={{ borderRadius: '50%', width: 40, height: 40, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 8 }}
                         aria-label="Delete Work Order"
-                        disabled={loading}
+                        disabled={loading || !writePermission}
                     >
                         &#128465;
                     </Button>
@@ -586,7 +587,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash 
                     <Button variant="secondary" onClick={onCancel} disabled={loading}>
                         Cancel
                     </Button>
-                    <Button variant="primary" type="submit" disabled={loading}>
+                    <Button variant="primary" type="submit" disabled={loading || !writePermission}>
                         {loading ? (
                             <>
                                 <Spinner
