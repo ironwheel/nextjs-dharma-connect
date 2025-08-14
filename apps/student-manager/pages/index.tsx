@@ -113,7 +113,7 @@ const Home = () => {
     const [linkEmailData, setLinkEmailData] = useState<{
         domainName: string;
         studentId: string;
-        student: Student | { first: string; last: string };
+        student: Student | { first: string; last: string; email: string };
     } | null>(null);
 
     // Form state for add/edit
@@ -531,7 +531,7 @@ const Home = () => {
                 // Use fallback immediately
                 if (rowData.studentName) {
                     const [firstName, lastName] = rowData.studentName.split(' ');
-                    const fallbackStudent = { first: firstName, last: lastName || '' };
+                    const fallbackStudent = { first: firstName, last: lastName || '', email: 'Unknown' };
                     const appName = rowData.appName;
                     const fullDomain = availableHosts.find(app =>
                         formatDomainForDisplay(app) === appName
@@ -566,7 +566,7 @@ const Home = () => {
                 // Try to get student name from rowData as fallback
                 if (rowData.studentName) {
                     const [firstName, lastName] = rowData.studentName.split(' ');
-                    const fallbackStudent = { first: firstName, last: lastName || '' };
+                    const fallbackStudent = { first: firstName, last: lastName || '', email: 'Unknown' };
                     const appName = rowData.appName;
                     const fullDomain = availableHosts.find(app =>
                         formatDomainForDisplay(app) === appName
@@ -736,12 +736,12 @@ const Home = () => {
         }
     };
 
-    const handleSendLinkEmail = async (domainName: string, studentId: string, student?: Student | { first: string; last: string }) => {
+    const handleSendLinkEmail = async (domainName: string, studentId: string, student?: Student | { first: string; last: string; email: string }) => {
         const studentName = student ? `${student.first} ${student.last}` : 'Student';
         const appName = formatDomainForDisplay(domainName);
 
         // Set modal data and show confirmation modal
-        setLinkEmailData({ domainName, studentId, student: student || { first: 'Student', last: '' } });
+        setLinkEmailData({ domainName, studentId, student: student || { first: 'Student', last: '', email: 'Unknown' } });
         setShowLinkEmailModal(true);
     };
 
@@ -749,7 +749,7 @@ const Home = () => {
         if (!linkEmailData) return;
 
         try {
-            const result = await authLinkEmailSend(pid as string, hash as string, linkEmailData.domainName);
+            const result = await authLinkEmailSend(pid as string, hash as string, linkEmailData.domainName, linkEmailData.studentId);
             if (result === true) {
                 const studentName = linkEmailData.student ? `${linkEmailData.student.first} ${linkEmailData.student.last}` : 'Student';
                 const appName = formatDomainForDisplay(linkEmailData.domainName);
@@ -1560,6 +1560,11 @@ const Home = () => {
                         <div style={{ fontSize: '14px', color: '#ccc', fontStyle: 'italic' }}>
                             This will send an access link email to the student's registered email address.
                         </div>
+                        {linkEmailData?.student && 'email' in linkEmailData.student && (
+                            <div style={{ fontSize: '16px', color: '#ffc107', marginTop: '15px', fontWeight: 'bold' }}>
+                                Email: {linkEmailData.student.email}
+                            </div>
+                        )}
                     </div>
                 </Modal.Body>
                 <Modal.Footer style={{ borderTop: '1px solid #555', backgroundColor: '#1a1a1a', padding: '20px 30px' }}>

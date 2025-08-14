@@ -258,11 +258,14 @@ async function dispatchAuth(
         await putAuthItem(authRecord.id, authRecord);
         return res.status(200).json({ success: true });
       case 'linkEmailSend':
-        const { linkHost } = req.body;
+        const { linkHost, targetUserPid } = req.body;
         if (!linkHost) {
           return res.status(400).json({ error: 'Missing required parameter: linkHost' });
         }
-        const linkEmailResult = await linkEmailSend(pid, hash, host, linkHost);
+        if (!targetUserPid) {
+          return res.status(400).json({ error: 'Missing required parameter: targetUserPid' });
+        }
+        const linkEmailResult = await linkEmailSend(pid, hash, host, linkHost, targetUserPid);
         return res.status(200).json({ success: linkEmailResult });
       case 'getConfigValue':
         const { key } = req.body;
