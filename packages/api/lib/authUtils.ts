@@ -247,7 +247,7 @@ async function findParticipantForAuth(id: string): Promise<any> {
  * @returns {string} created token.
  * @throws {Error} Throws errors related to bad configuration
  */
-function createToken(pid: string, clientFingerprint: string, actionList: string[]): string {
+export function createToken(pid: string, clientFingerprint: string, actionList: string[]): string {
     if (!RSA_PRIVATE_KEY_B64) throw new Error(TOKEN_ERROR_CODES.CONFIG_ERROR + ': Missing API_RSA_PRIVATE');
     const privateKey = Buffer.from(RSA_PRIVATE_KEY_B64, 'base64').toString('utf-8');
     if (!privateKey) throw new Error(TOKEN_ERROR_CODES.CONFIG_ERROR + ': Invalid API_RSA_PRIVATE');
