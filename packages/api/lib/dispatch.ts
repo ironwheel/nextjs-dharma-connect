@@ -9,7 +9,7 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import { tables, TableConfig } from './tableConfig';
 import { websockets, WebSocketConfig, websocketGetConfig } from './websocketConfig';
 import { listAll, listAllChunked, getOne, deleteOne, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll, batchGetItems, listAllQueryBeginsWithSortKeyMultiple } from './dynamoClient';
-import { verificationEmailSend, verificationEmailCallback, createToken, getActionsProfiles, getAuthList, getViews, getViewsProfiles, getActionsProfileForHost, putAuthItem, linkEmailSend, getConfigValue } from './authUtils';
+import { verificationEmailSend, verificationEmailCallback, createToken, getActionsProfiles, getAuthList, getViews, getViewsProfiles, putAuthItem, linkEmailSend, getConfigValue } from './authUtils';
 import { serialize } from 'cookie';
 import { v4 as uuidv4 } from 'uuid';
 import { sendWorkOrderMessage } from './sqsClient';
@@ -250,9 +250,6 @@ async function dispatchAuth(
         const viewsListData = await getViews(pid, host);
         console.log('dispatchAuth getViews: returning views data:', { views: viewsListData });
         return res.status(200).json({ views: viewsListData });
-      case 'getActionsProfileForHost':
-        const actionsProfile = await getActionsProfileForHost(host);
-        return res.status(200).json({ actionsProfile });
       case 'putAuthItem':
         const { authRecord } = req.body;
         if (!authRecord || !authRecord.id) {
