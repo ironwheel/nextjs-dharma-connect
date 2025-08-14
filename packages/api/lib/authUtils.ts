@@ -652,7 +652,7 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
             host: host,
             deviceFingerprint: deviceFingerprint,
             createdAt: Date.now(),
-            ttl: Date.now() + VERIFICATION_DURATION_MS // Verification token TTL from VERIFICATION_DURATION env var
+            ttl: Math.floor((Date.now() + VERIFICATION_DURATION_MS) / 1000) // TTL in seconds for DynamoDB
         }, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
     } catch (e) {
         console.error("verificationEmailSend: Failed to create verification token:", e);
@@ -785,7 +785,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
                 deviceFingerprint: deviceFingerprint,
                 failedAttempt: true,
                 createdAt: Date.now(),
-                ttl: Date.now() + (10 * 60 * 1000) // 10 minutes TTL for failed attempts
+                ttl: Math.floor((Date.now() + (10 * 60 * 1000)) / 1000) // 10 minutes TTL in seconds for DynamoDB
             }, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
         } catch (e) {
             console.error("verificationEmailCallback: Failed to record failed attempt:", e);
@@ -797,14 +797,14 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
         // Record failed attempt
         try {
             await putOne(tableCfg.tableName, {
-                verificationTokenId: `failed_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                verificationTokenId: `failed_${Date.now()}_${Math.random()}_${Math.random().toString(36).substr(2, 9)}`,
                 pid: pid,
                 hash: hash,
                 host: host,
                 deviceFingerprint: deviceFingerprint,
                 failedAttempt: true,
                 createdAt: Date.now(),
-                ttl: Date.now() + (10 * 60 * 1000) // 10 minutes TTL for failed attempts
+                ttl: Math.floor((Date.now() + (10 * 60 * 1000)) / 1000) // 10 minutes TTL in seconds for DynamoDB
             }, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
         } catch (e) {
             console.error("verificationEmailCallback: Failed to record failed attempt:", e);
@@ -816,14 +816,14 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
         // Record failed attempt
         try {
             await putOne(tableCfg.tableName, {
-                verificationTokenId: `failed_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                verificationTokenId: `failed_${Date.now()}_${Math.random()}_${Math.random().toString(36).substr(2, 9)}`,
                 pid: pid,
                 hash: hash,
                 host: host,
                 deviceFingerprint: deviceFingerprint,
                 failedAttempt: true,
                 createdAt: Date.now(),
-                ttl: Date.now() + (10 * 60 * 1000) // 10 minutes TTL for failed attempts
+                ttl: Math.floor((Date.now() + (10 * 60 * 1000)) / 1000) // 10 minutes TTL in seconds for DynamoDB
             }, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
         } catch (e) {
             console.error("verificationEmailCallback: Failed to record failed attempt:", e);
@@ -836,14 +836,14 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
         // Record failed attempt
         try {
             await putOne(tableCfg.tableName, {
-                verificationTokenId: `failed_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                verificationTokenId: `failed_${Date.now()}_${Math.random()}_${Math.random().toString(36).substr(2, 9)}`,
                 pid: pid,
                 hash: hash,
                 host: host,
                 deviceFingerprint: deviceFingerprint,
                 failedAttempt: true,
                 createdAt: Date.now(),
-                ttl: Date.now() + (10 * 60 * 1000) // 10 minutes TTL for failed attempts
+                ttl: Math.floor((Date.now() + (10 * 60 * 1000)) / 1000) // 10 minutes TTL in seconds for DynamoDB
             }, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
         } catch (e) {
             console.error("verificationEmailCallback: Failed to record failed attempt:", e);
@@ -867,7 +867,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
             id: pid,
             fingerprint: deviceFingerprint,
             createdAt: Date.now(),
-            ttl: Date.now() + SESSION_DURATION_MS // Session TTL from SESSION_DURATION env var
+            ttl: Math.floor((Date.now() + SESSION_DURATION_MS) / 1000) // TTL in seconds for DynamoDB
         }, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
     } catch (e) {
         console.error("verificationEmailCallback: Failed to create session:", e);
@@ -1017,7 +1017,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     const session = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
     // If session found, generate fresh access token if the session isn't expired
     if (session) {
-        if (session.ttl <= Date.now()) {
+        if (session.ttl <= Math.floor(Date.now() / 1000)) {
             // Session is expired, delete it and fall through to the verification process
             await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, session.id, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
         } else {
