@@ -754,16 +754,19 @@ export async function authGetConfigValue(
  * @param {string} pid - The participant ID.
  * @param {string} hash - The verification hash.
  * @param {string} linkHost - The host to send the link for.
+ * @param {string} targetUserPid - The participant ID of the user to send the email to.
  * @returns {Promise<boolean | RedirectedResponse>} A promise that resolves to true if the email was sent successfully.
  */
 export async function authLinkEmailSend(
     pid: string,
     hash: string,
-    linkHost: string
+    linkHost: string,
+    targetUserPid: string
 ): Promise<boolean | RedirectedResponse> {
     try {
         const response = await api.post(`${API_BASE_URL}/auth/linkEmailSend`, pid, hash, {
-            linkHost
+            linkHost,
+            targetUserPid
         });
         if (response && response.redirected) {
             console.log('[API] authLinkEmailSend redirected - authentication required');

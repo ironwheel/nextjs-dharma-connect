@@ -419,16 +419,17 @@ async function authGetLink(studentId: string, linkHost: string): Promise<string>
  * @async
  * @function linkEmailSend
  * @description Sends an email with an app-specific link to the participant.
- * @param {string} pid - Participant ID.
+ * @param {string} pid - Participant ID of the current user (for authentication).
  * @param {string} hash - The hash value to verify.
  * @param {string} host - The host of the calling app.
  * @param {string} linkHost - The host of the link to send.
+ * @param {string} targetUserPid - The participant ID of the user to send the email to.
  * @returns {Promise<boolean>} Resolves with true on success.
  * @throws {Error} If configuration is missing or sending fails.
  */
-export async function linkEmailSend(pid: string, hash: string, host: string, linkHost: string): Promise<boolean> {
+export async function linkEmailSend(pid: string, hash: string, host: string, linkHost: string, targetUserPid: string): Promise<boolean> {
     // Validate inputs
-    if (!pid || !hash || !host || !linkHost) {
+    if (!pid || !hash || !host || !linkHost || !targetUserPid) {
         throw new Error('linkEmailSend(): Missing required parameters');
     }
 
@@ -455,7 +456,7 @@ export async function linkEmailSend(pid: string, hash: string, host: string, lin
         if (expectedHash !== hash) throw new Error('AUTHUSER_ACCESS_NOT_ALLOWED_BAD_HASH');
     }
 
-    // Does this user have access?
+    // Does the originating user have access to the originating host
     let tableCfg = tableGetConfig('auth');
     let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
 
@@ -464,22 +465,28 @@ export async function linkEmailSend(pid: string, hash: string, host: string, lin
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
 
-    // Does this user have access to the originating host?
-    const permittedHosts: string[] = data['permitted-hosts'] || [];
-    const hasPermission = permittedHosts.includes(host);
+    let permittedHosts: string[] = data['permitted-hosts'] || [];
+    let hasPermission = permittedHosts.includes(host);
     if (!hasPermission) throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
 
-    // Does this user have access to the specified link host?
-    const permittedLinkHosts: string[] = data['permitted-hosts'] || [];
-    const hasLinkPermission = permittedLinkHosts.includes(linkHost);
-    if (!hasLinkPermission) throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_LINK_HOST_NOT_PERMITTED');
+    // Does the target user have access to the link host?
+    data = await getOne(tableCfg.tableName, tableCfg.pk, targetUserPid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+
+    if (!data) {
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
+    }
+
+    permittedHosts = data['permitted-hosts'] || [];
+    hasPermission = permittedHosts.includes(linkHost);
+    if (!hasPermission) throw new Error('AUTH_TARGETUSER_ACCESS_NOT_ALLOWED_LINK_HOST_NOT_PERMITTED');
 
     // Check necessary configs at the start
     if (!SMTP_USERNAME || !SMTP_PASSWORD) throw new Error("SMTP credentials not configured for email sending.");
     if (!EMAIL_FROM || !EMAIL_REPLY_TO) throw new Error("Sender email addresses not configured for email sending.");
 
-    // Find participant data internally
-    const participantData = await findParticipantForAuth(pid);
+    // Find participant data internally for the target user
+    const participantData = await findParticipantForAuth(targetUserPid);
     if (!participantData) {
         throw new Error('AUTH_PID_NOT_FOUND');
     }
@@ -493,7 +500,7 @@ export async function linkEmailSend(pid: string, hash: string, host: string, lin
         return englishFallback ? englishFallback.text : `link-${promptId}-${lang}-unknown`;
     };
 
-    const link = await authGetLink(pid, linkHost);
+    const link = await authGetLink(targetUserPid, linkHost);
 
     let emailBody = getLinkPrompt('email', language)
         .replace(/\|\|name\|\|/g, `${participantData.first} ${participantData.last}`)
