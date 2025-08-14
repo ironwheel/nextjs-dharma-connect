@@ -145,13 +145,82 @@ export const DEFAULT_NO_PERMISSIONS = {
 
 /**
  * @async
+ * @function getActionsProfileForHost
+ * @description Gets the actions profile for a given host from the app.actions table
+ * @param {string} host - The host to look up
+ * @returns {Promise<string>} The actions profile name for the host
+ * @throws {Error} If host not found in app.actions table
+ */
+async function getActionsProfileForHost(host: string): Promise<string> {
+    const tableCfg = tableGetConfig('app.actions');
+    const appActionData = await getOne(tableCfg.tableName, tableCfg.pk, host, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    if (!appActionData) {
+        throw new Error(`AUTH_APP_ACTIONS_NOT_FOUND: No actions profile found for host '${host}'`);
+    }
+    return appActionData.actionsProfile;
+}
+
+/**
+ * @async
+ * @function getAllActionsForUser
+ * @description Gets all actions for a user based on their permitted hosts
+ * @param {string[]} permittedHosts - Array of hosts the user has access to
+ * @returns {Promise<string[]>} Array of all actions the user has access to
+ * @throws {Error} If any host's actions profile is not found
+ */
+async function getAllActionsForUser(permittedHosts: string[]): Promise<string[]> {
+    const allActions: string[] = [];
+
+    for (const host of permittedHosts) {
+        try {
+            const actionsProfile = await getActionsProfileForHost(host);
+
+            // Lookup the actions list for this profile
+            const tableCfg = tableGetConfig('actions-profile');
+            const actionsListData = await getOne(tableCfg.tableName, tableCfg.pk, actionsProfile, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+
+            if (!actionsListData) {
+                throw new Error(`AUTH_ACTIONS_LIST_NOT_FOUND: No actions list found for profile '${actionsProfile}'`);
+            }
+
+            // Ensure actionsList is an array
+            let actionsList: string[];
+            if (Array.isArray(actionsListData.actions)) {
+                actionsList = actionsListData.actions;
+            } else if (actionsListData.actions && typeof actionsListData.actions === 'string') {
+                try {
+                    actionsList = JSON.parse(actionsListData.actions);
+                } catch (e) {
+                    throw new Error(`AUTH_ACTIONS_LIST_INVALID_FORMAT: Invalid JSON for profile '${actionsProfile}'`);
+                }
+            } else {
+                throw new Error(`AUTH_ACTIONS_LIST_INVALID_FORMAT: Actions list is not in expected format for profile '${actionsProfile}'`);
+            }
+
+            // Add actions to the combined list (avoiding duplicates)
+            for (const action of actionsList) {
+                if (!allActions.includes(action)) {
+                    allActions.push(action);
+                }
+            }
+        } catch (error) {
+            console.error(`Failed to get actions for host ${host}:`, error);
+            throw error;
+        }
+    }
+
+    return allActions;
+}
+
+/**
+ * @async
  * @function getPromptsForAid
  * @description Fetches prompts relevant to a given application ID (aid) from DynamoDB.
  * @param {string} aid - The application ID for which to fetch prompts.
  * @returns {Promise<Array<object>>} A promise that resolves to an array of prompt items.
  * @throws {Error} If the database scan fails or table name is not configured.
  */
-export async function getPromptsForAid(aid: string): Promise<Array<any>> {
+async function getPromptsForAid(aid: string): Promise<Array<any>> {
     const tableCfg = tableGetConfig('prompts');
     return await listAllFiltered(tableCfg.tableName, 'aid', aid);
 }
@@ -164,7 +233,7 @@ export async function getPromptsForAid(aid: string): Promise<Array<any>> {
  * @returns {Promise<object>} A promise that resolves to the participant's data (specific fields for auth).
  * @throws {Error} If participant not found or database query fails or table name not configured.
  */
-export async function findParticipantForAuth(id: string): Promise<any> {
+async function findParticipantForAuth(id: string): Promise<any> {
     const tableCfg = tableGetConfig('students');
     return await getOne(tableCfg.tableName, tableCfg.pk, id);
 }
@@ -178,7 +247,7 @@ export async function findParticipantForAuth(id: string): Promise<any> {
  * @returns {string} created token.
  * @throws {Error} Throws errors related to bad configuration
  */
-export function createToken(pid: string, clientFingerprint: string, actionList: string[]): string {
+function createToken(pid: string, clientFingerprint: string, actionList: string[]): string {
     if (!RSA_PRIVATE_KEY_B64) throw new Error(TOKEN_ERROR_CODES.CONFIG_ERROR + ': Missing API_RSA_PRIVATE');
     const privateKey = Buffer.from(RSA_PRIVATE_KEY_B64, 'base64').toString('utf-8');
     if (!privateKey) throw new Error(TOKEN_ERROR_CODES.CONFIG_ERROR + ': Invalid API_RSA_PRIVATE');
@@ -199,7 +268,7 @@ export function createToken(pid: string, clientFingerprint: string, actionList: 
  * @returns {VerifyResult} The verification result.
  * @throws {Error} Throws errors related to bad configuration
  */
-export function verifyToken(token: string, pid: string, clientFingerprint: string, operation: string): VerifyResult {
+function verifyToken(token: string, pid: string, clientFingerprint: string, operation: string): VerifyResult {
     if (!RSA_PUBLIC_KEY_B64) throw new Error(TOKEN_ERROR_CODES.CONFIG_ERROR + ': Missing API_RSA_PUBLIC');
     const publicKey = Buffer.from(RSA_PUBLIC_KEY_B64, 'base64').toString('utf-8');
     if (!publicKey) throw new Error(TOKEN_ERROR_CODES.CONFIG_ERROR + ': Invalid API_RSA_PUBLIC');
@@ -273,7 +342,6 @@ export function verifyToken(token: string, pid: string, clientFingerprint: strin
     return VerifyResult.VERIFY_OK;
 }
 
-
 /**
  * @function generateAuthHash
  * @description Generates an HMAC hash of a UUID using a secret key.
@@ -345,7 +413,7 @@ async function authGetLink(studentId: string, linkHost: string): Promise<string>
     return `https://${linkHost}/?pid=${studentId}&hash=${appSpecificHash}`;
 }
 
-
+// Auth Exports for the API
 
 /**
  * @async
@@ -969,12 +1037,8 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     // The user will copy the code and paste it into the login page. If the login code is confirmed,
     // verificationEmailCallback() will create a new session record for the current pid+fingerprint.
 
-    // Delete any existing verification tokens for this user
-    tableCfg = tableGetConfig('verification-tokens');
-    const currentVerificationTokens = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
-    for (const token of currentVerificationTokens) {
-        await deleteOne(tableCfg.tableName, tableCfg.pk, token.verificationTokenId, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
-    }
+    // Note: Verification tokens are managed via DynamoDB TTL to prevent race conditions
+    // between multiple open apps. Tokens expire automatically after VERIFICATION_DURATION.
 
     const verificationAccessToken = createToken(pid, deviceFingerprint, verificationActionList);
     return {
@@ -1154,73 +1218,4 @@ export async function getViewsProfiles(): Promise<string[]> {
             return [];
         }
     }
-}
-
-/**
- * @async
- * @function getActionsProfileForHost
- * @description Gets the actions profile for a given host from the app.actions table
- * @param {string} host - The host to look up
- * @returns {Promise<string>} The actions profile name for the host
- * @throws {Error} If host not found in app.actions table
- */
-export async function getActionsProfileForHost(host: string): Promise<string> {
-    const tableCfg = tableGetConfig('app.actions');
-    const appActionData = await getOne(tableCfg.tableName, tableCfg.pk, host, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
-    if (!appActionData) {
-        throw new Error(`AUTH_APP_ACTIONS_NOT_FOUND: No actions profile found for host '${host}'`);
-    }
-    return appActionData.actionsProfile;
-}
-
-/**
- * @async
- * @function getAllActionsForUser
- * @description Gets all actions for a user based on their permitted hosts
- * @param {string[]} permittedHosts - Array of hosts the user has access to
- * @returns {Promise<string[]>} Array of all actions the user has access to
- * @throws {Error} If any host's actions profile is not found
- */
-export async function getAllActionsForUser(permittedHosts: string[]): Promise<string[]> {
-    const allActions: string[] = [];
-
-    for (const host of permittedHosts) {
-        try {
-            const actionsProfile = await getActionsProfileForHost(host);
-
-            // Lookup the actions list for this profile
-            const tableCfg = tableGetConfig('actions-profile');
-            const actionsListData = await getOne(tableCfg.tableName, tableCfg.pk, actionsProfile, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
-
-            if (!actionsListData) {
-                throw new Error(`AUTH_ACTIONS_LIST_NOT_FOUND: No actions list found for profile '${actionsProfile}'`);
-            }
-
-            // Ensure actionsList is an array
-            let actionsList: string[];
-            if (Array.isArray(actionsListData.actions)) {
-                actionsList = actionsListData.actions;
-            } else if (actionsListData.actions && typeof actionsListData.actions === 'string') {
-                try {
-                    actionsList = JSON.parse(actionsListData.actions);
-                } catch (e) {
-                    throw new Error(`AUTH_ACTIONS_LIST_INVALID_FORMAT: Invalid JSON for profile '${actionsProfile}'`);
-                }
-            } else {
-                throw new Error(`AUTH_ACTIONS_LIST_INVALID_FORMAT: Actions list is not in expected format for profile '${actionsProfile}'`);
-            }
-
-            // Add actions to the combined list (avoiding duplicates)
-            for (const action of actionsList) {
-                if (!allActions.includes(action)) {
-                    allActions.push(action);
-                }
-            }
-        } catch (error) {
-            console.error(`Failed to get actions for host ${host}:`, error);
-            throw error;
-        }
-    }
-
-    return allActions;
 }
