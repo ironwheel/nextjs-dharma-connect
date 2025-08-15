@@ -60,6 +60,7 @@ export default function Home() {
     const [loadingArchived, setLoadingArchived] = useState(false)
     const [userName, setUserName] = useState<string>('')
     const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
+    const [loadingParticipantNames, setLoadingParticipantNames] = useState(false)
 
     // Set isClient to true after component mounts
     React.useEffect(() => {
@@ -195,6 +196,7 @@ export default function Home() {
     }
 
     const loadParticipantNamesForArchived = async (archivedOrders: WorkOrder[]) => {
+        setLoadingParticipantNames(true)
         const uniquePids = new Set<string>()
 
         // Collect all unique user IDs from createdBy and archivedBy fields
@@ -204,25 +206,34 @@ export default function Home() {
         })
 
         // Load names for each unique user ID
-        for (const pid of uniquePids) {
+        const namePromises = Array.from(uniquePids).map(async (pid) => {
             if (!participantNames[pid]) {
                 try {
                     const result = await getTableItem('students', pid, userPid, userHash)
                     if (result && (result.first || result.last)) {
                         const firstName = result.first || ''
                         const lastName = result.last || ''
-                        setParticipantNames(prev => ({
-                            ...prev,
-                            [pid]: `${firstName} ${lastName}`.trim()
-                        }))
+                        return { pid, name: `${firstName} ${lastName}`.trim() }
                     } else {
-                        setParticipantNames(prev => ({ ...prev, [pid]: pid }))
+                        return { pid, name: pid }
                     }
                 } catch (error) {
                     console.error(`Failed to load name for user ${pid}:`, error)
-                    setParticipantNames(prev => ({ ...prev, [pid]: pid }))
+                    return { pid, name: pid }
                 }
             }
+            return { pid, name: participantNames[pid] }
+        })
+
+        try {
+            const nameResults = await Promise.all(namePromises)
+            const newNames = { ...participantNames }
+            nameResults.forEach(({ pid, name }) => {
+                newNames[pid] = name
+            })
+            setParticipantNames(newNames)
+        } finally {
+            setLoadingParticipantNames(false)
         }
     }
 
@@ -350,7 +361,7 @@ export default function Home() {
                 )}
                 {isClient && (
                     <span className="status-item user-info">
-                        {userName || userPid}
+                        {userName ? userName : (userPid === 'default-user-pid' ? 'Loading...' : userPid)}
                     </span>
                 )}
             </div>
@@ -443,7 +454,11 @@ export default function Home() {
                                                 {workOrder.account}
                                             </td>
                                             <td style={{ border: 'none', verticalAlign: 'middle' }}>
-                                                {workOrder.createdBy ? (participantNames[workOrder.createdBy] || workOrder.createdBy) : 'Unknown'}
+                                                {loadingParticipantNames ? (
+                                                    <span className="text-muted">Loading...</span>
+                                                ) : (
+                                                    workOrder.createdBy ? (participantNames[workOrder.createdBy] || workOrder.createdBy) : 'Unknown'
+                                                )}
                                             </td>
                                             <td style={{ border: 'none', verticalAlign: 'middle' }}>
                                                 <div>
@@ -451,7 +466,11 @@ export default function Home() {
                                                         {workOrder.archivedAt ? new Date(workOrder.archivedAt).toLocaleDateString() : 'Unknown'}
                                                     </div>
                                                     <div style={{ fontSize: '0.75em', color: '#888' }}>
-                                                        by {workOrder.archivedBy ? (participantNames[workOrder.archivedBy] || workOrder.archivedBy) : 'Unknown'}
+                                                        by {loadingParticipantNames ? (
+                                                            <span className="text-muted">Loading...</span>
+                                                        ) : (
+                                                            workOrder.archivedBy ? (participantNames[workOrder.archivedBy] || workOrder.archivedBy) : 'Unknown'
+                                                        )}
                                                     </div>
                                                 </div>
                                             </td>
