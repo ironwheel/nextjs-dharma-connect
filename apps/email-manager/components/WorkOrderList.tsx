@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { Table, Button, Badge, Modal, Spinner } from 'react-bootstrap'
 import { toast } from 'react-toastify'
-import { getAllTableItems, useWebSocket, getTableItem, getTableItemOrNull, updateTableItem, getAllTableItemsFiltered, sendSQSMessage, putTableItem, authGetConfigValue } from 'sharedFrontend'
+import { getAllTableItems, useWebSocket, getTableItem, getTableItemOrNull, updateTableItem, sendSQSMessage, putTableItem, authGetConfigValue } from 'sharedFrontend'
 import { unmarshall } from '@aws-sdk/util-dynamodb'
 
 interface WorkOrder {
@@ -49,26 +49,25 @@ interface RecipientEntry {
 
 interface WorkOrderListProps {
     onEdit: (id: string) => void
-    onNew: () => void
     refreshTrigger?: number
     userPid: string
     userHash: string
     newlyCreatedWorkOrder?: WorkOrder
     writePermission: boolean
+    currentWorkOrderIndex: number
+    setCurrentWorkOrderIndex: (index: number) => void
+    setWorkOrders: (workOrders: WorkOrder[]) => void
 }
 
-export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userPid, userHash, newlyCreatedWorkOrder, writePermission }: WorkOrderListProps) {
-    const [workOrders, setWorkOrders] = useState<WorkOrder[]>([])
+export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, userHash, newlyCreatedWorkOrder, writePermission, currentWorkOrderIndex, setCurrentWorkOrderIndex, setWorkOrders }: WorkOrderListProps) {
+    const [workOrders, setWorkOrdersLocal] = useState<WorkOrder[]>([])
     const [loading, setLoading] = useState(true)
     const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
     const [hoveredRow, setHoveredRow] = useState<string | null>(null)
     const [showRecipientsModal, setShowRecipientsModal] = useState(false)
     const [currentRecipients, setCurrentRecipients] = useState<RecipientEntry[]>([]);
     const [recipientsType, setRecipientsType] = useState<'dry-run' | 'send'>('dry-run')
-    const [showArchiveModal, setShowArchiveModal] = useState(false)
-    const [archivedWorkOrders, setArchivedWorkOrders] = useState<WorkOrder[]>([])
-    const [loadingArchived, setLoadingArchived] = useState(false)
-    const [currentWorkOrderIndex, setCurrentWorkOrderIndex] = useState(0)
+
     const { lastMessage, status, connectionId } = useWebSocket()
     const prevWorkOrdersRef = useRef<WorkOrder[]>([])
     // Add state to cache campaign existence for each work order and language
@@ -80,26 +79,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
     const [emailDisplayPermission, setEmailDisplayPermission] = useState<boolean>(true);
     const [exportCSVPermission, setExportCSVPermission] = useState<boolean>(true);
 
-    // Navigation functions
-    const goToNextWorkOrder = () => {
-        if (currentWorkOrderIndex < workOrders.length - 1) {
-            setCurrentWorkOrderIndex(currentWorkOrderIndex + 1)
-        }
-    }
 
-    const goToPreviousWorkOrder = () => {
-        if (currentWorkOrderIndex > 0) {
-            setCurrentWorkOrderIndex(currentWorkOrderIndex - 1)
-        }
-    }
-
-    const goToFirstWorkOrder = () => {
-        setCurrentWorkOrderIndex(0)
-    }
-
-    const goToLastWorkOrder = () => {
-        setCurrentWorkOrderIndex(workOrders.length - 1)
-    }
 
     // Reset current index when work orders change
     useEffect(() => {
@@ -108,34 +88,12 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
         }
     }, [workOrders, currentWorkOrderIndex])
 
-    // Keyboard navigation
+    // Update parent's workOrders state when local state changes
     useEffect(() => {
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (workOrders.length === 0) return
+        setWorkOrders(workOrders)
+    }, [workOrders, setWorkOrders])
 
-            switch (event.key) {
-                case 'ArrowUp':
-                    event.preventDefault()
-                    goToPreviousWorkOrder()
-                    break
-                case 'ArrowDown':
-                    event.preventDefault()
-                    goToNextWorkOrder()
-                    break
-                case 'Home':
-                    event.preventDefault()
-                    goToFirstWorkOrder()
-                    break
-                case 'End':
-                    event.preventDefault()
-                    goToLastWorkOrder()
-                    break
-            }
-        }
 
-        window.addEventListener('keydown', handleKeyDown)
-        return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [currentWorkOrderIndex, workOrders.length])
 
     const downloadRecipientsCSV = (recipients: RecipientEntry[]) => {
         // Additional safety check - prevent download if permission is false
@@ -167,25 +125,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
         setShowRecipientsModal(true);
     }
 
-    const loadArchivedWorkOrders = async () => {
-        setLoadingArchived(true)
-        try {
-            const result = await getAllTableItemsFiltered('work-orders', 'archived', true, userPid, userHash)
-            if (result && Array.isArray(result)) {
-                setArchivedWorkOrders(result)
-            }
-        } catch (error) {
-            console.error('Failed to load archived work orders:', error)
-            toast.error('Failed to load archived work orders')
-        } finally {
-            setLoadingArchived(false)
-        }
-    }
 
-    const openArchiveModal = async () => {
-        setShowArchiveModal(true)
-        await loadArchivedWorkOrders()
-    }
 
     const archiveWorkOrder = async (workOrderId: string) => {
         try {
@@ -200,17 +140,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
         }
     }
 
-    const unarchiveWorkOrder = async (workOrderId: string) => {
-        try {
-            await updateTableItem('work-orders', workOrderId, 'archived', false, userPid, userHash)
-            toast.success('Work order restored successfully')
-            loadArchivedWorkOrders() // Refresh the archive list
-            loadWorkOrders() // Refresh the main list
-        } catch (error) {
-            console.error('Failed to unarchive work order:', error)
-            toast.error('Failed to restore work order')
-        }
-    }
+
 
     const isWorkOrderCompleted = (workOrder: WorkOrder) => {
         return workOrder.steps && workOrder.steps.every(step => {
@@ -249,7 +179,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
         }
     }
 
-    const loadWorkOrders = async () => {
+    const loadWorkOrders = useCallback(async () => {
         setLoading(true)
         try {
             const result = await getAllTableItems('work-orders', userPid, userHash)
@@ -263,7 +193,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                     const bTime = new Date(b.createdAt || '1970-01-01').getTime();
                     return bTime - aTime;
                 });
-                setWorkOrders(activeWorkOrders)
+                setWorkOrdersLocal(activeWorkOrders)
 
                 // Load participant names for all work orders
                 const uniquePids = new Set<string>()
@@ -295,11 +225,11 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
         } finally {
             setLoading(false)
         }
-    }
+    }, [userPid, userHash, setWorkOrders])
 
     useEffect(() => {
         loadWorkOrders()
-    }, [refreshTrigger])
+    }, [refreshTrigger, loadWorkOrders])
 
     // Load email display permission
     useEffect(() => {
@@ -332,7 +262,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                 const updatedWorkOrder = unmarshall(newImage) as WorkOrder
 
                 if (updatedWorkOrder) {
-                    setWorkOrders(prevOrders => {
+                    setWorkOrdersLocal(prevOrders => {
                         const index = prevOrders.findIndex(wo => wo.id === updatedWorkOrder.id)
 
                         if (index === -1) {
@@ -391,7 +321,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                     sleepUntil: workOrder.sleepUntil,
                 }
 
-                setWorkOrders(prevOrders => {
+                setWorkOrdersLocal(prevOrders => {
                     const index = prevOrders.findIndex(wo => wo.id === updatedWorkOrder.id)
 
                     if (index === -1) {
@@ -415,6 +345,11 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
         }
     }, [lastMessage])
 
+    // Update parent's workOrders state when local state changes
+    useEffect(() => {
+        setWorkOrders(workOrders)
+    }, [workOrders, setWorkOrders])
+
     useEffect(() => {
         // If a new work order is added, select the newest one (by createdAt)
         if (workOrders.length > prevWorkOrdersRef.current.length) {
@@ -437,7 +372,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
     useEffect(() => {
         if (newlyCreatedWorkOrder) {
             // Add the newly created work order to the list
-            setWorkOrders(prevOrders => {
+            setWorkOrdersLocal(prevOrders => {
                 // Check if it's already in the list (from WebSocket or reload)
                 const exists = prevOrders.some(wo => wo.id === newlyCreatedWorkOrder.id);
                 if (!exists) {
@@ -532,7 +467,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
             await putTableItem('work-orders', workOrderId, updatedWorkOrder, userPid, userHash)
 
             // Update state immediately to reflect the unlock
-            setWorkOrders(prevOrders => {
+            setWorkOrdersLocal(prevOrders => {
                 const index = prevOrders.findIndex(wo => wo.id === workOrderId)
                 if (index === -1) return prevOrders
                 const newOrders = [...prevOrders]
@@ -567,7 +502,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
             await putTableItem('work-orders', workOrder.id, updatedWorkOrder, userPid, userHash)
 
             // Update state immediately to reflect the lock
-            setWorkOrders(prevOrders => {
+            setWorkOrdersLocal(prevOrders => {
                 const index = prevOrders.findIndex(wo => wo.id === workOrder.id)
                 if (index === -1) return prevOrders
                 const newOrders = [...prevOrders]
@@ -593,7 +528,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
             // If starting a step, implement optimistic UI update
             if (isStarting) {
                 // Immediately update the UI to show "working" status
-                setWorkOrders(prevOrders => {
+                setWorkOrdersLocal(prevOrders => {
                     return prevOrders.map(wo => {
                         if (wo.id === id) {
                             return {
@@ -663,15 +598,7 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                             )}
                         </div>
                     </div>
-                    <div className="d-flex align-items-center" style={{ gap: 8, margin: 0, padding: 0 }}>
-                        <Button
-                            variant="outline-secondary"
-                            onClick={openArchiveModal}
-                            size="sm"
-                        >
-                            📁 Archived Work Orders
-                        </Button>
-                    </div>
+
                 </div>
                 <div className="d-flex justify-content-center align-items-center" style={{ height: '300px', color: '#bbb', fontSize: '1.5rem' }}>
                     Work Order List is Empty
@@ -683,117 +610,8 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
     return (
         <div className="bg-dark text-light">
             <div className="d-flex justify-content-between align-items-center mb-3" style={{ marginBottom: 0, paddingBottom: 0, gap: 0, minHeight: 0 }}>
-                <div className="d-flex align-items-center" style={{ gap: 6, margin: 0, padding: 0 }}>
-                    <div className="ms-1" style={{ margin: 0, padding: 0 }}>
-                        <Badge bg={status === 'open' ? 'success' : status === 'connecting' ? 'warning' : 'danger'}>
-                            Agent Connection: {status}
-                        </Badge>
-                        {connectionId && (
-                            <Badge bg="secondary" className="ms-2">
-                                ID: {connectionId}
-                            </Badge>
-                        )}
-                        {!connectionId && status === 'open' && (
-                            <Badge bg="warning" className="ms-2">
-                                Waiting for ID...
-                            </Badge>
-                        )}
-                    </div>
-                </div>
-                <div className="d-flex align-items-center" style={{ gap: 8, margin: 0, padding: 0 }}>
-                    <div className="d-flex align-items-center flex-column" style={{ minWidth: 60, padding: 0, margin: 0, gap: 2 }}>
-                        <div style={{ fontWeight: 700, fontSize: 22, color: '#51cfef', marginBottom: 0, marginTop: 0, textAlign: 'center', lineHeight: 1 }}>
-                            {workOrders.length}
-                        </div>
-                        <div className="d-flex flex-row align-items-center justify-content-center" style={{ gap: 8, margin: 0, padding: 0 }}>
-                            <Button
-                                variant="primary"
-                                onClick={goToPreviousWorkOrder}
-                                disabled={currentWorkOrderIndex === 0}
-                                size="lg"
-                                style={{
-                                    borderRadius: '50%',
-                                    width: 40,
-                                    height: 40,
-                                    padding: 0,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    backgroundColor: '#0d6efd',
-                                    border: 'none',
-                                    boxShadow: '0 2px 8px rgba(0,0,0,0.10)'
-                                }}
-                                title="Previous work order"
-                            >
-                                <svg width="22" height="22" viewBox="0 0 22 22" style={{ display: 'block', margin: 'auto' }}>
-                                    <line x1="15" y1="4" x2="7" y2="11" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" />
-                                    <line x1="7" y1="11" x2="15" y2="18" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" />
-                                </svg>
-                            </Button>
-                            <Button
-                                variant="primary"
-                                onClick={onNew}
-                                disabled={!writePermission}
-                                style={{
-                                    borderRadius: '50%',
-                                    width: 40,
-                                    height: 40,
-                                    padding: 0,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    backgroundColor: '#0d6efd',
-                                    border: 'none',
-                                    boxShadow: '0 2px 8px rgba(0,0,0,0.10)'
-                                }}
-                                title="Create new work order"
-                            >
-                                <svg width="22" height="22" viewBox="0 0 22 22" style={{ display: 'block', margin: 'auto' }}>
-                                    <line x1="11" y1="5" x2="11" y2="17" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" />
-                                    <line x1="5" y1="11" x2="17" y2="11" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" />
-                                </svg>
-                            </Button>
-                            <Button
-                                variant="primary"
-                                onClick={goToNextWorkOrder}
-                                disabled={currentWorkOrderIndex === workOrders.length - 1}
-                                size="lg"
-                                style={{
-                                    borderRadius: '50%',
-                                    width: 40,
-                                    height: 40,
-                                    padding: 0,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    backgroundColor: '#0d6efd',
-                                    border: 'none',
-                                    boxShadow: '0 2px 8px rgba(0,0,0,0.10)'
-                                }}
-                                title="Next work order"
-                            >
-                                <svg width="22" height="22" viewBox="0 0 22 22" style={{ display: 'block', margin: 'auto' }}>
-                                    <line x1="7" y1="4" x2="15" y2="11" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" />
-                                    <line x1="15" y1="11" x2="7" y2="18" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" />
-                                </svg>
-                            </Button>
-                        </div>
-                        <span className="mt-1 text-muted" style={{ fontSize: 13, textAlign: 'center', width: '100%', margin: 0, padding: 0, lineHeight: 1 }}>
-                            {workOrders.length > 0 ? `${currentWorkOrderIndex + 1} of ${workOrders.length}` : 'No work orders'}
-                        </span>
-                        <small className="text-muted" style={{ textAlign: 'center', width: '100%', margin: 0, padding: 0, lineHeight: 1 }}>
-                            (←→ arrows, Home/End keys)
-                        </small>
-                    </div>
-                    <Button
-                        variant="outline-secondary"
-                        onClick={openArchiveModal}
-                        size="sm"
-                        style={{ margin: 0, padding: '2px 8px', height: 32, display: 'flex', alignItems: 'center' }}
-                    >
-                        📁 Archived Work Orders
-                    </Button>
-                </div>
+
+
             </div>
 
             {workOrders.length > 0 ? (
@@ -1235,100 +1053,8 @@ export default function WorkOrderList({ onEdit, onNew, refreshTrigger = 0, userP
                 </Modal.Footer>
             </Modal>
 
-            {/* Archive Modal */}
-            <Modal
-                show={showArchiveModal}
-                onHide={() => setShowArchiveModal(false)}
-                size="xl"
-                dialogClassName="modal-fullscreen-lg-down"
-            >
-                <Modal.Header closeButton>
-                    <Modal.Title>Archived Work Orders ({archivedWorkOrders.length})</Modal.Title>
-                </Modal.Header>
-                <Modal.Body style={{ maxHeight: '80vh', overflow: 'hidden' }}>
-                    {loadingArchived ? (
-                        <div className="text-center py-4">
-                            <div className="spinner-border" role="status">
-                                <span className="visually-hidden">Loading...</span>
-                            </div>
-                        </div>
-                    ) : archivedWorkOrders.length === 0 ? (
-                        <div className="text-center py-4 text-muted">
-                            No archived work orders found.
-                        </div>
-                    ) : (
-                        <div style={{
-                            maxHeight: '70vh',
-                            overflowY: 'auto'
-                        }}>
-                            <Table borderless hover variant="dark" className="mb-0">
-                                <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: '#212529' }}>
-                                    <tr style={{ border: 'none' }}>
-                                        <th style={{ border: 'none' }}>Actions</th>
-                                        <th style={{ border: 'none' }}>Event</th>
-                                        <th style={{ border: 'none' }}>Sub Event</th>
-                                        <th style={{ border: 'none' }}>Stage</th>
-                                        <th style={{ border: 'none' }}>Languages</th>
-                                        <th style={{ border: 'none' }}>Email Account</th>
-                                        <th style={{ border: 'none' }}>Created By</th>
-                                        <th style={{ border: 'none' }}>Archived</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {archivedWorkOrders.map(workOrder => (
-                                        <tr key={workOrder.id}>
-                                            <td style={{ border: 'none', verticalAlign: 'middle' }}>
-                                                <Button
-                                                    variant="outline-success"
-                                                    size="sm"
-                                                    onClick={() => unarchiveWorkOrder(workOrder.id)}
-                                                    disabled={!writePermission}
-                                                    title="Restore work order"
-                                                >
-                                                    🔄 Restore
-                                                </Button>
-                                            </td>
-                                            <td style={{ border: 'none', verticalAlign: 'middle' }}>
-                                                {eventNames[workOrder.eventCode] || workOrder.eventCode}
-                                            </td>
-                                            <td style={{ border: 'none', verticalAlign: 'middle' }}>
-                                                {workOrder.subEvent}
-                                            </td>
-                                            <td style={{ border: 'none', verticalAlign: 'middle' }}>
-                                                {workOrder.stage}
-                                            </td>
-                                            <td style={{ border: 'none', verticalAlign: 'middle' }}>
-                                                {Object.keys(workOrder.languages ?? {}).filter(lang => !!workOrder.languages?.[lang]).join(',')}
-                                            </td>
-                                            <td style={{ border: 'none', verticalAlign: 'middle' }}>
-                                                {workOrder.account}
-                                            </td>
-                                            <td style={{ border: 'none', verticalAlign: 'middle' }}>
-                                                {participantNames[workOrder.createdBy] || workOrder.createdBy}
-                                            </td>
-                                            <td style={{ border: 'none', verticalAlign: 'middle' }}>
-                                                <div>
-                                                    <div style={{ fontSize: '0.85em' }}>
-                                                        {workOrder.archivedAt ? new Date(workOrder.archivedAt).toLocaleDateString() : 'Unknown'}
-                                                    </div>
-                                                    <div style={{ fontSize: '0.75em', color: '#888' }}>
-                                                        by {participantNames[workOrder.archivedBy || ''] || workOrder.archivedBy || 'Unknown'}
-                                                    </div>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </Table>
-                        </div>
-                    )}
-                </Modal.Body>
-                <Modal.Footer>
-                    <Button variant="secondary" onClick={() => setShowArchiveModal(false)}>
-                        Close
-                    </Button>
-                </Modal.Footer>
-            </Modal>
+
+
 
             <style>{`
                 .workorder-main-row {
