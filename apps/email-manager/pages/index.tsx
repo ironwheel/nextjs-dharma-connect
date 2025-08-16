@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useCallback } from 'react'
-import { Container, Modal, Button, Table } from 'react-bootstrap'
+import { Container, Modal, Button, Table, Spinner } from 'react-bootstrap'
 import WorkOrderList from '../components/WorkOrderList'
 import WorkOrderForm from '../components/WorkOrderForm'
 import { updateTableItem, authGetConfigValue, useWebSocket, getAllTableItemsFiltered, getTableItem } from 'sharedFrontend'
@@ -61,6 +61,7 @@ export default function Home() {
     const [userName, setUserName] = useState<string>('')
     const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
     const [loadingParticipantNames, setLoadingParticipantNames] = useState(false)
+    const [formLoading, setFormLoading] = useState(false)
 
     // Set isClient to true after component mounts
     React.useEffect(() => {
@@ -382,7 +383,20 @@ export default function Home() {
             <Modal show={showForm} onHide={handleFormClose} size="lg">
                 <Modal.Header closeButton className="bg-dark text-light">
                     <Modal.Title>
-                        {editingWorkOrderId ? 'Edit Work Order' : 'New Work Order'}
+                        <div className="d-flex align-items-center">
+                            <span className="me-2">
+                                {editingWorkOrderId ? 'Edit Work Order' : 'New Work Order'}
+                            </span>
+                            {formLoading && (
+                                <Spinner
+                                    as="span"
+                                    animation="border"
+                                    size="sm"
+                                    role="status"
+                                    aria-hidden="true"
+                                />
+                            )}
+                        </div>
                     </Modal.Title>
                 </Modal.Header>
                 <Modal.Body className="bg-dark text-light">
@@ -393,6 +407,7 @@ export default function Home() {
                         userPid={userPid}
                         userHash={userHash}
                         writePermission={writePermission}
+                        onLoadingChange={setFormLoading}
                     />
                 </Modal.Body>
             </Modal>

@@ -276,9 +276,64 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                             return newOrders
                         }
 
+                        // Check if we need to refresh campaign existence data
+                        const oldWorkOrder = prevOrders[index];
+                        const shouldRefreshCampaignData = checkIfCampaignDataNeedsRefresh(oldWorkOrder, updatedWorkOrder);
+
+                        // Log lock status changes for debugging
+                        if (oldWorkOrder.locked !== updatedWorkOrder.locked) {
+                            console.log(`[LOCK-STATUS] Work order ${updatedWorkOrder.id} lock status changed:`, {
+                                old: { locked: oldWorkOrder.locked, lockedBy: oldWorkOrder.lockedBy },
+                                new: { locked: updatedWorkOrder.locked, lockedBy: updatedWorkOrder.lockedBy }
+                            });
+                        }
+
                         // Simply update with the real data from DynamoDB
                         const newOrders = [...prevOrders]
                         newOrders[index] = updatedWorkOrder;
+
+                        // If campaign data needs refresh, trigger it
+                        if (shouldRefreshCampaignData) {
+                            // Use setTimeout to ensure state update completes first
+                            setTimeout(async () => {
+                                await prefetchCampaignExistence(updatedWorkOrder);
+                            }, 100);
+                        }
+
+                        // If any step reached an error state, also refresh the work order data to get updated lock status
+                        const hasErrorState = updatedWorkOrder.steps?.some(step => {
+                            const status = typeof step.status === 'string' ? step.status :
+                                (step.status && typeof step.status === 'object' && 'S' in step.status) ?
+                                    (step.status as { S: string }).S : 'ready';
+                            return status === 'error';
+                        });
+
+                        if (hasErrorState) {
+                            setTimeout(async () => {
+                                // Force refresh the work order data from database to get the correct lock status
+                                try {
+                                    const result = await getTableItem('work-orders', updatedWorkOrder.id, userPid, userHash);
+                                    if (result) {
+                                        const refreshedWorkOrder = result as WorkOrder;
+                                        setWorkOrdersLocal(prevOrders => {
+                                            const index = prevOrders.findIndex(wo => wo.id === updatedWorkOrder.id);
+                                            if (index !== -1) {
+                                                const newOrders = [...prevOrders];
+                                                newOrders[index] = refreshedWorkOrder;
+                                                return newOrders;
+                                            }
+                                            return prevOrders;
+                                        });
+                                        console.log(`[REFRESH] Work order ${updatedWorkOrder.id} data refreshed from database:`, {
+                                            locked: refreshedWorkOrder.locked,
+                                            lockedBy: refreshedWorkOrder.lockedBy
+                                        });
+                                    }
+                                } catch (error) {
+                                    console.error(`[REFRESH] Failed to refresh work order ${updatedWorkOrder.id}:`, error);
+                                }
+                            }, 200);
+                        }
 
                         return newOrders
                     })
@@ -335,15 +390,109 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                         return newOrders
                     }
 
+                    // Check if we need to refresh campaign existence data
+                    const oldWorkOrder = prevOrders[index];
+                    const shouldRefreshCampaignData = checkIfCampaignDataNeedsRefresh(oldWorkOrder, updatedWorkOrder);
+
+                    // Log lock status changes for debugging
+                    if (oldWorkOrder.locked !== updatedWorkOrder.locked) {
+                        console.log(`[LOCK-STATUS] Work order ${updatedWorkOrder.id} lock status changed:`, {
+                            old: { locked: oldWorkOrder.locked, lockedBy: oldWorkOrder.lockedBy },
+                            new: { locked: updatedWorkOrder.locked, lockedBy: updatedWorkOrder.lockedBy }
+                        });
+                    }
+
                     // Simply update with the real data from DynamoDB
                     const newOrders = [...prevOrders]
                     newOrders[index] = updatedWorkOrder;
+
+                    // If campaign data needs refresh, trigger it
+                    if (shouldRefreshCampaignData) {
+                        // Use setTimeout to ensure state update completes first
+                        setTimeout(async () => {
+                            await prefetchCampaignExistence(updatedWorkOrder);
+                        }, 100);
+                    }
+
+                    // If any step reached an error state, also refresh the work order data to get updated lock status
+                    const hasErrorState = updatedWorkOrder.steps?.some(step => {
+                        const status = typeof step.status === 'string' ? step.status :
+                            (step.status && typeof step.status === 'object' && 'S' in step.status) ?
+                                (step.status as { S: string }).S : 'ready';
+                        return status === 'error';
+                    });
+
+                    if (hasErrorState) {
+                        setTimeout(async () => {
+                            // Force refresh the work order data from database to get the correct lock status
+                            try {
+                                const result = await getTableItem('work-orders', updatedWorkOrder.id, userPid, userHash);
+                                if (result) {
+                                    const refreshedWorkOrder = result as WorkOrder;
+                                    setWorkOrdersLocal(prevOrders => {
+                                        const index = prevOrders.findIndex(wo => wo.id === updatedWorkOrder.id);
+                                        if (index !== -1) {
+                                            const newOrders = [...prevOrders];
+                                            newOrders[index] = refreshedWorkOrder;
+                                            return newOrders;
+                                        }
+                                        return prevOrders;
+                                    });
+                                    console.log(`[REFRESH] Work order ${updatedWorkOrder.id} data refreshed from database:`, {
+                                        locked: refreshedWorkOrder.locked,
+                                        lockedBy: refreshedWorkOrder.lockedBy
+                                    });
+                                }
+                            } catch (error) {
+                                console.error(`[REFRESH] Failed to refresh work order ${updatedWorkOrder.id}:`, error);
+                            }
+                        }, 200);
+                    }
 
                     return newOrders
                 })
             }
         }
     }, [lastMessage])
+
+    // Helper function to check if campaign data needs to be refreshed
+    const checkIfCampaignDataNeedsRefresh = (oldWorkOrder: WorkOrder, newWorkOrder: WorkOrder): boolean => {
+        if (!oldWorkOrder || !newWorkOrder || !oldWorkOrder.steps || !newWorkOrder.steps) {
+            return false;
+        }
+
+        // Helper to extract step status
+        const getStepStatus = (steps: WorkOrder['steps'], stepName: string): string => {
+            const stepObj = steps.find((s) => {
+                const name = typeof s.name === 'string' ? s.name :
+                    (s.name && typeof s.name === 'object' && 'S' in s.name) ? (s.name as { S: string }).S : '';
+                return name === stepName;
+            });
+
+            if (!stepObj) return 'ready';
+
+            const status = typeof stepObj.status === 'string' ? stepObj.status :
+                (stepObj.status && typeof stepObj.status === 'object' && 'S' in stepObj.status) ?
+                    (stepObj.status as { S: string }).S : 'ready';
+            return status;
+        };
+
+        // Check if Dry-Run step status changed to a terminal state
+        const oldDryRunStatus = getStepStatus(oldWorkOrder.steps, 'Dry-Run');
+        const newDryRunStatus = getStepStatus(newWorkOrder.steps, 'Dry-Run');
+        const dryRunCompleted = (oldDryRunStatus !== 'complete' && oldDryRunStatus !== 'error' && oldDryRunStatus !== 'exception') &&
+            (newDryRunStatus === 'complete' || newDryRunStatus === 'error' || newDryRunStatus === 'exception');
+
+        // Check if Send step status changed to a terminal state
+        const oldSendStatus = getStepStatus(oldWorkOrder.steps, 'Send');
+        const newSendStatus = getStepStatus(newWorkOrder.steps, 'Send');
+        const sendCompleted = (oldSendStatus !== 'complete' && oldSendStatus !== 'error' && oldSendStatus !== 'exception') &&
+            (newSendStatus === 'complete' || newSendStatus === 'error' || newSendStatus === 'exception');
+
+        return dryRunCompleted || sendCompleted;
+    };
+
+
 
     // Update parent's workOrders state when local state changes
     useEffect(() => {
@@ -552,6 +701,32 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                         return wo;
                     });
                 });
+            } else {
+                // If stopping a step, implement optimistic UI update to show "ready" status
+                setWorkOrdersLocal(prevOrders => {
+                    return prevOrders.map(wo => {
+                        if (wo.id === id) {
+                            return {
+                                ...wo,
+                                steps: wo.steps.map(s => {
+                                    const stepNameStr = typeof s.name === 'string' ? s.name :
+                                        (s.name && typeof s.name === 'object' && 'S' in s.name) ? (s.name as { S: string }).S : '';
+
+                                    if (stepNameStr === stepName) {
+                                        return {
+                                            ...s,
+                                            status: 'ready',
+                                            message: 'Ready to start',
+                                            isActive: false
+                                        };
+                                    }
+                                    return s;
+                                })
+                            };
+                        }
+                        return wo;
+                    });
+                });
             }
 
             // Determine the action to send to the email-agent
@@ -577,6 +752,25 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
             return workOrder.sendContinuously ? 'Send-Continuously' : 'Send-Once';
         }
         return stepName;
+    };
+
+    const getStepHelpText = (stepName: string, workOrder: WorkOrder) => {
+        switch (stepName) {
+            case 'Count':
+                return '(sanity check count of eligible students)';
+            case 'Prepare':
+                return '(copy and check email in all languages from Mailchimp)';
+            case 'Dry-Run':
+                return '(exercise send process without sending, show eligible recipients)';
+            case 'Test':
+                return '(send email to selected testers to check formatting and test links)';
+            case 'Send':
+                return workOrder.sendContinuously
+                    ? '(continuously evaluate eligibility and send email for a period of time)'
+                    : '(evaluate eligiblity once, send email, then stop)';
+            default:
+                return '';
+        }
     };
 
     if (loading) {
@@ -683,6 +877,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                                                             📁
                                                         </Button>
                                                     )}
+
                                                 </div>
                                             </td>
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
@@ -776,6 +971,14 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                                                                         }}>
                                                                             {getDisplayStepName(stepName, workOrder)}
                                                                         </span>
+                                                                        <div style={{
+                                                                            fontSize: '0.75rem',
+                                                                            color: '#adb5bd',
+                                                                            marginTop: '2px',
+                                                                            fontStyle: 'italic'
+                                                                        }}>
+                                                                            {getStepHelpText(stepName, workOrder)}
+                                                                        </div>
                                                                         {stepStatus !== 'ready' && (
                                                                             <span
                                                                                 style={{

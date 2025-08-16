@@ -62,6 +62,7 @@ interface WorkOrderFormProps {
     userPid: string
     userHash: string
     writePermission: boolean
+    onLoadingChange?: (loading: boolean) => void
 }
 
 /**
@@ -135,7 +136,7 @@ async function getExistingWorkOrders(
     }
 }
 
-export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash, writePermission }: WorkOrderFormProps) {
+export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash, writePermission, onLoadingChange }: WorkOrderFormProps) {
     const [loading, setLoading] = useState(false)
     const [events, setEvents] = useState<Event[]>([])
     const [eventCode, setEventCode] = useState('')
@@ -232,6 +233,13 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
 
         loadOptions()
     }, [])
+
+    // Notify parent component when loading state changes
+    useEffect(() => {
+        if (onLoadingChange) {
+            onLoadingChange(loading)
+        }
+    }, [loading, onLoadingChange])
 
     // Load work order if editing, but only after options are loaded
     useEffect(() => {
@@ -435,7 +443,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 structuralFieldsChanged =
                     existingWorkOrder.eventCode !== eventCode ||
                     existingWorkOrder.subEvent !== subEvent ||
-                    existingWorkOrder.stage !== stage
+                    existingWorkOrder.stage !== stage ||
+                    JSON.stringify(existingWorkOrder.languages || {}) !== JSON.stringify(languages || {})
 
                 shouldResetSteps = structuralFieldsChanged
                 existingSteps = existingWorkOrder.steps || []
@@ -559,50 +568,36 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
     return (
         <Form onSubmit={handleSubmit} className="text-light">
             <div className="d-flex justify-content-between align-items-center mb-3">
-                {id && (
-                    <Button
-                        variant="danger"
-                        onClick={async () => {
-                            if (window.confirm('Are you sure you want to delete this work order?')) {
-                                setLoading(true)
-                                try {
-                                    await deleteTableItem('work-orders', id, userPid, userHash)
-                                    toast.success('Work order deleted')
-                                    onSave()
-                                } catch {
-                                    toast.error('Failed to delete work order')
-                                } finally {
-                                    setLoading(false)
-                                }
-                            }
-                        }}
-                        style={{ borderRadius: '50%', width: 40, height: 40, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 8 }}
-                        aria-label="Delete Work Order"
-                        disabled={loading || !writePermission}
-                    >
-                        &#128465;
-                    </Button>
-                )}
                 <div className="d-flex gap-2 align-items-center">
+                    {id && (
+                        <Button
+                            variant="danger"
+                            onClick={async () => {
+                                if (window.confirm('Are you sure you want to delete this work order?')) {
+                                    setLoading(true)
+                                    try {
+                                        await deleteTableItem('work-orders', id, userPid, userHash)
+                                        toast.success('Work order deleted')
+                                        onSave()
+                                    } catch {
+                                        toast.error('Failed to delete work order')
+                                    } finally {
+                                        setLoading(false)
+                                    }
+                                }
+                            }}
+                            style={{ borderRadius: '50%', width: 40, height: 40, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 8 }}
+                            aria-label="Delete Work Order"
+                            disabled={loading || !writePermission}
+                        >
+                            &#128465;
+                        </Button>
+                    )}
                     <Button variant="secondary" onClick={onCancel} disabled={loading}>
                         Cancel
                     </Button>
                     <Button variant="primary" type="submit" disabled={loading || !writePermission}>
-                        {loading ? (
-                            <>
-                                <Spinner
-                                    as="span"
-                                    animation="border"
-                                    size="sm"
-                                    role="status"
-                                    aria-hidden="true"
-                                    className="me-2"
-                                />
-                                Saving...
-                            </>
-                        ) : (
-                            'Save'
-                        )}
+                        Save
                     </Button>
                 </div>
             </div>
