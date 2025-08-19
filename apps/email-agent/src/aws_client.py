@@ -750,6 +750,23 @@ class AWSClient:
             print(f"Error getting item from {table_name}: {e}")
             return None
 
+    def delete_dryrun_recipients(self, campaign_string: str):
+        """Delete existing dry run recipient records for a campaign string before beginning a new dry run."""
+        try:
+            table = self.dynamodb.Table(DRYRUN_RECIPIENTS_TABLE)
+            
+            # Check if record exists
+            response = table.get_item(Key={'campaignString': campaign_string})
+            if 'Item' in response:
+                # Record exists, delete it
+                table.delete_item(Key={'campaignString': campaign_string})
+                print(f"Deleted existing dry run recipient record for campaign: {campaign_string}")
+            else:
+                # No existing record to delete
+                print(f"No existing dry run recipient record found for campaign: {campaign_string}")
+        except Exception as e:
+            print(f"Error deleting dry run recipient records for campaign {campaign_string}: {e}")
+
     def append_dryrun_recipient(self, campaign_string: str, entry: dict):
         """Append a recipient to the dryrun_recipients table."""
         try:
