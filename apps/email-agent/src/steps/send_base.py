@@ -97,6 +97,11 @@ class SendBaseStep:
                 campaign_string = build_campaign_string(work_order.eventCode, work_order.subEvent, work_order.stage, lang)
                 await self._update_progress(work_order, f"Campaign string for {lang}: {campaign_string}", step.name)
                 
+                # For dry runs, delete existing recipient records before beginning
+                if self.dryrun:
+                    await self._update_progress(work_order, f"Clearing existing dry run records for {lang}...", step.name)
+                    self.aws_client.delete_dryrun_recipients(campaign_string)
+                
                 # Find eligible students for this language
                 await self._update_progress(work_order, f"Finding eligible students for {lang}...", step.name)
                 eligible_students = find_eligible_students(
