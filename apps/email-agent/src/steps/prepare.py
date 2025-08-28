@@ -307,18 +307,18 @@ class PrepareStep:
         # Get stage record to check QA fields
         stage_record = self._get_stage_record(work_order.stage)
         
-        # Check zoom ID if qaStepCheckZoomId is enabled
-        if stage_record.get('qaStepCheckZoomId', False):
-            self.log('debug', f"[DEBUG] QA Check - Stage: {work_order.stage}, inPerson: {work_order.inPerson}, zoomId: {work_order.zoomId}")
+        # Check zoom link if qaStepCheckZoomLink is enabled
+        if stage_record.get('qaStepCheckZoomLink', False):
+            self.log('debug', f"[DEBUG] QA Check - Stage: {work_order.stage}, inPerson: {work_order.inPerson}, zoomLink: {work_order.zoomLink}")
             if work_order.inPerson:
-                # Skip zoom ID check for in-person events
-                self.log('debug', f"[DEBUG] In-person event detected, skipping zoom ID check")
-            elif not work_order.zoomId:
-                raise ValueError("QA Failure: zoom ID required for stage")
+                # Skip zoom link check for in-person events
+                self.log('debug', f"[DEBUG] In-person event detected, skipping zoom link check")
+            elif not work_order.zoomLink:
+                raise ValueError("QA Failure: zoom link required for stage")
             else:
-                zoom_links = re.findall(r'https://[^\s"]*zoom\.us/[^\s"]*', html)
-                if not any(work_order.zoomId in link for link in zoom_links):
-                    raise ValueError("QA Failure: zoom link with zoom ID not found")
+                # Check if the exact zoom link is present in the HTML content
+                if work_order.zoomLink not in html:
+                    raise ValueError("QA Failure: exact zoom link not found in email content")
 
         # Check registration links if regLinkPresent is enabled
         reg_link_present = getattr(work_order, 'regLinkPresent', True)

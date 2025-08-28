@@ -149,7 +149,7 @@ class WorkOrder:
         self.createdBy = None
         self.replyTo = None
         self.fromName = None
-        self.zoomId = None  # Add zoomId field
+        self.zoomLink = None  # Add zoomLink field
         self.inPerson = None  # Add inPerson field
         self.config = {}  # Add config field for pool and other configuration
         self.testers = []  # Add testers field for test step
@@ -182,7 +182,7 @@ class WorkOrder:
             'createdBy': self.createdBy,
             'replyTo': self.replyTo,
             'fromName': self.fromName,
-            'zoomId': self.zoomId,
+            'zoomLink': self.zoomLink,
             'inPerson': self.inPerson,
             'config': self.config,
             'testers': self.testers,
@@ -216,7 +216,7 @@ class WorkOrder:
             'createdBy': {'S': self.createdBy} if self.createdBy else {'NULL': True},
             'replyTo': {'S': self.replyTo} if self.replyTo else {'NULL': True},
             'fromName': {'S': self.fromName} if self.fromName else {'NULL': True},
-            'zoomId': {'S': self.zoomId} if self.zoomId else {'NULL': True},
+            'zoomLink': {'S': self.zoomLink} if self.zoomLink else {'NULL': True},
             'inPerson': {'BOOL': self.inPerson} if self.inPerson is not None else {'NULL': True},
             'config': {'M': {k: {'S': v} for k, v in self.config.items()}} if self.config else {'NULL': True},
             'testers': {'L': [{'S': tester} for tester in self.testers]} if self.testers else {'NULL': True},
@@ -304,7 +304,7 @@ class WorkOrder:
                 work_order.createdBy = data.get('createdBy', {}).get('S')
                 work_order.replyTo = data.get('replyTo', {}).get('S')
                 work_order.fromName = data.get('fromName', {}).get('S')
-                work_order.zoomId = data.get('zoomId', {}).get('S')
+                work_order.zoomLink = data.get('zoomLink', {}).get('S')
                 work_order.inPerson = data.get('inPerson', {}).get('BOOL')
                 
                 # Handle config with better error handling
@@ -346,7 +346,7 @@ class WorkOrder:
                 work_order.createdBy = data.get('createdBy')
                 work_order.replyTo = data.get('replyTo')
                 work_order.fromName = data.get('fromName')
-                work_order.zoomId = data.get('zoomId')
+                work_order.zoomLink = data.get('zoomLink')
                 work_order.inPerson = data.get('inPerson', False)
                 work_order.config = data.get('config', {})
                 work_order.testers = data.get('testers', [])
