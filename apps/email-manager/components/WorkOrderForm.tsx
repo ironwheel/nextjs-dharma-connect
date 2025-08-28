@@ -10,7 +10,7 @@ interface WorkOrder {
     subEvent: string;
     stage: string;
     account?: string;
-    zoomId?: string;
+    zoomLink?: string;
     inPerson?: boolean;
     languages?: Record<string, boolean>;
     subjects?: Record<string, string>;
@@ -46,7 +46,8 @@ interface Stage {
     description: string;
     order?: number;
     parentStage?: string;
-    qaStepCheckZoomId?: boolean;
+    qaStepCheckZoomLink?: boolean;
+    qaStepCheckRegLink?: boolean;
 }
 
 interface InheritedFields {
@@ -148,7 +149,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
     const [subjects, setSubjects] = useState<{ [lang: string]: string }>({})
     const [accountList, setAccountList] = useState<string[]>([])
     const [account, setAccount] = useState('')
-    const [zoomId, setZoomId] = useState('')
+    const [zoomLink, setZoomLink] = useState('')
     const [inPerson, setInPerson] = useState(false)
     const [optionsLoaded, setOptionsLoaded] = useState(false)
     const [testers, setTesters] = useState<string[]>([])
@@ -253,7 +254,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     setSubjects(response.subjects || {})
                     setAccount(response.account)
                     setLanguages(response.languages || {})
-                    setZoomId(response.zoomId || '')
+                    setZoomLink(response.zoomLink || '')
                     setInPerson(response.inPerson || false)
                     setTesters(response.testers || [])
                     setSendContinuously(response.sendContinuously || false)
@@ -280,7 +281,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             setSubjects(response.subjects || {})
             setAccount(response.account || '')
             setLanguages(response.languages || {})
-            setZoomId(response.zoomId || '')
+            setZoomLink(response.zoomLink || '')
             setInPerson(response.inPerson || false)
             setTesters(response.testers || [])
             setSendContinuously(response.sendContinuously || false)
@@ -357,6 +358,14 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             }
         }
     }, [eventCode, subEvent])
+
+    // Sync selectedStageRecord when stage changes and stages are available
+    useEffect(() => {
+        if (stage && stages.length > 0) {
+            const stageRecord = stages.find(s => s.stage === stage)
+            setSelectedStageRecord(stageRecord || null)
+        }
+    }, [stage, stages])
 
     // New function to handle stage selection with immediate validation
     const handleStageChange = async (newStage: string) => {
@@ -525,7 +534,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 subjects,
                 account,
                 createdBy: userPid,
-                zoomId,
+                zoomLink,
                 inPerson,
                 testers,
                 sendContinuously,
@@ -763,32 +772,51 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 </Form.Select>
             </Form.Group>
 
-            {selectedStageRecord?.qaStepCheckZoomId && (
+            {selectedStageRecord?.qaStepCheckZoomLink && (
+                    <Form.Group className="mb-3">
+                        {inPerson ? (
+                            <>
+                                <Form.Label>Event Type</Form.Label>
+                                <div className="form-control bg-dark text-light border-secondary" style={{ padding: '0.375rem 0.75rem', backgroundColor: '#212529', color: '#fff' }}>
+                                    <Badge bg="success" className="me-2">In-Person</Badge>
+                                    This is an in-person event - no Zoom ID required
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <Form.Label>Zoom Meeting Link</Form.Label>
+                                <Form.Control
+                                    type="url"
+                                    value={zoomLink}
+                                    onChange={e => setZoomLink(e.target.value)}
+                                    placeholder="https://us02web.zoom.us/j/1234567890?pwd=..."
+                                    className="bg-dark text-light border-secondary"
+                                    required
+                                />
+                                <Form.Text className="text-muted">
+                                    Required for this stage
+                                </Form.Text>
+                                <Form.Text className="text-info small">
+                                    💡 Please copy the entire Zoom link directly from Zoom to avoid errors
+                                </Form.Text>
+                            </>
+                        )}
+                    </Form.Group>
+                )}
+
+            {selectedStageRecord?.qaStepCheckRegLink && (
                 <Form.Group className="mb-3">
-                    {inPerson ? (
-                        <>
-                            <Form.Label>Event Type</Form.Label>
-                            <div className="form-control bg-dark text-light border-secondary" style={{ padding: '0.375rem 0.75rem', backgroundColor: '#212529', color: '#fff' }}>
-                                <Badge bg="success" className="me-2">In-Person</Badge>
-                                This is an in-person event - no Zoom ID required
-                            </div>
-                        </>
-                    ) : (
-                        <>
-                            <Form.Label>Zoom ID</Form.Label>
-                            <Form.Control
-                                type="text"
-                                value={zoomId}
-                                onChange={e => setZoomId(e.target.value)}
-                                placeholder="Enter Zoom ID"
-                                className="bg-dark text-light border-secondary"
-                                required
-                            />
-                            <Form.Text className="text-muted">
-                                Required for this stage
-                            </Form.Text>
-                        </>
-                    )}
+                    <Form.Check
+                        type="checkbox"
+                        id="regLinkPresent"
+                        label="Registration Link Present"
+                        checked={regLinkPresent}
+                        onChange={e => setRegLinkPresent(e.target.checked)}
+                        className="bg-dark text-light border-secondary"
+                    />
+                    <Form.Text className="text-muted">
+                        When enabled, the Prepare step will check for registration links with proper parameters
+                    </Form.Text>
                 </Form.Group>
             )}
 
@@ -825,20 +853,6 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 />
                 <Form.Text className="text-muted">
                     When enabled, the Prepare step will check for the ||name|| field in HTML content
-                </Form.Text>
-            </Form.Group>
-
-            <Form.Group className="mb-3">
-                <Form.Check
-                    type="checkbox"
-                    id="regLinkPresent"
-                    label="Registration Link Present"
-                    checked={regLinkPresent}
-                    onChange={e => setRegLinkPresent(e.target.checked)}
-                    className="bg-dark text-light border-secondary"
-                />
-                <Form.Text className="text-muted">
-                    When enabled, the Prepare step will check for registration links with proper parameters
                 </Form.Text>
             </Form.Group>
 
