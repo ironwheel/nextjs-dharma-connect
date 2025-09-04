@@ -57,9 +57,12 @@ interface WorkOrderListProps {
     currentWorkOrderIndex: number
     setCurrentWorkOrderIndex: (index: number) => void
     setWorkOrders: (workOrders: WorkOrder[]) => void
+    onWorkOrderIndexChange?: (updates: { workOrderId?: string }) => Promise<boolean>
+    editedWorkOrderId?: string | null
+    setEditedWorkOrderId?: (id: string | null) => void
 }
 
-export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, userHash, newlyCreatedWorkOrder, writePermission, currentWorkOrderIndex, setCurrentWorkOrderIndex, setWorkOrders }: WorkOrderListProps) {
+export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, userHash, newlyCreatedWorkOrder, writePermission, currentWorkOrderIndex, setCurrentWorkOrderIndex, setWorkOrders, onWorkOrderIndexChange, editedWorkOrderId, setEditedWorkOrderId }: WorkOrderListProps) {
     const [workOrders, setWorkOrdersLocal] = useState<WorkOrder[]>([])
     const [loading, setLoading] = useState(true)
     const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
@@ -78,6 +81,8 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
     const [eventNames, setEventNames] = useState<Record<string, string>>({});
     const [emailDisplayPermission, setEmailDisplayPermission] = useState<boolean>(true);
     const [exportCSVPermission, setExportCSVPermission] = useState<boolean>(true);
+    const [restorationRetryCount, setRestorationRetryCount] = useState<number>(0);
+
 
 
 
@@ -230,6 +235,35 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
     useEffect(() => {
         loadWorkOrders()
     }, [refreshTrigger, loadWorkOrders])
+
+    // Handle edited work order restoration after refresh
+    useEffect(() => {
+        if (editedWorkOrderId && workOrders.length > 0 && setEditedWorkOrderId) {
+            const editedWorkOrderIndex = workOrders.findIndex(wo => wo.id === editedWorkOrderId);
+            if (editedWorkOrderIndex !== -1) {
+                setCurrentWorkOrderIndex(editedWorkOrderIndex);
+                setEditedWorkOrderId(null); // Clear the edited work order ID
+                setRestorationRetryCount(0); // Reset retry count on success
+            } else {
+                // Increment retry count
+                setRestorationRetryCount(prev => prev + 1);
+                
+                // Clear after max retries or timeout
+                if (restorationRetryCount >= 5) {
+                    setEditedWorkOrderId(null);
+                    setRestorationRetryCount(0);
+                } else {
+                    // Set a timeout as backup
+                    const timeoutId = setTimeout(() => {
+                        setEditedWorkOrderId(null);
+                        setRestorationRetryCount(0);
+                    }, 5000); // 5 second timeout
+                    
+                    return () => clearTimeout(timeoutId);
+                }
+            }
+        }
+    }, [workOrders, editedWorkOrderId, setEditedWorkOrderId, restorationRetryCount]);
 
     // Load email display permission
     useEffect(() => {
@@ -500,20 +534,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
     }, [workOrders, setWorkOrders])
 
     useEffect(() => {
-        // If a new work order is added, select the newest one (by createdAt)
-        if (workOrders.length > prevWorkOrdersRef.current.length) {
-            // Find the newest work order by createdAt
-            let newestIndex = 0;
-            let newestDate = new Date(workOrders[0]?.createdAt || '1970-01-01').getTime();
-            for (let i = 1; i < workOrders.length; i++) {
-                const d = new Date(workOrders[i].createdAt || '1970-01-01').getTime();
-                if (d > newestDate) {
-                    newestDate = d;
-                    newestIndex = i;
-                }
-            }
-            setCurrentWorkOrderIndex(newestIndex);
-        }
+        // Update the previous work orders reference for tracking changes
         prevWorkOrdersRef.current = workOrders;
     }, [workOrders]);
 
@@ -540,10 +561,19 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
             // Select the newly created work order
             setCurrentWorkOrderIndex(0);
 
+            // Persist the newly created work order selection
+            if (newlyCreatedWorkOrder.id && onWorkOrderIndexChange) {
+                onWorkOrderIndexChange({
+                    workOrderId: newlyCreatedWorkOrder.id
+                }).catch(error => {
+                    console.error('Failed to persist newly created work order selection:', error);
+                });
+            }
+
             // Clear the newly created work order after handling it
             // This will be done by the parent component
         }
-    }, [newlyCreatedWorkOrder]);
+    }, [newlyCreatedWorkOrder, onWorkOrderIndexChange]);
 
     // Helper to prefetch campaign existence for all enabled languages for a work order
     const prefetchCampaignExistence = async (workOrder: WorkOrder) => {
@@ -908,19 +938,6 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                                                         (step.isActive && typeof step.isActive === 'object' && 'BOOL' in step.isActive) ?
                                                             (step.isActive as { BOOL: boolean }).BOOL : false;
 
-                                                    // Debug logging for step data
-                                                    if (stepStatus === 'error') {
-                                                        console.log('[DEBUG] Step data for', workOrder.id, stepName, ':', {
-                                                            step,
-                                                            stepName,
-                                                            stepStatus,
-                                                            stepMessage,
-                                                            stepIsActive,
-                                                            rawMessage: step.message,
-                                                            messageType: typeof step.message,
-                                                            messageKeys: step.message && typeof step.message === 'object' ? Object.keys(step.message) : 'N/A'
-                                                        });
-                                                    }
 
                                                     const isWorking = stepStatus === 'working' || stepIsActive;
                                                     const isComplete = stepStatus === 'complete';
