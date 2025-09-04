@@ -76,17 +76,14 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
      */
     const connect = useCallback((url: string) => {
         if (ws.current?.readyState === WebSocket.OPEN) {
-            console.log('[WebSocket] Already connected');
             return;
         }
 
-        console.log('[WebSocket] Creating new WebSocket connection to:', url);
         ws.current = new WebSocket(url);
         setStatus('connecting');
         setIsReady(false);
 
         ws.current.onopen = () => {
-            console.log('[WebSocket] Connection opened successfully');
             setStatus('open');
             setIsReady(true);
             // Reset reconnection attempts on successful connection
@@ -103,23 +100,18 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
                 if (ws.current?.readyState === WebSocket.OPEN) {
                     // Send a ping message to get the connection ID
                     const pingMessage = { type: 'ping' };
-                    console.log('[WebSocket] Sending ping message:', JSON.stringify(pingMessage));
                     ws.current?.send(JSON.stringify(pingMessage));
-                } else {
-                    console.warn('[WebSocket] Connection not ready for ping, skipping');
                 }
             }, 100);
         };
 
         ws.current.onclose = (event) => {
-            console.log('[WebSocket] Connection closed:', event.code, event.reason);
             setStatus('closed');
             setIsReady(false);
             setConnectionId(null);
 
             // If the connection was closed unexpectedly (not by user), attempt reconnection
             if (event.code !== 1000) { // 1000 is normal closure
-                console.log('[WebSocket] Unexpected closure, attempting reconnection...');
 
                 // Trigger error event for components to handle
                 window.dispatchEvent(new CustomEvent('websocket-error', {
@@ -139,7 +131,6 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
         };
 
         ws.current.onerror = (error) => {
-            console.error('[WebSocket] Connection error:', error);
             setStatus('closed');
             setIsReady(false);
             // Trigger a custom error event that components can listen to
@@ -149,22 +140,18 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
         };
 
         ws.current.onmessage = (event) => {
-            console.log('[WebSocket] Received message:', event.data);
             try {
                 const data = JSON.parse(event.data);
-                console.log('[WebSocket] Parsed message data:', data);
 
                 // If this is a connection ID response, store it
                 if (data.type === 'connectionId') {
                     setConnectionId(data.connectionId);
-                    console.log('[WebSocket] Connected with ID:', data.connectionId);
                 } else {
                     // Store the last message for components to access
-                    console.log('[WebSocket] Storing message:', data);
                     setLastMessage(data);
                 }
             } catch (error) {
-                console.error('[WebSocket] Failed to parse message:', error);
+                // Failed to parse message
             }
         };
     }, []);
@@ -175,13 +162,11 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
      */
     const attemptReconnection = useCallback(async () => {
         if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
-            console.log('[WebSocket] Max reconnection attempts reached, stopping automatic reconnection');
             return;
         }
 
         // Check if we're on an auth route - don't reconnect on auth routes
         if (isAuthRoute(router.pathname)) {
-            console.log('[WebSocket] Skipping reconnection on auth route:', router.pathname);
             return;
         }
 
@@ -193,7 +178,6 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
             maxReconnectDelay
         );
 
-        console.log(`[WebSocket] Attempting reconnection ${reconnectAttemptsRef.current}/${maxReconnectAttempts} in ${Math.round(delay)}ms`);
 
         reconnectTimeoutRef.current = setTimeout(async () => {
             try {
@@ -202,7 +186,6 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
                 const hash = urlParams.get('hash');
 
                 if (!pid || !hash) {
-                    console.warn('[WebSocket] No pid/hash found for reconnection');
                     return;
                 }
 
@@ -210,12 +193,10 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
                 if ('websocketUrl' in details && details.websocketUrl) {
                     connect(details.websocketUrl);
                 } else {
-                    console.error('[WebSocket] Invalid connection details during reconnection:', details);
                     // Try again after a delay
                     attemptReconnection();
                 }
             } catch (err) {
-                console.error('[WebSocket] Reconnection failed:', err);
                 // Try again after a delay
                 attemptReconnection();
             }
@@ -235,7 +216,6 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
             // Only attempt periodic reconnection if we're not currently connected
             // and not on an auth route
             if (status === 'closed' && !isAuthRoute(router.pathname)) {
-                console.log('[WebSocket] Periodic reconnection check - attempting to reconnect');
                 attemptReconnection();
             }
         }, periodicReconnectDelay);
@@ -246,7 +226,6 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
      * @description Disconnects from the WebSocket server.
      */
     const disconnect = useCallback(() => {
-        console.log('[WebSocket] Disconnecting...');
 
         // Clear any pending reconnection attempts
         if (reconnectTimeoutRef.current) {
@@ -280,8 +259,6 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
     const sendMessage = useCallback((message: any) => {
         if (ws.current?.readyState === WebSocket.OPEN && isReady) {
             ws.current.send(JSON.stringify(message));
-        } else {
-            console.warn('WebSocket is not connected or not ready');
         }
     }, [isReady]);
 
@@ -291,7 +268,6 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
 
         // Guard against duplicate connections in React Strict Mode
         if (hasConnected.current) {
-            console.log('[WebSocket] Already attempted connection, skipping duplicate');
             return;
         }
 
@@ -302,27 +278,20 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
         if (pid && hash) {
             // Check if we're on an auth route
             if (isAuthRoute(router.pathname)) {
-                console.log('[WebSocket] Skipping auto-connect on auth route:', router.pathname);
                 return;
             }
 
-            console.log('[WebSocket] Attempting auto-connect on route:', router.pathname);
             hasConnected.current = true; // Mark that we've attempted connection
 
             getWebSocketConnection(resource, pid, hash)
                 .then((details) => {
                     if ('websocketUrl' in details && details.websocketUrl) {
                         connect(details.websocketUrl);
-                    } else {
-                        console.error('[WebSocket] Invalid connection details:', details);
                     }
                 })
                 .catch((err) => {
-                    console.error('[WebSocket] Failed to get connection:', err);
                     hasConnected.current = false; // Reset on error to allow retry
                 });
-        } else {
-            console.warn('[WebSocket] No pid/hash found in URL, skipping auto-connect');
         }
         // Only run once on mount
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -346,7 +315,6 @@ export function WebSocketProvider({ children, resource = 'work-orders' }: WebSoc
         const handleManualPing = () => {
             if (ws.current?.readyState === WebSocket.OPEN) {
                 const pingMessage = { type: 'ping' };
-                console.log('[WebSocket] Manual ping triggered:', JSON.stringify(pingMessage));
                 ws.current.send(JSON.stringify(pingMessage));
             }
         };

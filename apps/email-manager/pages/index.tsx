@@ -1,9 +1,9 @@
 "use client";
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useRef } from 'react'
 import { Container, Modal, Button, Table, Spinner } from 'react-bootstrap'
 import WorkOrderList from '../components/WorkOrderList'
 import WorkOrderForm from '../components/WorkOrderForm'
-import { updateTableItem, authGetConfigValue, useWebSocket, getAllTableItemsFiltered, getTableItem } from 'sharedFrontend'
+import { updateTableItem, authGetConfigValue, useWebSocket, getAllTableItemsFiltered, getTableItem, getTableItemOrNull } from 'sharedFrontend'
 
 // Define interface for work order
 interface WorkOrder {
@@ -62,6 +62,9 @@ export default function Home() {
     const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
     const [loadingParticipantNames, setLoadingParticipantNames] = useState(false)
     const [formLoading, setFormLoading] = useState(false)
+    const [editedWorkOrderId, setEditedWorkOrderId] = useState<string | null>(null)
+    const initialWorkOrdersLoaded = useRef(false)
+
 
     // Set isClient to true after component mounts
     React.useEffect(() => {
@@ -87,6 +90,57 @@ export default function Home() {
             setUserName(userPid)
         }
     }, [userPid, userHash])
+
+    // Fetch user's last used work order configuration
+    const fetchCurrentUserLastUsedConfig = useCallback(async () => {
+        try {
+            if (!userPid || userPid === 'default-user-pid') {
+                return null
+            }
+
+            const studentRecord = await getTableItemOrNull('students', userPid, userPid, userHash)
+            if (studentRecord && studentRecord.emailManagerLastUsedConfig) {
+                return studentRecord.emailManagerLastUsedConfig
+            } else {
+                return null
+            }
+        } catch (error) {
+            console.error('Error fetching user emailManagerLastUsedConfig:', error)
+            return null
+        }
+    }, [userPid, userHash])
+
+    // Update user's last used work order configuration
+    const updateUserEmailManagerLastUsedConfig = useCallback(async (updates: {
+        workOrderId?: string
+    }) => {
+        try {
+            if (!userPid || userPid === 'default-user-pid') {
+                return false
+            }
+
+            // Don't update if workOrderId is undefined
+            if (updates.workOrderId === undefined) {
+                return false
+            }
+
+            // Get current student record
+            const currentConfig = await fetchCurrentUserLastUsedConfig()
+
+            // Create or update the emailManagerLastUsedConfig
+            const updatedEmailManagerLastUsedConfig = {
+                ...(currentConfig || {}),
+                ...updates
+            }
+
+            // Update the student record
+            await updateTableItem('students', userPid, 'emailManagerLastUsedConfig', updatedEmailManagerLastUsedConfig, userPid, userHash)
+            return true
+        } catch (error) {
+            console.error('Error updating user emailManagerLastUsedConfig:', error)
+            return false
+        }
+    }, [userPid, userHash, fetchCurrentUserLastUsedConfig])
 
     // Fetch write permission
     React.useEffect(() => {
@@ -116,6 +170,85 @@ export default function Home() {
         loadUserName();
     }, [userPid, userHash, loadUserName]);
 
+    // Restore last used work order on startup (only once)
+    React.useEffect(() => {
+        const restoreLastUsedWorkOrder = async () => {
+            // Only restore once when work orders are first loaded
+            if (workOrders.length === 0 || initialWorkOrdersLoaded.current) return;
+            
+            // Mark that we've loaded initial work orders
+            initialWorkOrdersLoaded.current = true;
+            
+            try {
+                const userConfig = await fetchCurrentUserLastUsedConfig();
+                
+                if (userConfig?.workOrderId) {
+                    // Find the work order index by ID
+                    const workOrderIndex = workOrders.findIndex(wo => wo.id === userConfig.workOrderId);
+                    
+                    if (workOrderIndex !== -1) {
+                        setCurrentWorkOrderIndex(workOrderIndex);
+                    } else {
+                        setCurrentWorkOrderIndex(0);
+                    }
+                } else {
+                    setCurrentWorkOrderIndex(0);
+                }
+            } catch (error) {
+                console.error('Error restoring last used work order:', error);
+                setCurrentWorkOrderIndex(0);
+            }
+        };
+
+        restoreLastUsedWorkOrder();
+    }, [workOrders, fetchCurrentUserLastUsedConfig]);
+
+    // Keyboard navigation support
+    React.useEffect(() => {
+        const handleKeyDown = async (event: KeyboardEvent) => {
+            if (workOrders.length === 0) return;
+            
+            switch (event.key) {
+                case 'Home':
+                    event.preventDefault();
+                    if (currentWorkOrderIndex !== 0) {
+                        setCurrentWorkOrderIndex(0);
+                        const firstWorkOrder = workOrders[0];
+                        if (firstWorkOrder && firstWorkOrder.id) {
+                            try {
+                                await updateUserEmailManagerLastUsedConfig({
+                                    workOrderId: firstWorkOrder.id
+                                });
+                            } catch (error) {
+                                console.error('Failed to persist work order navigation (Home):', error);
+                            }
+                        }
+                    }
+                    break;
+                case 'End':
+                    event.preventDefault();
+                    const lastIndex = workOrders.length - 1;
+                    if (currentWorkOrderIndex !== lastIndex) {
+                        setCurrentWorkOrderIndex(lastIndex);
+                        const lastWorkOrder = workOrders[lastIndex];
+                        if (lastWorkOrder && lastWorkOrder.id) {
+                            try {
+                                await updateUserEmailManagerLastUsedConfig({
+                                    workOrderId: lastWorkOrder.id
+                                });
+                            } catch (error) {
+                                console.error('Failed to persist work order navigation (End):', error);
+                            }
+                        }
+                    }
+                    break;
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [workOrders, currentWorkOrderIndex, updateUserEmailManagerLastUsedConfig]);
+
     const handleNewWorkOrder = () => {
         setEditingWorkOrderId(undefined)
         setShowForm(true)
@@ -134,6 +267,15 @@ export default function Home() {
                 await updateTableItem('work-orders', editingWorkOrderId, 'locked', false, userPid, userHash)
                 await updateTableItem('work-orders', editingWorkOrderId, 'lockedBy', null, userPid, userHash)
 
+                // Persist the work order that was being edited
+                try {
+                    await updateUserEmailManagerLastUsedConfig({
+                        workOrderId: editingWorkOrderId
+                    });
+                } catch (error) {
+                    console.error('Failed to persist work order after edit:', error);
+                }
+
             } catch (err) {
                 // Log error but don't bother the user, as the lock will expire anyway.
                 console.error('Failed to unlock work order on form close:', err);
@@ -141,35 +283,78 @@ export default function Home() {
         }
 
         // If a new work order was created, store it for the list
-        if (createdWorkOrder) {
+        if (createdWorkOrder && createdWorkOrder.id) {
             setNewlyCreatedWorkOrder(createdWorkOrder)
+            
+            // Persist the newly created work order
+            try {
+                await updateUserEmailManagerLastUsedConfig({
+                    workOrderId: createdWorkOrder.id
+                });
+            } catch (error) {
+                console.error('Failed to persist newly created work order:', error);
+            }
+        } else if (editingWorkOrderId) {
+            // Store the edited work order ID for restoration after refresh
+            setEditedWorkOrderId(editingWorkOrderId);
+            
+            // Use a longer delay to ensure the editedWorkOrderId state is set before refresh
+            setTimeout(() => {
+                setRefreshCounter(prev => prev + 1);
+            }, 100) // Short delay to ensure state update
+        } else {
+            // For cases where neither new work order nor editing, use the original timing
+            setTimeout(() => {
+                setRefreshCounter(prev => prev + 1);
+                // Clear the newly created work order after the refresh
+                if (createdWorkOrder && createdWorkOrder.id) {
+                    setTimeout(() => {
+                        setNewlyCreatedWorkOrder(undefined)
+                    }, 1000)
+                }
+            }, 500)
         }
 
         setShowForm(false)
         setEditingWorkOrderId(undefined)
-
-        // Add a small delay to ensure DynamoDB has propagated the change
-        setTimeout(() => {
-            setRefreshCounter(prev => prev + 1)
-            // Clear the newly created work order after the refresh
-            if (createdWorkOrder) {
-                setTimeout(() => {
-                    setNewlyCreatedWorkOrder(undefined)
-                }, 1000)
-            }
-        }, 500)
     }
 
     // Navigation functions
-    const goToNextWorkOrder = () => {
+    const goToNextWorkOrder = async () => {
         if (currentWorkOrderIndex < workOrders.length - 1) {
-            setCurrentWorkOrderIndex(currentWorkOrderIndex + 1)
+            const newIndex = currentWorkOrderIndex + 1;
+            setCurrentWorkOrderIndex(newIndex);
+            
+            // Persist the new work order selection
+            const newWorkOrder = workOrders[newIndex];
+            if (newWorkOrder && newWorkOrder.id) {
+                try {
+                    await updateUserEmailManagerLastUsedConfig({
+                        workOrderId: newWorkOrder.id
+                    });
+                } catch (error) {
+                    console.error('Failed to persist work order navigation:', error);
+                }
+            }
         }
     }
 
-    const goToPreviousWorkOrder = () => {
+    const goToPreviousWorkOrder = async () => {
         if (currentWorkOrderIndex > 0) {
-            setCurrentWorkOrderIndex(currentWorkOrderIndex - 1)
+            const newIndex = currentWorkOrderIndex - 1;
+            setCurrentWorkOrderIndex(newIndex);
+            
+            // Persist the new work order selection
+            const newWorkOrder = workOrders[newIndex];
+            if (newWorkOrder && newWorkOrder.id) {
+                try {
+                    await updateUserEmailManagerLastUsedConfig({
+                        workOrderId: newWorkOrder.id
+                    });
+                } catch (error) {
+                    console.error('Failed to persist work order navigation:', error);
+                }
+            }
         }
     }
 
@@ -378,6 +563,9 @@ export default function Home() {
                 currentWorkOrderIndex={currentWorkOrderIndex}
                 setCurrentWorkOrderIndex={setCurrentWorkOrderIndex}
                 setWorkOrders={setWorkOrders}
+                onWorkOrderIndexChange={updateUserEmailManagerLastUsedConfig}
+                editedWorkOrderId={editedWorkOrderId}
+                setEditedWorkOrderId={setEditedWorkOrderId}
             />
 
             <Modal show={showForm} onHide={handleFormClose} size="lg">
