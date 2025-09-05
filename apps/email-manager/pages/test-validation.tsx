@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Container, Form } from 'react-bootstrap';
 import { toast } from 'react-toastify';
-import { getAllTableItems } from 'sharedFrontend';
+import { getAllTableItems, authGetConfigValue } from 'sharedFrontend';
 
 // Define interface for sub events
 interface SubEvent {
@@ -17,6 +17,7 @@ export default function TestValidationPage() {
     const [selectedStage, setSelectedStage] = useState('');
     const [subEvents, setSubEvents] = useState<string[]>([]);
     const [debugLog, setDebugLog] = useState<string[]>([]);
+    const [userEventAccess, setUserEventAccess] = useState<string[]>([]);
 
     const addDebugLog = (message: string) => {
         setDebugLog(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);
@@ -30,12 +31,35 @@ export default function TestValidationPage() {
                 const pid = urlParams.get('pid') || 'default-pid';
                 const hash = urlParams.get('hash') || 'default-hash';
 
-                const [eventsResp, stagesResp] = await Promise.all([
+                const [eventsResp, stagesResp, eventAccessResp] = await Promise.all([
                     getAllTableItems('events', pid, hash),
-                    getAllTableItems('stages', pid, hash)
+                    getAllTableItems('stages', pid, hash),
+                    authGetConfigValue(pid, hash, 'eventAccess')
                 ]);
 
-                const filteredEvents = Array.isArray(eventsResp) ? eventsResp.filter((ev) => ev.config && ev.config.emailManager) : [];
+                // Handle event access
+                if (Array.isArray(eventAccessResp)) {
+                    setUserEventAccess(eventAccessResp);
+                    addDebugLog(`User event access: ${eventAccessResp.join(', ')}`);
+                } else {
+                    setUserEventAccess([]);
+                    addDebugLog('No event access restrictions found, showing no events');
+                }
+
+                // Filter events based on user's event access list
+                let filteredEvents: Array<{ aid: string; name: string; config?: { emailManager?: boolean }; subEvents?: Record<string, SubEvent> }> = [];
+                if (Array.isArray(eventsResp)) {
+                    if (userEventAccess.length > 0 && !userEventAccess.includes('all')) {
+                        // If user has specific event access (not 'all'), filter by those events
+                        filteredEvents = eventsResp.filter((ev) => userEventAccess.includes(ev.aid));
+                    } else if (userEventAccess.includes('all')) {
+                        // If user has 'all' access, show all events
+                        filteredEvents = eventsResp;
+                    } else {
+                        // If no event access configured, show no events
+                        filteredEvents = [];
+                    }
+                }
                 setEvents(filteredEvents);
                 setStages(Array.isArray(stagesResp) ? stagesResp : []);
 
@@ -46,7 +70,14 @@ export default function TestValidationPage() {
                 addDebugLog(`Found ${stagesWithParent.length} stages with parentStage: ${stagesWithParent.map((s) => s.stage).join(', ')}`);
 
             } catch (error) {
-                addDebugLog(`Error loading data: ${error}`);
+                // Handle AUTH_UNKNOWN_CONFIG_KEY and other errors gracefully
+                if (error.message && error.message.includes('AUTH_UNKNOWN_CONFIG_KEY')) {
+                    addDebugLog('Event access not configured for user, showing no events');
+                } else {
+                    addDebugLog(`Error loading data: ${error}`);
+                }
+                setUserEventAccess([]);
+                setEvents([]);
                 toast.error('Failed to load data');
             }
         };

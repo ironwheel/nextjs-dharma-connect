@@ -60,9 +60,10 @@ interface WorkOrderListProps {
     onWorkOrderIndexChange?: (updates: { workOrderId?: string }) => Promise<boolean>
     editedWorkOrderId?: string | null
     setEditedWorkOrderId?: (id: string | null) => void
+    userEventAccess: string[]
 }
 
-export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, userHash, newlyCreatedWorkOrder, writePermission, currentWorkOrderIndex, setCurrentWorkOrderIndex, setWorkOrders, onWorkOrderIndexChange, editedWorkOrderId, setEditedWorkOrderId }: WorkOrderListProps) {
+export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, userHash, newlyCreatedWorkOrder, writePermission, currentWorkOrderIndex, setCurrentWorkOrderIndex, setWorkOrders, onWorkOrderIndexChange, editedWorkOrderId, setEditedWorkOrderId, userEventAccess }: WorkOrderListProps) {
     const [workOrders, setWorkOrdersLocal] = useState<WorkOrder[]>([])
     const [loading, setLoading] = useState(true)
     const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
@@ -184,14 +185,36 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         }
     }
 
+    // Helper function to check if a work order should be visible based on user's event access
+    const isWorkOrderAccessible = (workOrder: WorkOrder): boolean => {
+        if (userEventAccess.length === 0) {
+            return false; // No access configured
+        }
+        if (userEventAccess.includes('all')) {
+            return true; // All access
+        }
+        return userEventAccess.includes(workOrder.eventCode); // Specific event access
+    }
+
     const loadWorkOrders = useCallback(async () => {
         setLoading(true)
         try {
             const result = await getAllTableItems('work-orders', userPid, userHash)
 
             if (result && Array.isArray(result)) {
+                // Filter work orders by user's event access
+                let filteredWorkOrders = result;
+                if (userEventAccess.length > 0 && !userEventAccess.includes('all')) {
+                    // If user has specific event access (not 'all'), filter by those events
+                    filteredWorkOrders = result.filter(wo => userEventAccess.includes(wo.eventCode));
+                } else if (!userEventAccess.includes('all') && userEventAccess.length === 0) {
+                    // If no event access configured, show no work orders
+                    filteredWorkOrders = [];
+                }
+                // If user has 'all' access or userEventAccess includes 'all', show all work orders
+
                 // Filter out archived work orders by default
-                const activeWorkOrders = result.filter(wo => !wo.archived)
+                const activeWorkOrders = filteredWorkOrders.filter(wo => !wo.archived)
                 // Sort by createdAt (newest first), with fallback for missing createdAt
                 activeWorkOrders.sort((a, b) => {
                     const aTime = new Date(a.createdAt || '1970-01-01').getTime();
@@ -230,7 +253,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         } finally {
             setLoading(false)
         }
-    }, [userPid, userHash, setWorkOrders])
+    }, [userPid, userHash, setWorkOrders, userEventAccess])
 
     useEffect(() => {
         loadWorkOrders()
@@ -300,14 +323,43 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                         const index = prevOrders.findIndex(wo => wo.id === updatedWorkOrder.id)
 
                         if (index === -1) {
-                            // If it's a new work order, add it to the list and sort
-                            const newOrders = [updatedWorkOrder, ...prevOrders]
-                            newOrders.sort((a, b) => {
-                                const aTime = new Date(a.createdAt || '1970-01-01').getTime();
-                                const bTime = new Date(b.createdAt || '1970-01-01').getTime();
-                                return bTime - aTime;
-                            })
-                            return newOrders
+                            // If it's a new work order, only add it if user has access
+                            if (isWorkOrderAccessible(updatedWorkOrder)) {
+                                const newOrders = [updatedWorkOrder, ...prevOrders]
+                                newOrders.sort((a, b) => {
+                                    const aTime = new Date(a.createdAt || '1970-01-01').getTime();
+                                    const bTime = new Date(b.createdAt || '1970-01-01').getTime();
+                                    return bTime - aTime;
+                                })
+                                return newOrders
+                            } else {
+                                // User doesn't have access to this work order, don't add it
+                                console.log(`[ACCESS-DENIED] Not adding work order ${updatedWorkOrder.id} (${updatedWorkOrder.eventCode}) - user doesn't have access`);
+                                return prevOrders
+                            }
+                        }
+
+                        // Check if user still has access to this work order
+                        const hasAccess = isWorkOrderAccessible(updatedWorkOrder);
+                        
+                        if (!hasAccess) {
+                            // User no longer has access, remove this work order
+                            console.log(`[ACCESS-DENIED] Removing work order ${updatedWorkOrder.id} (${updatedWorkOrder.eventCode}) - user no longer has access`);
+                            const filteredOrders = prevOrders.filter(wo => wo.id !== updatedWorkOrder.id);
+                            
+                            // If the removed work order was the current one, adjust the index
+                            if (index === currentWorkOrderIndex) {
+                                // Move to the next available work order, or the last one if we're at the end
+                                const newIndex = Math.min(currentWorkOrderIndex, filteredOrders.length - 1);
+                                if (newIndex >= 0) {
+                                    setCurrentWorkOrderIndex(newIndex);
+                                }
+                            } else if (index < currentWorkOrderIndex) {
+                                // If we removed a work order before the current one, adjust the index
+                                setCurrentWorkOrderIndex(currentWorkOrderIndex - 1);
+                            }
+                            
+                            return filteredOrders;
                         }
 
                         // Check if we need to refresh campaign existence data
@@ -414,14 +466,43 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                     const index = prevOrders.findIndex(wo => wo.id === updatedWorkOrder.id)
 
                     if (index === -1) {
-                        // If it's a new work order, add it to the list and sort
-                        const newOrders = [updatedWorkOrder, ...prevOrders]
-                        newOrders.sort((a, b) => {
-                            const aTime = new Date(a.createdAt || '1970-01-01').getTime();
-                            const bTime = new Date(b.createdAt || '1970-01-01').getTime();
-                            return bTime - aTime;
-                        })
-                        return newOrders
+                        // If it's a new work order, only add it if user has access
+                        if (isWorkOrderAccessible(updatedWorkOrder)) {
+                            const newOrders = [updatedWorkOrder, ...prevOrders]
+                            newOrders.sort((a, b) => {
+                                const aTime = new Date(a.createdAt || '1970-01-01').getTime();
+                                const bTime = new Date(b.createdAt || '1970-01-01').getTime();
+                                return bTime - aTime;
+                            })
+                            return newOrders
+                        } else {
+                            // User doesn't have access to this work order, don't add it
+                            console.log(`[ACCESS-DENIED] Not adding work order ${updatedWorkOrder.id} (${updatedWorkOrder.eventCode}) - user doesn't have access`);
+                            return prevOrders
+                        }
+                    }
+
+                    // Check if user still has access to this work order
+                    const hasAccess = isWorkOrderAccessible(updatedWorkOrder);
+                    
+                    if (!hasAccess) {
+                        // User no longer has access, remove this work order
+                        console.log(`[ACCESS-DENIED] Removing work order ${updatedWorkOrder.id} (${updatedWorkOrder.eventCode}) - user no longer has access`);
+                        const filteredOrders = prevOrders.filter(wo => wo.id !== updatedWorkOrder.id);
+                        
+                        // If the removed work order was the current one, adjust the index
+                        if (index === currentWorkOrderIndex) {
+                            // Move to the next available work order, or the last one if we're at the end
+                            const newIndex = Math.min(currentWorkOrderIndex, filteredOrders.length - 1);
+                            if (newIndex >= 0) {
+                                setCurrentWorkOrderIndex(newIndex);
+                            }
+                        } else if (index < currentWorkOrderIndex) {
+                            // If we removed a work order before the current one, adjust the index
+                            setCurrentWorkOrderIndex(currentWorkOrderIndex - 1);
+                        }
+                        
+                        return filteredOrders;
                     }
 
                     // Check if we need to refresh campaign existence data

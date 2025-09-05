@@ -64,6 +64,7 @@ interface WorkOrderFormProps {
     userHash: string
     writePermission: boolean
     onLoadingChange?: (loading: boolean) => void
+    userEventAccess: string[]
 }
 
 /**
@@ -137,7 +138,7 @@ async function getExistingWorkOrders(
     }
 }
 
-export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash, writePermission, onLoadingChange }: WorkOrderFormProps) {
+export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash, writePermission, onLoadingChange, userEventAccess }: WorkOrderFormProps) {
     const [loading, setLoading] = useState(false)
     const [events, setEvents] = useState<Event[]>([])
     const [eventCode, setEventCode] = useState('')
@@ -184,8 +185,20 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     getTableItem('config', 'emailTestIDs', userPid, userHash)
                 ])
 
-                // Only show events with config.emailManager === true
-                const filteredEvents = Array.isArray(eventsResp) ? eventsResp.filter((ev: Event) => ev.config && ev.config.emailManager) : []
+                // Filter events based on user's event access list
+                let filteredEvents: Event[] = [];
+                if (Array.isArray(eventsResp)) {
+                    if (userEventAccess.length > 0 && !userEventAccess.includes('all')) {
+                        // If user has specific event access (not 'all'), filter by those events
+                        filteredEvents = eventsResp.filter((ev: Event) => userEventAccess.includes(ev.aid));
+                    } else if (userEventAccess.includes('all')) {
+                        // If user has 'all' access, show all events
+                        filteredEvents = eventsResp;
+                    } else {
+                        // If no event access configured, show no events
+                        filteredEvents = [];
+                    }
+                }
                 setEvents(filteredEvents)
                 setAccountList(accountResp?.value || [])
                 setStages(Array.isArray(stagesResp) ? stagesResp : [])
