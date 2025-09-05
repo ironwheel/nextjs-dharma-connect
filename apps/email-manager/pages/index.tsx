@@ -63,6 +63,7 @@ export default function Home() {
     const [loadingParticipantNames, setLoadingParticipantNames] = useState(false)
     const [formLoading, setFormLoading] = useState(false)
     const [editedWorkOrderId, setEditedWorkOrderId] = useState<string | null>(null)
+    const [userEventAccess, setUserEventAccess] = useState<string[]>([])
     const initialWorkOrdersLoaded = useRef(false)
 
 
@@ -142,13 +143,18 @@ export default function Home() {
         }
     }, [userPid, userHash, fetchCurrentUserLastUsedConfig])
 
-    // Fetch write permission
+    // Fetch write permission and event access
     React.useEffect(() => {
-        const fetchWritePermission = async () => {
+        const fetchPermissions = async () => {
             if (!pid || !hash) return;
 
             try {
-                const permissionResponse = await authGetConfigValue(pid as string, hash as string, 'writePermission');
+                const [permissionResponse, eventAccessResponse] = await Promise.all([
+                    authGetConfigValue(pid as string, hash as string, 'writePermission'),
+                    authGetConfigValue(pid as string, hash as string, 'eventAccess')
+                ]);
+
+                // Handle write permission
                 if (permissionResponse && typeof permissionResponse === 'boolean') {
                     setWritePermission(permissionResponse);
                     console.log('Write permission:', permissionResponse);
@@ -156,13 +162,28 @@ export default function Home() {
                     console.log('Write permission fetch redirected or failed, using default (false)');
                     setWritePermission(false);
                 }
+
+                // Handle event access
+                if (Array.isArray(eventAccessResponse)) {
+                    setUserEventAccess(eventAccessResponse);
+                    console.log('User event access:', eventAccessResponse);
+                } else {
+                    console.log('No event access restrictions found, showing no events');
+                    setUserEventAccess([]);
+                }
             } catch (error) {
-                console.error('Error fetching write permission:', error);
+                // Handle AUTH_UNKNOWN_CONFIG_KEY and other errors gracefully
+                if (error.message && error.message.includes('AUTH_UNKNOWN_CONFIG_KEY')) {
+                    console.log('Event access not configured for user, showing no events');
+                } else {
+                    console.error('Error fetching permissions:', error);
+                }
                 setWritePermission(false);
+                setUserEventAccess([]);
             }
         };
 
-        fetchWritePermission();
+        fetchPermissions();
     }, [pid, hash]);
 
     // Load user name
@@ -370,9 +391,20 @@ export default function Home() {
         try {
             const result = await getAllTableItemsFiltered('work-orders', 'archived', true, userPid, userHash)
             if (result && Array.isArray(result)) {
-                setArchivedWorkOrders(result)
+                // Filter archived work orders by user's event access
+                let filteredArchivedWorkOrders = result;
+                if (userEventAccess.length > 0 && !userEventAccess.includes('all')) {
+                    // If user has specific event access (not 'all'), filter by those events
+                    filteredArchivedWorkOrders = result.filter(wo => userEventAccess.includes(wo.eventCode));
+                } else if (!userEventAccess.includes('all') && userEventAccess.length === 0) {
+                    // If no event access configured, show no archived work orders
+                    filteredArchivedWorkOrders = [];
+                }
+                // If user has 'all' access or userEventAccess includes 'all', show all archived work orders
+
+                setArchivedWorkOrders(filteredArchivedWorkOrders)
                 // Load participant names for all archived work orders
-                await loadParticipantNamesForArchived(result)
+                await loadParticipantNamesForArchived(filteredArchivedWorkOrders)
             }
         } catch (error) {
             console.error('Failed to load archived work orders:', error)
@@ -563,6 +595,7 @@ export default function Home() {
                 currentWorkOrderIndex={currentWorkOrderIndex}
                 setCurrentWorkOrderIndex={setCurrentWorkOrderIndex}
                 setWorkOrders={setWorkOrders}
+                userEventAccess={userEventAccess}
                 onWorkOrderIndexChange={updateUserEmailManagerLastUsedConfig}
                 editedWorkOrderId={editedWorkOrderId}
                 setEditedWorkOrderId={setEditedWorkOrderId}
@@ -596,6 +629,7 @@ export default function Home() {
                         userHash={userHash}
                         writePermission={writePermission}
                         onLoadingChange={setFormLoading}
+                        userEventAccess={userEventAccess}
                     />
                 </Modal.Body>
             </Modal>
