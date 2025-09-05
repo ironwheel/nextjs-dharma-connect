@@ -111,7 +111,7 @@ function fromDynamo(item: any): any {
 }
 
 // StudentHistoryModal component
-const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, allPools, emailDisplayPermission }) => {
+const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, allPools, emailDisplayPermission, userEventAccess }) => {
     const [copying, setCopying] = React.useState(false);
 
     // Helper function to mask email in demo mode
@@ -132,11 +132,19 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
         displayText: string;
         eventKey: string;
     };
-    // Gather all subevents from allEvents prop
+    // Gather all subevents from allEvents prop (filtered by user's event access)
     const subEvents: SubEvent[] = [];
     if (Array.isArray(allEvents)) {
         allEvents.forEach(event => {
             if (event.hide) return;
+
+            // Filter events based on user's event access list
+            if (userEventAccess && userEventAccess.length > 0 && !userEventAccess.includes('all')) {
+                // If user has specific event access (not 'all'), check if this event is allowed
+                if (!userEventAccess.includes(event.aid)) {
+                    return; // Skip this event if not in user's access list
+                }
+            }
             const subEventKeys = Object.keys(event.subEvents || {});
             if (subEventKeys.length === 0) {
                 subEvents.push({
@@ -336,6 +344,7 @@ const Home = () => {
     const [currentUserName, setCurrentUserName] = useState<string>("Unknown");
     const [version, setVersion] = useState<string>("dev");
     const [emailDisplayPermission, setEmailDisplayPermission] = useState<boolean>(false);
+    const [userEventAccess, setUserEventAccess] = useState<string[]>([]);
     // Add new state for currentEligibleStudents
     const [currentEligibleStudents, setCurrentEligibleStudents] = useState<Student[]>([]);
     // Add state for eligibility caching system
@@ -1141,6 +1150,14 @@ const Home = () => {
         events.forEach(event => {
             if (event.hide) return; // Skip hidden events
 
+            // Filter events based on user's event access list
+            if (userEventAccess.length > 0 && !userEventAccess.includes('all')) {
+                // If user has specific event access (not 'all'), check if this event is allowed
+                if (!userEventAccess.includes(event.aid)) {
+                    return; // Skip this event if not in user's access list
+                }
+            }
+
             const subEventKeys = Object.keys(event.subEvents || {});
 
             if (subEventKeys.length === 0) {
@@ -1259,7 +1276,7 @@ const Home = () => {
             setEventDropdownOpen(false);
         };
 
-        // Get all sub-events and sort them
+        // Get all sub-events and sort them (filtered by user's event access)
         const allSubEvents = getAllSubEvents(allEvents);
         const sortedSubEvents = sortSubEventsByDate(allSubEvents);
 
@@ -2246,6 +2263,26 @@ const Home = () => {
                 const historyPermission = await authGetConfigValue(pid as string, hash as string, 'studentHistory');
                 setCanViewStudentHistory(historyPermission === true);
 
+                // Fetch user's event access list
+                try {
+                    const eventAccessResult = await authGetConfigValue(pid as string, hash as string, 'eventAccess');
+                    if (Array.isArray(eventAccessResult)) {
+                        setUserEventAccess(eventAccessResult);
+                        console.log('User event access:', eventAccessResult);
+                    } else {
+                        console.log('No event access restrictions found, showing no events');
+                        setUserEventAccess([]); // Default to no events if no restrictions
+                    }
+                } catch (error) {
+                    // Handle AUTH_UNKNOWN_CONFIG_KEY and other errors gracefully
+                    if (error.message && error.message.includes('AUTH_UNKNOWN_CONFIG_KEY')) {
+                        console.log('Event access not configured for user, showing no events');
+                    } else {
+                        console.error('Error fetching event access:', error);
+                    }
+                    setUserEventAccess([]); // Default to no events on error or missing config
+                }
+
                 // Fetch demo mode config
                 const demoModeConfig = await fetchConfig('demoMode');
                 if (demoModeConfig) {
@@ -2317,22 +2354,10 @@ const Home = () => {
                 }
 
                 if (!currentEventToUse) {
-                    // Fallback to config-based selection
-                    const aidData = await fetchConfig("eventDashboardLandingAID");
-                    const seData = await fetchConfig("eventDashboardLandingSubEvent");
-
-                    if (aidData && seData && aidData.value && seData.value && Array.isArray(filteredEvents)) {
-                        const foundEvent = filteredEvents.find(e => e.aid === aidData.value && e.subEvents && e.subEvents[seData.value]) || null;
-                        // Set the selected sub-event in the event object for reference
-                        if (foundEvent && seData.value) {
-                            foundEvent.selectedSubEvent = seData.value;
-                        }
-                        currentEventToUse = foundEvent;
-                        console.log('Using config fallback - Event:', aidData.value, 'SubEvent:', seData.value);
-                    } else if (filteredEvents.length > 0) {
-                        // If no config found, use the first event
+                    // Use the first available event from user's event access list
+                    if (filteredEvents.length > 0) {
                         currentEventToUse = filteredEvents[0];
-                        console.log('Using first available event as fallback');
+                        console.log('Using first available event from user access list');
                     }
                 }
 
@@ -2574,7 +2599,7 @@ const Home = () => {
                     version={version}
                 />
             </Container>
-            <StudentHistoryModal show={showHistoryModal} onClose={() => setShowHistoryModal(false)} student={selectedStudent} fetchConfig={fetchConfig} allEvents={allEvents} allPools={allPools} emailDisplayPermission={emailDisplayPermission} />
+            <StudentHistoryModal show={showHistoryModal} onClose={() => setShowHistoryModal(false)} student={selectedStudent} fetchConfig={fetchConfig} allEvents={allEvents} allPools={allPools} emailDisplayPermission={emailDisplayPermission} userEventAccess={userEventAccess} />
         </>
     );
 };
