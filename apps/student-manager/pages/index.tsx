@@ -102,6 +102,10 @@ const Home = () => {
     }>({});
     const [availableHosts, setAvailableHosts] = useState<string[]>([]);
 
+    // Event access state
+    const [eventAccessList, setEventAccessList] = useState<string[]>([]);
+    const [eventNames, setEventNames] = useState<Record<string, string>>({});
+
     // Modal state
     const [showEditModal, setShowEditModal] = useState(false);
     const [selectedAuthRecord, setSelectedAuthRecord] = useState<AuthRecord | null>(null);
@@ -293,9 +297,26 @@ const Home = () => {
         }
     };
 
+    const fetchConfig = async (configName: string) => {
+        try {
+            const config = await getTableItemOrNull('config', configName, pid as string, hash as string);
+
+            // Check if we got a redirected response
+            if (config && 'redirected' in config) {
+                console.log(`Config fetch redirected for ${configName} - authentication required`);
+                return null;
+            }
+
+            return config;
+        } catch (error) {
+            console.error('Error fetching config:', error);
+            return null;
+        }
+    };
 
 
-    const discoverConfigSchema = () => {
+
+    const discoverConfigSchema = async () => {
         try {
             const defaultAuthRecord = allAuthRecords.find(ar => ar.id === 'default');
             if (!defaultAuthRecord || !defaultAuthRecord.config) {
@@ -306,11 +327,64 @@ const Home = () => {
             const schema = defaultAuthRecord.config;
             const hosts = Object.keys(schema);
 
+            // Fetch event access list and then look up individual event names
+            try {
+                const eventListConfig = await fetchConfig('eventAccessList');
+                let eventCodes: string[] = [];
+                
+                if (eventListConfig && eventListConfig.value && Array.isArray(eventListConfig.value)) {
+                    eventCodes = eventListConfig.value;
+                } else {
+                    // Fallback to a default list if config not found
+                    eventCodes = ['all'];
+                }
+                
+                setEventAccessList(eventCodes);
+
+                // Look up event names for each event code (excluding 'all')
+                const eventLookups = eventCodes
+                    .filter(code => code !== 'all')
+                    .map(async (eventCode) => {
+                        try {
+                            const eventRecord = await getTableItemOrNull('events', eventCode, pid as string, hash as string);
+                            if (eventRecord && !('redirected' in eventRecord) && eventRecord.name) {
+                                return { code: eventCode, name: eventRecord.name };
+                            } else {
+                                // Fallback to using the code as name if event not found
+                                console.warn(`Event ${eventCode} not found or missing name field, using code as display name`);
+                                return { code: eventCode, name: eventCode };
+                            }
+                        } catch (error) {
+                            console.error(`Error fetching event ${eventCode}:`, error);
+                            // Fallback to using the code as name on error
+                            return { code: eventCode, name: eventCode };
+                        }
+                    });
+
+                // Wait for all event lookups to complete
+                const eventResults = await Promise.all(eventLookups);
+                
+                // Create a mapping of event codes to names
+                const eventNamesMap: Record<string, string> = { 'all': 'All Events (Wildcard)' };
+                eventResults.forEach(({ code, name }) => {
+                    eventNamesMap[code] = name;
+                });
+                
+                setEventNames(eventNamesMap);
+
+            } catch (error) {
+                console.error('Error fetching event data:', error);
+                setEventAccessList(['all']);
+                setEventNames({ 'all': 'All Events (Wildcard)' });
+            }
+
             setConfigSchema(schema);
             setAvailableHosts(hosts);
 
             console.log('Discovered config schema:', schema);
             console.log('Available hosts:', hosts);
+            console.log('Event access list:', eventAccessList);
+            console.log('Event names mapping:', eventNames);
         } catch (error) {
             console.error('Error discovering config schema:', error);
             throw error; // Re-throw the error to be handled by the caller
@@ -509,7 +583,13 @@ const Home = () => {
                                     // Use current value if available, otherwise use default from schema
                                     const currentValue = rowData.authRecord?.config?.[host]?.[key];
                                     const defaultValue = hostSchema[key];
-                                    initialConfig[host][key] = currentValue !== undefined ? currentValue : defaultValue;
+                                    
+                                    // Handle array fields specially (like eventAccess)
+                                    if (Array.isArray(defaultValue)) {
+                                        initialConfig[host][key] = Array.isArray(currentValue) ? currentValue : defaultValue;
+                                    } else {
+                                        initialConfig[host][key] = currentValue !== undefined ? currentValue : defaultValue;
+                                    }
                                 });
                             }
                         });
@@ -701,7 +781,13 @@ const Home = () => {
                                 // Use current value if available, otherwise use default from schema
                                 const currentValue = authRecord?.config?.[host]?.[key];
                                 const defaultValue = hostSchema[key];
-                                initialConfig[host][key] = currentValue !== undefined ? currentValue : defaultValue;
+                                
+                                // Handle array fields specially (like eventAccess)
+                                if (Array.isArray(defaultValue)) {
+                                    initialConfig[host][key] = Array.isArray(currentValue) ? currentValue : defaultValue;
+                                } else {
+                                    initialConfig[host][key] = currentValue !== undefined ? currentValue : defaultValue;
+                                }
                             });
                         }
                     });
@@ -903,9 +989,9 @@ const Home = () => {
         }));
 
         // Force re-render of config sections when permitted hosts change
-        setTimeout(() => {
+        setTimeout(async () => {
             try {
-                discoverConfigSchema();
+                await discoverConfigSchema();
             } catch (error) {
                 console.error('Failed to re-discover config schema after host toggle:', error);
                 // Don't throw here as this is a user action, just log the error
@@ -1059,7 +1145,7 @@ const Home = () => {
 
                 // Discover config schema from default auth record
                 try {
-                    discoverConfigSchema();
+                    await discoverConfigSchema();
                 } catch (error) {
                     console.error('Failed to discover config schema:', error);
                     throw new Error(`Configuration discovery failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -1409,103 +1495,220 @@ const Home = () => {
                                         {!isPermitted && <span style={{ color: '#888', fontSize: '0.9em' }}> (Not Permitted)</span>}
                                     </h5>
 
-                                    {Object.entries(hostSchema).map(([key, defaultValue]) => {
-                                        const currentValue = formData.config?.[host]?.[key];
-                                        const value = currentValue !== undefined ? currentValue : defaultValue;
+                                    {(() => {
+                                        // Separate fields by type for better organization
+                                        const fields = Object.entries(hostSchema);
+                                        const nonBooleanFields = fields.filter(([key, defaultValue]) => 
+                                            typeof defaultValue !== 'boolean' && 
+                                            key !== 'eventAccess' && 
+                                            key !== 'viewsProfile'
+                                        );
+                                        const specialFields = fields.filter(([key, defaultValue]) => 
+                                            key === 'viewsProfile' || 
+                                            (key === 'eventAccess' && Array.isArray(defaultValue))
+                                        );
+                                        const booleanFields = fields.filter(([key, defaultValue]) => 
+                                            typeof defaultValue === 'boolean'
+                                        );
 
-                                        // Determine field type and render appropriate input
-                                        if (typeof defaultValue === 'boolean') {
-                                            return (
-                                                <Row key={key}>
-                                                    <Col md={3}>
-                                                        <Form.Check
-                                                            type="checkbox"
-                                                            label={key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
-                                                            checked={value}
-                                                            onChange={(e) => setFormData(prev => ({
-                                                                ...prev,
-                                                                config: {
-                                                                    ...prev.config,
-                                                                    [host]: {
-                                                                        ...prev.config[host],
-                                                                        [key]: e.target.checked
-                                                                    }
-                                                                }
-                                                            }))}
-                                                            disabled={!isPermitted}
-                                                        />
-                                                    </Col>
-                                                </Row>
-                                            );
-                                        } else if (key === 'viewsProfile') {
-                                            return (
-                                                <Row key={key}>
-                                                    <Col md={6}>
-                                                        <Form.Group className="mb-3">
-                                                            <Form.Label>Views Profile</Form.Label>
-                                                            <Form.Select
-                                                                value={value || ''}
-                                                                onChange={(e) => setFormData(prev => ({
-                                                                    ...prev,
-                                                                    config: {
-                                                                        ...prev.config,
-                                                                        [host]: {
-                                                                            ...prev.config[host],
-                                                                            [key]: e.target.value
-                                                                        }
-                                                                    }
-                                                                }))}
-                                                                disabled={!isPermitted}
-                                                                style={{
-                                                                    backgroundColor: isPermitted ? '#2b2b2b' : '#1a1a1a',
-                                                                    color: 'white',
-                                                                    border: '1px solid #555'
-                                                                }}
-                                                            >
-                                                                <option value="">Select a views profile...</option>
-                                                                {allViewsProfiles.map(profile => (
-                                                                    <option key={profile.id} value={profile.id}>
-                                                                        {profile.id}
-                                                                    </option>
-                                                                ))}
-                                                            </Form.Select>
-                                                        </Form.Group>
-                                                    </Col>
-                                                </Row>
-                                            );
-                                        } else {
-                                            // Default to text input for other types
-                                            return (
-                                                <Row key={key}>
-                                                    <Col md={6}>
-                                                        <Form.Group className="mb-3">
-                                                            <Form.Label>{key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</Form.Label>
-                                                            <Form.Control
-                                                                type="text"
-                                                                value={value || ''}
-                                                                onChange={(e) => setFormData(prev => ({
-                                                                    ...prev,
-                                                                    config: {
-                                                                        ...prev.config,
-                                                                        [host]: {
-                                                                            ...prev.config[host],
-                                                                            [key]: e.target.value
-                                                                        }
-                                                                    }
-                                                                }))}
-                                                                disabled={!isPermitted}
-                                                                style={{
-                                                                    backgroundColor: isPermitted ? '#2b2b2b' : '#1a1a1a',
-                                                                    color: 'white',
-                                                                    border: '1px solid #555'
-                                                                }}
-                                                            />
-                                                        </Form.Group>
-                                                    </Col>
-                                                </Row>
-                                            );
-                                        }
-                                    })}
+                                        return (
+                                            <>
+                                                {/* Render non-boolean fields first */}
+                                                {nonBooleanFields.map(([key, defaultValue]) => {
+                                                    const currentValue = formData.config?.[host]?.[key];
+                                                    const value = currentValue !== undefined ? currentValue : defaultValue;
+
+                                                    return (
+                                                        <Row key={key}>
+                                                            <Col md={6}>
+                                                                <Form.Group className="mb-3">
+                                                                    <Form.Label>{key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</Form.Label>
+                                                                    <Form.Control
+                                                                        type="text"
+                                                                        value={value || ''}
+                                                                        onChange={(e) => setFormData(prev => ({
+                                                                            ...prev,
+                                                                            config: {
+                                                                                ...prev.config,
+                                                                                [host]: {
+                                                                                    ...prev.config[host],
+                                                                                    [key]: e.target.value
+                                                                                }
+                                                                            }
+                                                                        }))}
+                                                                        disabled={!isPermitted}
+                                                                        style={{
+                                                                            backgroundColor: isPermitted ? '#2b2b2b' : '#1a1a1a',
+                                                                            color: 'white',
+                                                                            border: '1px solid #555'
+                                                                        }}
+                                                                    />
+                                                                </Form.Group>
+                                                            </Col>
+                                                        </Row>
+                                                    );
+                                                })}
+
+                                                {/* Render special fields (viewsProfile, eventAccess) */}
+                                                {specialFields.map(([key, defaultValue]) => {
+                                                    const currentValue = formData.config?.[host]?.[key];
+                                                    const value = currentValue !== undefined ? currentValue : defaultValue;
+
+                                                    if (key === 'viewsProfile') {
+                                                        return (
+                                                            <Row key={key}>
+                                                                <Col md={6}>
+                                                                    <Form.Group className="mb-3">
+                                                                        <Form.Label>Views Profile</Form.Label>
+                                                                        <Form.Select
+                                                                            value={value || ''}
+                                                                            onChange={(e) => setFormData(prev => ({
+                                                                                ...prev,
+                                                                                config: {
+                                                                                    ...prev.config,
+                                                                                    [host]: {
+                                                                                        ...prev.config[host],
+                                                                                        [key]: e.target.value
+                                                                                    }
+                                                                                }
+                                                                            }))}
+                                                                            disabled={!isPermitted}
+                                                                            style={{
+                                                                                backgroundColor: isPermitted ? '#2b2b2b' : '#1a1a1a',
+                                                                                color: 'white',
+                                                                                border: '1px solid #555'
+                                                                            }}
+                                                                        >
+                                                                            <option value="">Select a views profile...</option>
+                                                                            {allViewsProfiles.map(profile => (
+                                                                                <option key={profile.id} value={profile.id}>
+                                                                                    {profile.id}
+                                                                                </option>
+                                                                            ))}
+                                                                        </Form.Select>
+                                                                    </Form.Group>
+                                                                </Col>
+                                                            </Row>
+                                                        );
+                                                    } else if (key === 'eventAccess' && Array.isArray(defaultValue)) {
+                                                        return (
+                                                            <Row key={key}>
+                                                                <Col md={12}>
+                                                                    <Form.Group className="mb-3">
+                                                                        <Form.Label>Event Access</Form.Label>
+                                                                        <div style={{ 
+                                                                            border: '1px solid #555', 
+                                                                            borderRadius: '4px', 
+                                                                            padding: '10px',
+                                                                            backgroundColor: isPermitted ? '#2b2b2b' : '#1a1a1a',
+                                                                            maxHeight: '300px',
+                                                                            overflowY: 'auto'
+                                                                        }}>
+                                                                            {eventAccessList.map(eventCode => {
+                                                                                const eventName = eventNames[eventCode] || eventCode;
+                                                                                const isChecked = Array.isArray(value) ? value.includes(eventCode) : false;
+                                                                                const isAllEvent = eventCode === 'all';
+                                                                                
+                                                                                return (
+                                                                                    <div key={eventCode} style={{ marginBottom: '8px' }}>
+                                                                                        <Form.Check
+                                                                                            type="checkbox"
+                                                                                            label={
+                                                                                                <div style={{ 
+                                                                                                    fontWeight: isAllEvent ? 'bold' : 'normal', 
+                                                                                                    color: isAllEvent ? '#ffc107' : 'white' 
+                                                                                                }}>
+                                                                                                    {eventName}
+                                                                                                </div>
+                                                                                            }
+                                                                                            checked={isChecked}
+                                                                                            onChange={(e) => {
+                                                                                                const currentEvents = Array.isArray(value) ? [...value] : [];
+                                                                                                let newEvents;
+                                                                                                
+                                                                                                if (e.target.checked) {
+                                                                                                    if (isAllEvent) {
+                                                                                                        // If selecting 'all', clear other selections
+                                                                                                        newEvents = ['all'];
+                                                                                                    } else {
+                                                                                                        // If selecting specific event, remove 'all' if it exists
+                                                                                                        newEvents = [...currentEvents.filter(code => code !== 'all'), eventCode];
+                                                                                                    }
+                                                                                                } else {
+                                                                                                    newEvents = currentEvents.filter(code => code !== eventCode);
+                                                                                                }
+                                                                                                
+                                                                                                setFormData(prev => ({
+                                                                                                    ...prev,
+                                                                                                    config: {
+                                                                                                        ...prev.config,
+                                                                                                        [host]: {
+                                                                                                            ...prev.config[host],
+                                                                                                            [key]: newEvents
+                                                                                                        }
+                                                                                                    }
+                                                                                                }));
+                                                                                            }}
+                                                                                            disabled={!isPermitted}
+                                                                                            style={{ marginBottom: '5px' }}
+                                                                                        />
+                                                                                    </div>
+                                                                                );
+                                                                            })}
+                                                                        </div>
+                                                                                                                                <Form.Text className="text-muted">
+                                                            Select which events this student can access. You can select multiple specific events or choose "All Events" for complete access.
+                                                        </Form.Text>
+                                                    </Form.Group>
+                                                </Col>
+                                            </Row>
+                                        );
+                                    }
+                                    return null;
+                                })}
+
+                                                {/* Add spacing between Event Access and other sections */}
+                                                {specialFields.some(([key]) => key === 'eventAccess') && (
+                                                    <div style={{ marginBottom: '20px' }}></div>
+                                                )}
+
+                                                {/* Render boolean fields at the bottom */}
+                                                {booleanFields.length > 0 && (
+                                                    <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #555' }}>
+                                                        <h6 style={{ marginBottom: '15px', color: '#ffc107' }}>Permissions</h6>
+                                                        <Row>
+                                                            {booleanFields.map(([key, defaultValue]) => {
+                                                                const currentValue = formData.config?.[host]?.[key];
+                                                                const value = currentValue !== undefined ? currentValue : defaultValue;
+
+                                                                return (
+                                                                    <Col md={4} key={key}>
+                                                                        <Form.Check
+                                                                            type="checkbox"
+                                                                            label={key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
+                                                                            checked={value}
+                                                                            onChange={(e) => setFormData(prev => ({
+                                                                                ...prev,
+                                                                                config: {
+                                                                                    ...prev.config,
+                                                                                    [host]: {
+                                                                                        ...prev.config[host],
+                                                                                        [key]: e.target.checked
+                                                                                    }
+                                                                                }
+                                                                            }))}
+                                                                            disabled={!isPermitted}
+                                                                            style={{ marginBottom: '10px' }}
+                                                                        />
+                                                                    </Col>
+                                                                );
+                                                            })}
+                                                        </Row>
+                                                    </div>
+                                                )}
+                                            </>
+                                        );
+                                    })()}
                                 </div>
                             );
                         })}
