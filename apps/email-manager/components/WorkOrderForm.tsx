@@ -45,7 +45,7 @@ interface Stage {
     stage: string;
     description: string;
     order?: number;
-    parentStage?: string;
+    parentStages?: string[];
     qaStepCheckZoomLink?: boolean;
     qaStepCheckRegLink?: boolean;
 }
@@ -68,37 +68,53 @@ interface WorkOrderFormProps {
 }
 
 /**
- * Find the most recent parent work order for inheritance.
+ * Find the most recent parent work order for inheritance from multiple possible parent stages.
  * @param eventCode - The event code to match
  * @param subEvent - The sub event to match
- * @param parentStage - The parent stage to match
+ * @param parentStages - Array of possible parent stages to match (in order of preference)
  * @param pid - User PID
  * @param hash - User hash
- * @returns The most recent matching parent work order, or null if not found
+ * @returns Object with the most recent matching parent work order and which parent stage was found, or null if none found
  */
 async function getParentWorkOrder(
     eventCode: string,
     subEvent: string,
-    parentStage: string,
+    parentStages: string[],
     pid: string,
     hash: string
-): Promise<WorkOrder | null> {
+): Promise<{ workOrder: WorkOrder; parentStage: string } | null> {
     // Get all work orders with matching eventCode
     const items = await getAllTableItemsFiltered('work-orders', 'eventCode', eventCode, pid, hash);
     if (!Array.isArray(items) || items.length === 0) return null;
-    // Further filter by subEvent and stage == parentStage, allowing archived items
-    const filtered = items.filter(item =>
-        item.subEvent === subEvent &&
-        item.stage === parentStage
+    
+    // Check for multiple parent stages existing (error condition)
+    const existingParentStages = parentStages.filter(parentStage => 
+        items.some(item => item.subEvent === subEvent && item.stage === parentStage)
     );
-    if (filtered.length === 0) return null;
-    // Sort by createdAt descending (most recent first)
-    filtered.sort((a, b) => {
-        const aTime = new Date(a.createdAt || '1970-01-01').getTime();
-        const bTime = new Date(b.createdAt || '1970-01-01').getTime();
-        return bTime - aTime;
-    });
-    return filtered[0];
+    
+    if (existingParentStages.length > 1) {
+        throw new Error(`Multiple parent stages found: ${existingParentStages.join(', ')}. Only one parent stage should exist.`);
+    }
+    
+    // Find the first available parent stage in order of preference
+    for (const parentStage of parentStages) {
+        const filtered = items.filter(item =>
+            item.subEvent === subEvent &&
+            item.stage === parentStage
+        );
+        
+        if (filtered.length > 0) {
+            // Sort by createdAt descending (most recent first)
+            filtered.sort((a, b) => {
+                const aTime = new Date(a.createdAt || '1970-01-01').getTime();
+                const bTime = new Date(b.createdAt || '1970-01-01').getTime();
+                return bTime - aTime;
+            });
+            return { workOrder: filtered[0], parentStage };
+        }
+    }
+    
+    return null;
 }
 
 /**
@@ -166,6 +182,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
     const [stageValidating, setStageValidating] = useState(false)
     const [existingWorkOrders, setExistingWorkOrders] = useState<WorkOrder[]>([])
     const [loadingExistingWorkOrders, setLoadingExistingWorkOrders] = useState(false)
+    const [inheritedFromStage, setInheritedFromStage] = useState<string | null>(null)
     const loadedSubEventRef = useRef<string | null>(null)
     const loadedWorkOrderRef = useRef<WorkOrder | null>(null)
     const lastValidationRef = useRef<{ eventCode: string, subEvent: string, stage: string } | null>(null)
@@ -356,9 +373,9 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
         }
     }, [eventCode, subEvent, userPid, userHash, id])
 
-    // Re-validate parent stage when eventCode or subEvent changes
+    // Re-validate parent stages when eventCode or subEvent changes
     useEffect(() => {
-        if (stage && selectedStageRecord?.parentStage && eventCode && subEvent) {
+        if (stage && selectedStageRecord?.parentStages && selectedStageRecord.parentStages.length > 0 && eventCode && subEvent) {
             const currentValidation = { eventCode, subEvent, stage }
             const lastValidation = lastValidationRef.current
 
@@ -389,6 +406,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             setStage('')
             setSelectedStageRecord(null)
             setInheritedFields({})
+            setInheritedFromStage(null)
             return
         }
 
@@ -401,14 +419,14 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
 
         const stageRecord = stages.find(s => s.stage === newStage)
 
-        // If stage has parentStage, validate immediately before setting
-        if (stageRecord?.parentStage && eventCode && subEvent) {
+        // If stage has parentStages, validate immediately before setting
+        if (stageRecord?.parentStages && stageRecord.parentStages.length > 0 && eventCode && subEvent) {
             setStageValidating(true)
             try {
                 // Implement parent work order validation using getParentWorkOrder
-                const parentWorkOrder = await getParentWorkOrder(eventCode, subEvent, stageRecord.parentStage, userPid, userHash);
-                if (!parentWorkOrder) {
-                    toast.error(`No parent work order found for stage '${stageRecord.parentStage}'`);
+                const parentResult = await getParentWorkOrder(eventCode, subEvent, stageRecord.parentStages, userPid, userHash);
+                if (!parentResult) {
+                    toast.error(`No parent work order found for any of the parent stages: ${stageRecord.parentStages.join(', ')}`);
                     // Don't set the stage - keep current selection
                     attemptedStageRef.current = stage;
                     return;
@@ -417,25 +435,31 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 setStage(newStage)
                 setSelectedStageRecord(stageRecord)
                 setInheritedFields({
-                    s3HTMLPaths: parentWorkOrder.s3HTMLPaths,
-                    languages: parentWorkOrder.languages,
-                    subjects: parentWorkOrder.subjects
+                    s3HTMLPaths: parentResult.workOrder.s3HTMLPaths,
+                    languages: parentResult.workOrder.languages,
+                    subjects: parentResult.workOrder.subjects
                 })
+                setInheritedFromStage(parentResult.parentStage)
                 // Update last validation ref
                 lastValidationRef.current = { eventCode, subEvent, stage: newStage }
             } catch (error) {
                 console.error('Error finding parent work order:', error)
-                toast.error(`Error finding parent work order for stage '${stageRecord.parentStage}'`)
+                if (error instanceof Error && error.message.includes('Multiple parent stages found')) {
+                    toast.error(error.message)
+                } else {
+                    toast.error(`Error finding parent work order for stages: ${stageRecord.parentStages.join(', ')}`)
+                }
                 // Don't set the stage - keep current selection
                 attemptedStageRef.current = stage;
             } finally {
                 setStageValidating(false)
             }
         } else {
-            // No parent stage, proceed normally
+            // No parent stages, proceed normally
             setStage(newStage)
             setSelectedStageRecord(stageRecord || null)
             setInheritedFields({})
+            setInheritedFromStage(null)
         }
     }
 
@@ -718,9 +742,10 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                         })()}
                     </Form.Text>
                 )}
-                {selectedStageRecord?.parentStage && (
+                {selectedStageRecord?.parentStages && selectedStageRecord.parentStages.length > 0 && (
                     <Form.Text className="text-info">
-                        This stage inherits content from parent stage: {selectedStageRecord.parentStage}
+                        <br />
+                        This stage inherits content from parent stage: {inheritedFromStage || 'validating...'}
                     </Form.Text>
                 )}
             </Form.Group>
@@ -736,12 +761,12 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                             label={lang}
                             checked={Boolean(languages[lang])}
                             onChange={e => setLanguages(langs => ({ ...langs, [lang]: e.target.checked }))}
-                            disabled={Boolean(selectedStageRecord?.parentStage)}
+                            disabled={Boolean(selectedStageRecord?.parentStages && selectedStageRecord.parentStages.length > 0)}
                             className="bg-dark text-light border-secondary"
                         />
                     ))}
                 </div>
-                {selectedStageRecord?.parentStage && (
+                {selectedStageRecord?.parentStages && selectedStageRecord.parentStages.length > 0 && (
                     <Form.Text className="text-info">
                         Languages are inherited from parent stage and cannot be modified
                     </Form.Text>
@@ -758,12 +783,12 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                             value={subjects[lang] || ''}
                             onChange={e => setSubjects(s => ({ ...s, [lang]: e.target.value }))}
                             placeholder={`Subject for ${lang.toUpperCase()}`}
-                            disabled={Boolean(selectedStageRecord?.parentStage)}
+                            disabled={Boolean(selectedStageRecord?.parentStages && selectedStageRecord.parentStages.length > 0)}
                             className="bg-dark text-light border-secondary mb-2"
                         />
                     </div>
                 ))}
-                {selectedStageRecord?.parentStage && (
+                {selectedStageRecord?.parentStages && selectedStageRecord.parentStages.length > 0 && (
                     <Form.Text className="text-info">
                         Subjects are inherited from parent stage and cannot be modified
                     </Form.Text>

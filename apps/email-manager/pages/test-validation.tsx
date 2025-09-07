@@ -11,7 +11,7 @@ interface SubEvent {
 
 export default function TestValidationPage() {
     const [events, setEvents] = useState<Array<{ aid: string; name: string; config?: { emailManager?: boolean }; subEvents?: Record<string, SubEvent> }>>([]);
-    const [stages, setStages] = useState<Array<{ stage: string; description: string; order?: number; parentStage?: string }>>([]);
+    const [stages, setStages] = useState<Array<{ stage: string; description: string; order?: number; parentStages?: string[] }>>([]);
     const [eventCode, setEventCode] = useState('');
     const [subEvent, setSubEvent] = useState('');
     const [selectedStage, setSelectedStage] = useState('');
@@ -65,9 +65,9 @@ export default function TestValidationPage() {
 
                 addDebugLog(`Loaded ${filteredEvents.length} events and ${Array.isArray(stagesResp) ? stagesResp.length : 0} stages`);
 
-                // Log stages with parentStage
-                const stagesWithParent = Array.isArray(stagesResp) ? stagesResp.filter((s) => s.parentStage) : [];
-                addDebugLog(`Found ${stagesWithParent.length} stages with parentStage: ${stagesWithParent.map((s) => s.stage).join(', ')}`);
+                // Log stages with parentStages
+                const stagesWithParent = Array.isArray(stagesResp) ? stagesResp.filter((s) => s.parentStages && s.parentStages.length > 0) : [];
+                addDebugLog(`Found ${stagesWithParent.length} stages with parentStages: ${stagesWithParent.map((s) => s.stage).join(', ')}`);
 
             } catch (error) {
                 // Handle AUTH_UNKNOWN_CONFIG_KEY and other errors gracefully
@@ -107,8 +107,8 @@ export default function TestValidationPage() {
         const stageRecord = stages.find(s => s.stage === newStage);
         addDebugLog(`Found stage record: ${JSON.stringify(stageRecord)}`);
 
-        if (stageRecord?.parentStage && eventCode && subEvent) {
-            addDebugLog(`Stage has parentStage: ${stageRecord.parentStage}, validating...`);
+        if (stageRecord?.parentStages && stageRecord.parentStages.length > 0 && eventCode && subEvent) {
+            addDebugLog(`Stage has parentStages: ${stageRecord.parentStages.join(', ')}, validating...`);
 
             try {
                 // Note: handleFindParentWorkOrder is not implemented in the new API
@@ -118,10 +118,10 @@ export default function TestValidationPage() {
                 toast.success(`Stage '${newStage}' selected (parent validation skipped)`);
             } catch (error) {
                 addDebugLog(`Error finding parent work order: ${error}`);
-                toast.error(`Error finding parent work order for stage '${stageRecord.parentStage}'`);
+                toast.error(`Error finding parent work order for stages: ${stageRecord.parentStages.join(', ')}`);
             }
         } else {
-            addDebugLog('No parent stage required, proceeding normally');
+            addDebugLog('No parent stages required, proceeding normally');
             setSelectedStage(newStage);
         }
     };
@@ -170,7 +170,7 @@ export default function TestValidationPage() {
                         {stages.map(st => (
                             <option key={st.stage} value={st.stage}>
                                 {st.order ? `[${st.order}] ` : ''}{st.stage} - {st.description}
-                                {st.parentStage ? ` (parent: ${st.parentStage})` : ''}
+                                {st.parentStages && st.parentStages.length > 0 ? ` (parents: ${st.parentStages.join(', ')})` : ''}
                             </option>
                         ))}
                     </Form.Select>
@@ -192,7 +192,7 @@ export default function TestValidationPage() {
                     <div><strong>Event Code:</strong> {eventCode || 'None'}</div>
                     <div><strong>Sub Event:</strong> {subEvent || 'None'}</div>
                     <div><strong>Selected Stage:</strong> {selectedStage || 'None'}</div>
-                    <div><strong>Stages with parentStage:</strong> {stages.filter(s => s.parentStage).map(s => s.stage).join(', ') || 'None'}</div>
+                    <div><strong>Stages with parentStages:</strong> {stages.filter(s => s.parentStages && s.parentStages.length > 0).map(s => s.stage).join(', ') || 'None'}</div>
                 </div>
             </div>
         </Container>
