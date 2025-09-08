@@ -100,8 +100,8 @@ export function checkEligibility(
                 }
                 break;
             case 'currenteventoffering':
-                if (studentData.programs?.[currentAid]?.offeringHistory?.[attr.subevent]) {
-                    isEligible = !!(studentData.programs[currentAid].offeringHistory[attr.subevent!]?.offeringSKU) && 
+                if (attr.subevent && studentData.programs?.[currentAid]?.offeringHistory?.[attr.subevent]) {
+                    isEligible = !!(studentData.programs[currentAid].offeringHistory[attr.subevent]?.offeringSKU) && 
                                 !studentData.programs[currentAid]?.withdrawn;
                 }
                 break;
@@ -109,8 +109,8 @@ export function checkEligibility(
                 isEligible = !!(studentData.programs?.[currentAid]?.test);
                 break;
             case 'currenteventnotoffering':
-                if (studentData.programs?.[currentAid]?.offeringHistory?.[attr.subevent]) {
-                    isEligible = !(!!(studentData.programs[currentAid].offeringHistory[attr.subevent!]?.offeringSKU));
+                if (attr.subevent && studentData.programs?.[currentAid]?.offeringHistory?.[attr.subevent]) {
+                    isEligible = !(!!(studentData.programs[currentAid].offeringHistory[attr.subevent]?.offeringSKU));
                 }
                 break;
             case 'offeringandpools':
