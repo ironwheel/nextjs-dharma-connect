@@ -72,13 +72,11 @@ def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid:
             programs = student_data.get('programs', {})
             program = programs.get(current_aid, {})
             is_eligible = program.get('test', {})
-        elif attr_type == 'notoffering':
-            aid = attr.get('aid')
-            subevent = attr.get('subevent')
+        elif attr_type == 'currenteventnotoffering':
             programs = student_data.get('programs', {})
-            program = programs.get(aid, {})
+            program = programs.get(current_aid, {})
             offering_history = program.get('offeringHistory', {})
-            subevent_data = offering_history.get(subevent, {})
+            subevent_data = offering_history.get(current_subevent, {})
             is_eligible = not bool(subevent_data.get('offeringSKU'))
         elif attr_type == 'offeringandpools':
             aid = attr.get('aid')
@@ -112,10 +110,9 @@ def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid:
             programs = student_data.get('programs', {})
             program = programs.get(current_aid, {})
             is_eligible = bool(program.get('accepted')) and not bool(program.get('withdrawn')) 
-        elif attr_type == 'notjoin':
-            aid = attr.get('aid')
+        elif attr_type == 'currenteventnotjoin':
             programs = student_data.get('programs', {})
-            program = programs.get(aid, {})
+            program = programs.get(current_aid, {})
             is_eligible = not bool(program.get('join'))
         elif attr_type == 'joinwhich':
             aid = attr.get('aid')
