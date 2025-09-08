@@ -524,7 +524,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             const pool = selectedEvent?.config?.pool || ''
 
             // Initialize or preserve steps
-            const steps = shouldResetSteps ? [
+            let steps = shouldResetSteps ? [
                 {
                     name: 'Count',
                     status: 'ready',
@@ -533,8 +533,10 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 },
                 {
                     name: 'Prepare',
-                    status: 'ready',
-                    message: '',
+                    status: inheritedFields.s3HTMLPaths && Object.keys(inheritedFields.s3HTMLPaths).length > 0 ? 'complete' : 'ready',
+                    message: inheritedFields.s3HTMLPaths && Object.keys(inheritedFields.s3HTMLPaths).length > 0 
+                        ? `Skipped - HTML files inherited from parent stage: ${inheritedFromStage}` 
+                        : '',
                     isActive: false
                 },
                 {
@@ -556,6 +558,20 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     isActive: false
                 }
             ] : existingSteps
+
+            // If not resetting steps but we have inherited s3HTMLPaths, update the Prepare step
+            if (!shouldResetSteps && inheritedFields.s3HTMLPaths && Object.keys(inheritedFields.s3HTMLPaths).length > 0) {
+                steps = steps.map(step => {
+                    if (step.name === 'Prepare' && step.status === 'ready') {
+                        return {
+                            ...step,
+                            status: 'complete',
+                            message: `Skipped - HTML files inherited from parent stage: ${inheritedFromStage}`
+                        }
+                    }
+                    return step
+                })
+            }
 
             let workOrderId = id;
             if (!workOrderId) {

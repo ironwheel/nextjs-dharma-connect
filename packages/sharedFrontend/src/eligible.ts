@@ -13,7 +13,7 @@ export interface StudentData {
 }
 
 export interface PoolAttribute {
-    type: 'true' | 'pool' | 'pooldiff' | 'pooland' | 'practice' | 'offering' | 'offeringandpools' | 'oath' | 'attended' | 'join' | 'joinwhich' | 'eligible';
+    type: 'true' | 'pool' | 'pooldiff' | 'pooland' | 'practice' | 'offering' | 'currenteventoffering' | 'currenteventtest' | 'currenteventnotoffering' | 'offeringandpools' | 'oath' | 'attended' | 'join' | 'currenteventjoin' | 'currenteventaccepted' | 'currenteventnotjoin' | 'joinwhich' | 'eligible';
     name?: string;
     inpool?: string;
     outpool?: string;
@@ -99,6 +99,20 @@ export function checkEligibility(
                     isEligible = !!(studentData.programs?.[attr.aid]?.offeringHistory?.[attr.subevent]?.offeringSKU);
                 }
                 break;
+            case 'currenteventoffering':
+                if (studentData.programs?.[currentAid]?.offeringHistory?.[attr.subevent]) {
+                    isEligible = !!(studentData.programs[currentAid].offeringHistory[attr.subevent!]?.offeringSKU) && 
+                                !studentData.programs[currentAid]?.withdrawn;
+                }
+                break;
+            case 'currenteventtest':
+                isEligible = !!(studentData.programs?.[currentAid]?.test);
+                break;
+            case 'currenteventnotoffering':
+                if (studentData.programs?.[currentAid]?.offeringHistory?.[attr.subevent]) {
+                    isEligible = !(!!(studentData.programs[currentAid].offeringHistory[attr.subevent!]?.offeringSKU));
+                }
+                break;
             case 'offeringandpools':
                 if (attr.aid && attr.subevent && attr.pools && studentData.programs?.[attr.aid]?.offeringHistory?.[attr.subevent]) {
                     isEligible = !!(attr.pools.some((p) => checkEligibility(p, studentData, currentAid, allPoolsData)));
@@ -118,6 +132,16 @@ export function checkEligibility(
                 if (attr.aid) {
                     isEligible = !!(studentData.programs?.[attr.aid]?.join);
                 }
+                break;
+            case 'currenteventjoin':
+                isEligible = !!(studentData.programs?.[currentAid]?.join);
+                break;
+            case 'currenteventaccepted':
+                isEligible = !!(studentData.programs?.[currentAid]?.accepted) && 
+                            !studentData.programs?.[currentAid]?.withdrawn;
+                break;
+            case 'currenteventnotjoin':
+                isEligible = !(!!(studentData.programs?.[currentAid]?.join));
                 break;
             case 'joinwhich':
                 if (attr.aid && attr.retreat &&
