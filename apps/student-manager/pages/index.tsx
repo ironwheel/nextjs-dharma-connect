@@ -1473,6 +1473,29 @@ const Home = () => {
                             </div>
                         )}
 
+                        {/* Permitted Apps Section */}
+                        <div style={{
+                            border: '1px solid #555',
+                            borderRadius: '8px',
+                            padding: '20px',
+                            marginBottom: '30px',
+                            backgroundColor: '#1a1a1a'
+                        }}>
+                            <h5 style={{ marginBottom: '20px' }}>Permitted Apps</h5>
+                            <Row>
+                                {availableHosts.map(host => (
+                                    <Col md={6} key={host} className="mb-2">
+                                        <Form.Check
+                                            type="checkbox"
+                                            label={formatDomainForDisplay(host)}
+                                            checked={formData.permittedHosts.includes(host)}
+                                            onChange={() => handleTogglePermittedHost(host)}
+                                        />
+                                    </Col>
+                                ))}
+                            </Row>
+                        </div>
+
                         {/* Dynamic App Configuration Sections */}
                         {availableHosts.map(host => {
                             const hostSchema = configSchema[host];
@@ -1713,26 +1736,6 @@ const Home = () => {
                             );
                         })}
 
-                        <div style={{
-                            border: '1px solid #555',
-                            borderRadius: '8px',
-                            padding: '20px',
-                            backgroundColor: '#1a1a1a'
-                        }}>
-                            <h5 style={{ marginBottom: '20px' }}>Permitted Apps</h5>
-                            <Row>
-                                {availableHosts.map(host => (
-                                    <Col md={6} key={host} className="mb-2">
-                                        <Form.Check
-                                            type="checkbox"
-                                            label={formatDomainForDisplay(host)}
-                                            checked={formData.permittedHosts.includes(host)}
-                                            onChange={() => handleTogglePermittedHost(host)}
-                                        />
-                                    </Col>
-                                ))}
-                            </Row>
-                        </div>
                     </Form >
                 </Modal.Body >
                 <Modal.Footer style={{ borderTop: 'none' }}>
