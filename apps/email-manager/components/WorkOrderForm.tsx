@@ -394,6 +394,13 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
         if (stage && stages.length > 0) {
             const stageRecord = stages.find(s => s.stage === stage)
             setSelectedStageRecord(stageRecord || null)
+            
+            // Auto-set regLinkPresent based on stage's qaStepCheckRegLink property
+            if (stageRecord) {
+                setRegLinkPresent(Boolean(stageRecord.qaStepCheckRegLink))
+            } else {
+                setRegLinkPresent(false)
+            }
         }
     }, [stage, stages])
 
@@ -440,6 +447,10 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     subjects: parentResult.workOrder.subjects
                 })
                 setInheritedFromStage(parentResult.parentStage)
+                
+                // Auto-set regLinkPresent based on stage's qaStepCheckRegLink property
+                setRegLinkPresent(Boolean(stageRecord.qaStepCheckRegLink))
+                
                 // Update last validation ref
                 lastValidationRef.current = { eventCode, subEvent, stage: newStage }
             } catch (error) {
@@ -460,6 +471,13 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             setSelectedStageRecord(stageRecord || null)
             setInheritedFields({})
             setInheritedFromStage(null)
+            
+            // Auto-set regLinkPresent based on stage's qaStepCheckRegLink property
+            if (stageRecord) {
+                setRegLinkPresent(Boolean(stageRecord.qaStepCheckRegLink))
+            } else {
+                setRegLinkPresent(false)
+            }
         }
     }
 
