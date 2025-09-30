@@ -60,8 +60,19 @@ def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid:
             programs = student_data.get('programs', {})
             program = programs.get(aid, {})
             offering_history = program.get('offeringHistory', {})
-            subevent_data = offering_history.get(subevent, {})
-            is_eligible = bool(subevent_data.get('offeringSKU')) and not bool(program.get('withdrawn')) 
+            if subevent == 'any':
+                # Check if student has any offering in any subevent for this program
+                is_eligible = False
+                for subevent_key in offering_history.keys():
+                    subevent_data = offering_history.get(subevent_key, {})
+                    if bool(subevent_data.get('offeringSKU')):
+                        is_eligible = True
+                        break
+                is_eligible = is_eligible and not bool(program.get('withdrawn'))
+            else:
+                # Check specific subevent
+                subevent_data = offering_history.get(subevent, {})
+                is_eligible = bool(subevent_data.get('offeringSKU')) and not bool(program.get('withdrawn')) 
         elif attr_type == 'currenteventoffering':
             programs = student_data.get('programs', {})
             program = programs.get(current_aid, {})
