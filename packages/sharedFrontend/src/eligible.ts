@@ -96,7 +96,18 @@ export function checkEligibility(
                 break;
             case 'offering':
                 if (attr.aid && attr.subevent) {
-                    isEligible = !!(studentData.programs?.[attr.aid]?.offeringHistory?.[attr.subevent]?.offeringSKU);
+                    if (attr.subevent === 'any') {
+                        // Check if student has any offering in any subevent for this program
+                        const offeringHistory = studentData.programs?.[attr.aid]?.offeringHistory;
+                        if (offeringHistory) {
+                            isEligible = Object.keys(offeringHistory).some(subeventKey => 
+                                !!(offeringHistory[subeventKey]?.offeringSKU)
+                            );
+                        }
+                    } else {
+                        // Check specific subevent
+                        isEligible = !!(studentData.programs?.[attr.aid]?.offeringHistory?.[attr.subevent]?.offeringSKU);
+                    }
                 }
                 break;
             case 'currenteventoffering':
