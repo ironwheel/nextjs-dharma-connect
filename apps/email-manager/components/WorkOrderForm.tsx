@@ -446,6 +446,9 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     languages: parentResult.workOrder.languages,
                     subjects: parentResult.workOrder.subjects
                 })
+                // Apply inherited values to form state
+                setLanguages(parentResult.workOrder.languages || {})
+                setSubjects(parentResult.workOrder.subjects || {})
                 setInheritedFromStage(parentResult.parentStage)
                 
                 // Auto-set regLinkPresent based on stage's qaStepCheckRegLink property
