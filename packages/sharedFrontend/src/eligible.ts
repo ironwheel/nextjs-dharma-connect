@@ -13,7 +13,7 @@ export interface StudentData {
 }
 
 export interface PoolAttribute {
-    type: 'true' | 'pool' | 'pooldiff' | 'pooland' | 'practice' | 'offering' | 'currenteventoffering' | 'currenteventtest' | 'currenteventnotoffering' | 'offeringandpools' | 'oath' | 'attended' | 'join' | 'currenteventjoin' | 'currenteventaccepted' | 'currenteventnotjoin' | 'joinwhich' | 'eligible';
+    type: 'true' | 'pool' | 'pooldiff' | 'pooland' | 'practice' | 'offering' | 'currenteventoffering' | 'currenteventtest' | 'currenteventnotoffering' | 'offeringandpools' | 'oath' | 'attended' | 'join' | 'currenteventjoin' | 'currenteventaccepted' | 'currenteventnotjoin' | 'joinwhich' | 'offeringwhich' | 'eligible';
     name?: string;
     inpool?: string;
     outpool?: string;
@@ -159,8 +159,29 @@ export function checkEligibility(
                     studentData.programs?.[attr.aid]?.join &&
                     !studentData.programs?.[attr.aid]?.withdrawn &&
                     studentData.programs?.[attr.aid]?.whichRetreats) {
-                    const keys = Object.keys(studentData.programs[attr.aid].whichRetreats);
-                    isEligible = keys.some((key) => key.startsWith(attr.retreat!));
+                    const whichRetreats = studentData.programs[attr.aid].whichRetreats;
+                    const keys = Object.keys(whichRetreats);
+                    isEligible = keys.some((key) => key.startsWith(attr.retreat!) && whichRetreats[key]);
+                }
+                break;
+            case 'offeringwhich':
+                if (attr.aid && attr.retreat && attr.subevent &&
+                    studentData.programs?.[attr.aid]?.join &&
+                    !studentData.programs?.[attr.aid]?.withdrawn &&
+                    studentData.programs?.[attr.aid]?.whichRetreats) {
+                    // First check: verify the retreat is in whichRetreats and is truthy
+                    const whichRetreats = studentData.programs[attr.aid].whichRetreats;
+                    const retreatKeys = Object.keys(whichRetreats);
+                    const hasRetreat = retreatKeys.some((key) => key.startsWith(attr.retreat!) && whichRetreats[key]);
+                    
+                    // Second check: verify offering exists for the subevent (independent of whichRetreats)
+                    if (hasRetreat && studentData.programs[attr.aid].offeringHistory) {
+                        const offeringHistory = studentData.programs[attr.aid].offeringHistory;
+                        const offeringKeys = Object.keys(offeringHistory);
+                        isEligible = offeringKeys.some((key) => 
+                            key.startsWith(attr.subevent!) && !!(offeringHistory[key]?.offeringSKU)
+                        );
+                    }
                 }
                 break;
             case 'eligible':

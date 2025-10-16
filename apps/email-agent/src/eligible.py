@@ -133,8 +133,31 @@ def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid:
             if (program.get('join') and 
                 not program.get('withdrawn') and 
                 program.get('whichRetreats')):
-                keys = list(program['whichRetreats'].keys())
-                is_eligible = any(key.startswith(retreat) for key in keys)
+                which_retreats = program['whichRetreats']
+                keys = list(which_retreats.keys())
+                is_eligible = any(key.startswith(retreat) and which_retreats[key] for key in keys)
+        elif attr_type == 'offeringwhich':
+            aid = attr.get('aid')
+            retreat = attr.get('retreat')
+            subevent = attr.get('subevent')
+            programs = student_data.get('programs', {})
+            program = programs.get(aid, {})
+            if (program.get('join') and 
+                not program.get('withdrawn') and 
+                program.get('whichRetreats')):
+                # First check: verify the retreat is in whichRetreats and is truthy
+                which_retreats = program['whichRetreats']
+                retreat_keys = list(which_retreats.keys())
+                has_retreat = any(key.startswith(retreat) and which_retreats[key] for key in retreat_keys)
+                
+                # Second check: verify offering exists for the subevent (independent of whichRetreats)
+                if has_retreat and program.get('offeringHistory'):
+                    offering_history = program['offeringHistory']
+                    offering_keys = list(offering_history.keys())
+                    is_eligible = any(
+                        key.startswith(subevent) and bool(offering_history[key].get('offeringSKU'))
+                        for key in offering_keys
+                    )
         elif attr_type == 'eligible':
             programs = student_data.get('programs', {})
             program = programs.get(current_aid, {})
