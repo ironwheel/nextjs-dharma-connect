@@ -599,6 +599,15 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 workOrderId = `wo-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
             }
 
+            // Determine s3HTMLPaths value:
+            // 1. If we have inherited fields from a parent stage, use those
+            // 2. Otherwise, if editing, preserve the existing s3HTMLPaths
+            // 3. Otherwise (new work order with no inheritance), leave undefined
+            let s3HTMLPathsValue = inheritedFields.s3HTMLPaths;
+            if (!s3HTMLPathsValue && id && loadedWorkOrderRef.current) {
+                s3HTMLPathsValue = loadedWorkOrderRef.current.s3HTMLPaths;
+            }
+
             const workOrder: WorkOrder = {
                 id: workOrderId,
                 eventCode,
@@ -619,7 +628,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 config: {
                     pool: pool
                 },
-                s3HTMLPaths: inheritedFields.s3HTMLPaths,
+                s3HTMLPaths: s3HTMLPathsValue,
                 steps: steps,
                 locked: false,
                 createdAt: new Date().toISOString(),
