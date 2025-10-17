@@ -117,6 +117,10 @@ def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid:
             programs = student_data.get('programs', {})
             program = programs.get(current_aid, {})
             is_eligible = bool(program.get('join'))   
+        elif attr_type == 'currenteventmanualinclude':
+            programs = student_data.get('programs', {})
+            program = programs.get(current_aid, {})
+            is_eligible = bool(program.get('manualInclude'))
         elif attr_type == 'currenteventaccepted':
             programs = student_data.get('programs', {})
             program = programs.get(current_aid, {})

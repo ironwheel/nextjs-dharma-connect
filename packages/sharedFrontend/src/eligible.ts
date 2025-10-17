@@ -13,7 +13,7 @@ export interface StudentData {
 }
 
 export interface PoolAttribute {
-    type: 'true' | 'pool' | 'pooldiff' | 'pooland' | 'practice' | 'offering' | 'currenteventoffering' | 'currenteventtest' | 'currenteventnotoffering' | 'offeringandpools' | 'oath' | 'attended' | 'join' | 'currenteventjoin' | 'currenteventaccepted' | 'currenteventnotjoin' | 'joinwhich' | 'offeringwhich' | 'eligible';
+    type: 'true' | 'pool' | 'pooldiff' | 'pooland' | 'practice' | 'offering' | 'currenteventoffering' | 'currenteventtest' | 'currenteventnotoffering' | 'offeringandpools' | 'oath' | 'attended' | 'join' | 'currenteventjoin' | 'currenteventmanualinclude' | 'currenteventaccepted' | 'currenteventnotjoin' | 'joinwhich' | 'offeringwhich' | 'eligible';
     name?: string;
     inpool?: string;
     outpool?: string;
@@ -146,6 +146,9 @@ export function checkEligibility(
                 break;
             case 'currenteventjoin':
                 isEligible = !!(studentData.programs?.[currentAid]?.join);
+                break;
+            case 'currenteventmanualinclude':
+                isEligible = !!(studentData.programs?.[currentAid]?.manualInclude);
                 break;
             case 'currenteventaccepted':
                 isEligible = !!(studentData.programs?.[currentAid]?.accepted) && 
