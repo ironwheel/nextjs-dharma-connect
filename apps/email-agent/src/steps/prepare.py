@@ -64,12 +64,24 @@ class PrepareStep:
         self.log('debug', f"[DEBUG] MAILCHIMP_REPLY_TO: {self.reply_to}")
         self.log('debug', f"[DEBUG] S3_BUCKET: {self.s3_bucket}")
 
+        # Get stage record to check for parent stages
+        stage_record = self._get_stage_record(work_order.stage)
+        parent_stages = stage_record.get('parentStages', [])
+        
+        # Use parent stage for template if available, otherwise use current stage
+        template_stage = parent_stages[0] if parent_stages else work_order.stage
+        
+        if parent_stages:
+            self.log('debug', f"[DEBUG] Stage '{work_order.stage}' has parent stages: {parent_stages}. Using '{template_stage}' for template lookup.")
+        else:
+            self.log('debug', f"[DEBUG] Stage '{work_order.stage}' has no parent stages. Using current stage for template lookup.")
+
         # Process each language in the work order
         for lang in work_order.languages.keys():
             if not work_order.languages[lang]:
                 continue  # Skip disabled languages
 
-            template_name = f"{work_order.eventCode}-{work_order.subEvent}-{work_order.stage}-{lang}"
+            template_name = f"{work_order.eventCode}-{work_order.subEvent}-{template_stage}-{lang}"
             object_name = template_name + ".html"
             s3_key = f"{work_order.eventCode}/{object_name}"
 
