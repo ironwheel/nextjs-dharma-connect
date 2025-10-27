@@ -283,7 +283,7 @@ function verifyToken(token: string, pid: string, clientFingerprint: string, oper
             console.log(`  - Error: ${err.message}`);
             console.log(`  - Expired at: ${err.expiredAt ? new Date(err.expiredAt).toISOString() : 'unknown'}`);
             console.log(`  - Current time: ${new Date().toISOString()}`);
-            console.log(`  - Expected ACCESS_TOKEN_DURATION: ${ACCESS_TOKEN_DURATION_SECONDS} seconds (${(parseInt(ACCESS_TOKEN_DURATION_SECONDS) / 60).toFixed(2)} minutes)`);
+            console.log(`  - Expected ACCESS_TOKEN_DURATION: ${ACCESS_TOKEN_DURATION_SECONDS || 'unknown'} seconds (${ACCESS_TOKEN_DURATION_SECONDS ? (parseInt(ACCESS_TOKEN_DURATION_SECONDS) / 60).toFixed(2) : 'unknown'} minutes)`);
             return VerifyResult.VERIFY_ERR_EXPIRED;
         } else if (err instanceof jwt.JsonWebTokenError) {
             console.log(`TOKEN VERIFICATION [pid=${pid}]: Invalid signature - ${err.message}`);
@@ -1063,14 +1063,14 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
         console.log(`  - Session TTL: ${sessionTTL} (expires: ${new Date(sessionTTL * 1000).toISOString()})`);
         console.log(`  - Current time: ${currentTimeSeconds} (${new Date(currentTimeSeconds * 1000).toISOString()})`);
         console.log(`  - Time until expiry: ${timeUntilExpirySeconds} seconds (${(timeUntilExpirySeconds / 3600).toFixed(2)} hours)`);
-        console.log(`  - Expected SESSION_DURATION: ${SESSION_DURATION_SECONDS} seconds (${(parseInt(SESSION_DURATION_SECONDS) / 3600).toFixed(2)} hours)`);
+        console.log(`  - Expected SESSION_DURATION: ${SESSION_DURATION_SECONDS || 'unknown'} seconds (${SESSION_DURATION_SECONDS ? (parseInt(SESSION_DURATION_SECONDS) / 3600).toFixed(2) : 'unknown'} hours)`);
         console.log(`  - Is expired: ${sessionTTL <= currentTimeSeconds}`);
         
         if (sessionTTL <= currentTimeSeconds) {
             // Session is expired, delete it and fall through to the verification process
             console.log(`SESSION EXPIRED [pid=${pid}]: Deleting session and requiring re-verification`);
             console.log(`  - Reason: TTL (${sessionTTL}) <= current time (${currentTimeSeconds})`);
-            console.log(`  - Session was valid for: ${sessionAgeSeconds} seconds instead of expected ${SESSION_DURATION_SECONDS} seconds`);
+            console.log(`  - Session was valid for: ${sessionAgeSeconds} seconds instead of expected ${SESSION_DURATION_SECONDS || 'unknown'} seconds`);
             await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, session.id, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
         } else {
             // Session is valid, generate fresh access token with all actions
