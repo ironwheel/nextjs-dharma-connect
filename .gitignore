@@ -81,6 +81,7 @@ apps/email-agent.zip
 
 # Ignore Python virtual environments
 apps/email-agent/venv/
+utils/.venv/
 
 # Ignore utility cache files
 utils/refresh_prompts_student_dashboard_cache.py

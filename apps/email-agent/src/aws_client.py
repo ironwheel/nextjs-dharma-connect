@@ -804,10 +804,14 @@ class AWSClient:
         except Exception as e:
             print(f"Error appending dryrun recipient: {e}")
 
-    def append_send_recipient(self, campaign_string: str, entry: dict):
+    def append_send_recipient(self, campaign_string: str, entry: dict, account: str = None):
         """Append a recipient to the send_recipients table."""
         try:
             table = self.dynamodb.Table(SEND_RECIPIENTS_TABLE)
+            
+            # Add account to entry if provided
+            if account:
+                entry['account'] = account
             
             # Try to get existing record
             try:
@@ -839,4 +843,63 @@ class AWSClient:
                 else:
                     raise
         except Exception as e:
-            print(f"Error appending send recipient: {e}") 
+            print(f"Error appending send recipient: {e}")
+    
+    def count_emails_sent_by_account_in_last_24_hours(self, account: str) -> int:
+        """
+        Count the number of emails sent by a specific account in the last 24 hours.
+        
+        Args:
+            account: The account name (e.g., 'connect', 'vajrayana')
+            
+        Returns:
+            int: Number of emails sent by this account in the last 24 hours
+        """
+        try:
+            table = self.dynamodb.Table(SEND_RECIPIENTS_TABLE)
+            
+            # Calculate the timestamp 24 hours ago
+            twenty_four_hours_ago = datetime.now(timezone.utc) - timedelta(hours=24)
+            twenty_four_hours_ago_iso = twenty_four_hours_ago.isoformat()
+            
+            # Scan the table for all campaign strings
+            count = 0
+            last_evaluated_key = None
+            
+            while True:
+                if last_evaluated_key:
+                    response = table.scan(ExclusiveStartKey=last_evaluated_key)
+                else:
+                    response = table.scan()
+                
+                items = response.get('Items', [])
+                
+                # For each campaign string, check entries for matching account and timestamp
+                for item in items:
+                    entries = item.get('entries', [])
+                    for entry in entries:
+                        # Check if this entry is for the target account
+                        entry_account = entry.get('account')
+                        if entry_account != account:
+                            continue
+                        
+                        # Check if the sendtime is within the last 24 hours
+                        sendtime_str = entry.get('sendtime')
+                        if sendtime_str:
+                            try:
+                                sendtime = datetime.fromisoformat(sendtime_str.replace('Z', '+00:00'))
+                                if sendtime >= twenty_four_hours_ago:
+                                    count += 1
+                            except Exception as e:
+                                print(f"[WARNING] Failed to parse sendtime '{sendtime_str}': {e}")
+                
+                last_evaluated_key = response.get('LastEvaluatedKey')
+                if not last_evaluated_key:
+                    break
+            
+            return count
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to count emails for account '{account}': {e}")
+            # Return 0 to be safe - don't block sends if we can't check the limit
+            return 0 

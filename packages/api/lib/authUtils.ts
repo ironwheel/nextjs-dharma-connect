@@ -279,13 +279,17 @@ function verifyToken(token: string, pid: string, clientFingerprint: string, oper
         decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] });
     } catch (err: any) {
         if (err instanceof jwt.TokenExpiredError) {
-            console.log("TOKEN ERR: expired");
+            console.log(`TOKEN VERIFICATION [pid=${pid}]: Token expired`);
+            console.log(`  - Error: ${err.message}`);
+            console.log(`  - Expired at: ${err.expiredAt ? new Date(err.expiredAt).toISOString() : 'unknown'}`);
+            console.log(`  - Current time: ${new Date().toISOString()}`);
+            console.log(`  - Expected ACCESS_TOKEN_DURATION: ${ACCESS_TOKEN_DURATION_SECONDS} seconds (${(parseInt(ACCESS_TOKEN_DURATION_SECONDS) / 60).toFixed(2)} minutes)`);
             return VerifyResult.VERIFY_ERR_EXPIRED;
         } else if (err instanceof jwt.JsonWebTokenError) {
-            console.log("TOKEN ERR: invalid signature");
+            console.log(`TOKEN VERIFICATION [pid=${pid}]: Invalid signature - ${err.message}`);
             return VerifyResult.VERIFY_ERR_INVALID_SIGNATURE;
         } else {
-            console.log("TOKEN ERR: unknown");
+            console.log(`TOKEN VERIFICATION [pid=${pid}]: Unknown error - ${err.message || err}`);
             return VerifyResult.VERIFY_ERR_UNKNOWN;
         }
     }
@@ -869,13 +873,26 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
     // Verification token is valid, so we can create a session
     tableCfg = tableGetConfig('sessions');
 
+    const sessionCreatedAt = Date.now();
+    const sessionTTL = Math.floor((sessionCreatedAt + SESSION_DURATION_MS) / 1000);
+    const sessionDurationSeconds = Math.floor(SESSION_DURATION_MS / 1000);
+    
+    console.log(`SESSION CREATION [pid=${pid}]:`);
+    console.log(`  - Creating new session after email verification`);
+    console.log(`  - Created at: ${new Date(sessionCreatedAt).toISOString()} (${sessionCreatedAt})`);
+    console.log(`  - TTL set to: ${sessionTTL} (expires: ${new Date(sessionTTL * 1000).toISOString()})`);
+    console.log(`  - SESSION_DURATION_MS: ${SESSION_DURATION_MS} ms`);
+    console.log(`  - Session duration: ${sessionDurationSeconds} seconds (${(sessionDurationSeconds / 3600).toFixed(2)} hours)`);
+    console.log(`  - Device fingerprint: ${deviceFingerprint}`);
+
     try {
         await putOne(tableCfg.tableName, {
             id: pid,
             fingerprint: deviceFingerprint,
-            createdAt: Date.now(),
-            ttl: Math.floor((Date.now() + SESSION_DURATION_MS) / 1000) // TTL in seconds for DynamoDB
+            createdAt: sessionCreatedAt,
+            ttl: sessionTTL // TTL in seconds for DynamoDB
         }, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        console.log(`SESSION CREATION [pid=${pid}]: Successfully created session in DynamoDB`);
     } catch (e) {
         console.error("verificationEmailCallback: Failed to create session:", e);
         throw new Error('AUTH_SESSION_CREATION_FAILED');
@@ -963,18 +980,26 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
 
     let tokenVerificationResult = VerifyResult.VERIFY_ERR_UNKNOWN;
     if (token) {
+        console.log(`TOKEN CHECK [pid=${pid}]: Access token provided, attempting verification for operation: ${operation}`);
         tokenVerificationResult = verifyToken(token, pid, deviceFingerprint, operation);
+        console.log(`TOKEN CHECK [pid=${pid}]: Verification result: ${tokenVerificationResult}`);
     } else {
-        console.log("checkAccess: no token provided");
+        console.log(`TOKEN CHECK [pid=${pid}]: No access token provided in request`);
     }
 
     // The verify token function which includes operation permission along with
     // the the pre-check of the hash means we're good to go
     // We don't need to return the token because the client already has it
     if (tokenVerificationResult === VerifyResult.VERIFY_OK) {
+        console.log(`TOKEN CHECK [pid=${pid}]: Token valid and operation permitted, user authenticated`);
         return {
             status: 'authenticated'
         };
+    }
+
+    // Token verification failed, will check for valid session to refresh token
+    if (token) {
+        console.log(`TOKEN CHECK [pid=${pid}]: Token verification failed (${tokenVerificationResult}), checking session for token refresh`);
     }
 
     // Check if token is valid but operation not found, and if it's a verification operation
@@ -1022,19 +1047,46 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     // Sessions records use a primary key of pid-deviceFingerprint
     tableCfg = tableGetConfig('sessions');
     const session = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    
     // If session found, generate fresh access token if the session isn't expired
     if (session) {
-        if (session.ttl <= Math.floor(Date.now() / 1000)) {
+        const currentTimeSeconds = Math.floor(Date.now() / 1000);
+        const sessionTTL = session.ttl;
+        const sessionCreatedAt = session.createdAt || 0;
+        const sessionAgeSeconds = currentTimeSeconds - Math.floor(sessionCreatedAt / 1000);
+        const timeUntilExpirySeconds = sessionTTL - currentTimeSeconds;
+        
+        console.log(`SESSION CHECK [pid=${pid}]:`);
+        console.log(`  - Session found: YES`);
+        console.log(`  - Session created: ${new Date(sessionCreatedAt).toISOString()} (${sessionCreatedAt})`);
+        console.log(`  - Session age: ${sessionAgeSeconds} seconds (${(sessionAgeSeconds / 3600).toFixed(2)} hours)`);
+        console.log(`  - Session TTL: ${sessionTTL} (expires: ${new Date(sessionTTL * 1000).toISOString()})`);
+        console.log(`  - Current time: ${currentTimeSeconds} (${new Date(currentTimeSeconds * 1000).toISOString()})`);
+        console.log(`  - Time until expiry: ${timeUntilExpirySeconds} seconds (${(timeUntilExpirySeconds / 3600).toFixed(2)} hours)`);
+        console.log(`  - Expected SESSION_DURATION: ${SESSION_DURATION_SECONDS} seconds (${(parseInt(SESSION_DURATION_SECONDS) / 3600).toFixed(2)} hours)`);
+        console.log(`  - Is expired: ${sessionTTL <= currentTimeSeconds}`);
+        
+        if (sessionTTL <= currentTimeSeconds) {
             // Session is expired, delete it and fall through to the verification process
+            console.log(`SESSION EXPIRED [pid=${pid}]: Deleting session and requiring re-verification`);
+            console.log(`  - Reason: TTL (${sessionTTL}) <= current time (${currentTimeSeconds})`);
+            console.log(`  - Session was valid for: ${sessionAgeSeconds} seconds instead of expected ${SESSION_DURATION_SECONDS} seconds`);
             await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, session.id, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
         } else {
             // Session is valid, generate fresh access token with all actions
+            console.log(`SESSION VALID [pid=${pid}]: Refreshing access token`);
+            console.log(`  - ${timeUntilExpirySeconds} seconds remaining on session`);
             const allActionsList = await getAllActionsForUser(permittedHosts);
             return {
                 status: 'authenticated',
                 accessToken: createToken(pid, deviceFingerprint, allActionsList)
             };
         }
+    } else {
+        console.log(`SESSION CHECK [pid=${pid}]:`);
+        console.log(`  - Session found: NO`);
+        console.log(`  - Reason: No session record exists for pid=${pid} with fingerprint=${deviceFingerprint}`);
+        console.log(`  - User will need to complete email verification to create a new session`);
     }
 
     // No existing session - begin verification process

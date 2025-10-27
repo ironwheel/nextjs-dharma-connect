@@ -11,7 +11,7 @@ from ..models import WorkOrder, Step, StepStatus
 from ..aws_client import AWSClient
 from ..email_sender import send_email
 from ..eligible import check_eligibility
-from ..config import STUDENT_TABLE, POOLS_TABLE, PROMPTS_TABLE, EVENTS_TABLE, EMAIL_BURST_SIZE, EMAIL_RECOVERY_SLEEP_SECS
+from ..config import STUDENT_TABLE, POOLS_TABLE, PROMPTS_TABLE, EVENTS_TABLE, EMAIL_BURST_SIZE, EMAIL_RECOVERY_SLEEP_SECS, SMTP_24_HOUR_SEND_LIMIT
 from .shared import passes_stage_filter, build_campaign_string, code_to_full_language, get_stage_prefix, find_eligible_students
 
 
@@ -55,6 +55,20 @@ class SendBaseStep:
         try:
             # Update initial progress message
             await self._update_progress(work_order, f"Starting {self.step_name.lower()} process...", step.name)
+            
+            # For actual sends (not dry-runs), check the 24-hour send limit for this account
+            if not self.dryrun and work_order.account:
+                await self._update_progress(work_order, f"Checking 24-hour send limit for account '{work_order.account}'...", step.name)
+                emails_sent_in_last_24h = self.aws_client.count_emails_sent_by_account_in_last_24_hours(work_order.account)
+                self.log('progress', f"[LIMIT-CHECK] Account '{work_order.account}' has sent {emails_sent_in_last_24h} emails in the last 24 hours (limit: {SMTP_24_HOUR_SEND_LIMIT})")
+                
+                if emails_sent_in_last_24h >= SMTP_24_HOUR_SEND_LIMIT:
+                    error_message = f"24-hour send limit reached for account '{work_order.account}'. Sent {emails_sent_in_last_24h}/{SMTP_24_HOUR_SEND_LIMIT} emails in the last 24 hours. Please wait before sending more emails."
+                    await self._update_progress(work_order, error_message, step.name)
+                    raise Exception(error_message)
+                
+                remaining = SMTP_24_HOUR_SEND_LIMIT - emails_sent_in_last_24h
+                await self._update_progress(work_order, f"Account '{work_order.account}' has {remaining} emails remaining in 24-hour limit", step.name)
             
             # Get stage record for filtering and prefix
             stage_record = self._get_stage_record(work_order.stage)
@@ -151,7 +165,7 @@ class SendBaseStep:
                             if self.dryrun:
                                 self.aws_client.append_dryrun_recipient(campaign_string, entry)
                             else:
-                                self.aws_client.append_send_recipient(campaign_string, entry)
+                                self.aws_client.append_send_recipient(campaign_string, entry, work_order.account)
                     except Exception as e:
                         # Email failure is terminal - stop processing and report error
                         error_message = f"Email sending failed for {lang}: {str(e)}"

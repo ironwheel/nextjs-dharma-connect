@@ -44,11 +44,24 @@ def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid:
         if attr_type == 'true':
             is_eligible = True
         elif attr_type == 'pool':
+            # Validate that 'name' field exists
+            if 'name' not in attr:
+                raise ValueError(f"Pool '{pool_name}' has a malformed 'pool' type attribute missing required 'name' field. Attribute data: {attr}")
             is_eligible = check_eligibility(attr['name'], student_data, current_aid, all_pools_data, current_subevent)
         elif attr_type == 'pooldiff':
+            # Validate required fields
+            if 'inpool' not in attr:
+                raise ValueError(f"Pool '{pool_name}' has a malformed 'pooldiff' type attribute missing required 'inpool' field. Attribute data: {attr}")
+            if 'outpool' not in attr:
+                raise ValueError(f"Pool '{pool_name}' has a malformed 'pooldiff' type attribute missing required 'outpool' field. Attribute data: {attr}")
             is_eligible = (check_eligibility(attr['inpool'], student_data, current_aid, all_pools_data, current_subevent) and
                           not check_eligibility(attr['outpool'], student_data, current_aid, all_pools_data, current_subevent))
         elif attr_type == 'pooland':
+            # Validate required fields
+            if 'pool1' not in attr:
+                raise ValueError(f"Pool '{pool_name}' has a malformed 'pooland' type attribute missing required 'pool1' field. Attribute data: {attr}")
+            if 'pool2' not in attr:
+                raise ValueError(f"Pool '{pool_name}' has a malformed 'pooland' type attribute missing required 'pool2' field. Attribute data: {attr}")
             is_eligible = (check_eligibility(attr['pool1'], student_data, current_aid, all_pools_data, current_subevent) and
                           check_eligibility(attr['pool2'], student_data, current_aid, all_pools_data, current_subevent))
         elif attr_type == 'practice':
@@ -90,6 +103,11 @@ def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid:
             subevent_data = offering_history.get(current_subevent, {})
             is_eligible = not bool(subevent_data.get('offeringSKU'))
         elif attr_type == 'offeringandpools':
+            # Validate required fields
+            if 'aid' not in attr:
+                raise ValueError(f"Pool '{pool_name}' has a malformed 'offeringandpools' type attribute missing required 'aid' field. Attribute data: {attr}")
+            if 'subevent' not in attr:
+                raise ValueError(f"Pool '{pool_name}' has a malformed 'offeringandpools' type attribute missing required 'subevent' field. Attribute data: {attr}")
             aid = attr.get('aid')
             subevent = attr.get('subevent')
             pools = attr.get('pools', [])
