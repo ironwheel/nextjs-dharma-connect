@@ -105,6 +105,15 @@ class SendBaseStep:
                 if not work_order.languages[lang]:
                     continue  # Skip disabled languages
                 
+                # Check send limit before starting each language (for non-dry-runs)
+                if not self.dryrun and work_order.account and total_emails_sent > 0:
+                    emails_sent_in_last_24h = self.aws_client.count_emails_sent_by_account_in_last_24_hours(work_order.account)
+                    if emails_sent_in_last_24h >= SMTP_24_HOUR_SEND_LIMIT:
+                        error_message = f"24-hour send limit reached before processing {lang}. Sent {emails_sent_in_last_24h}/{SMTP_24_HOUR_SEND_LIMIT} emails in the last 24 hours. Stopping to avoid exceeding limit."
+                        await self._update_progress(work_order, error_message, step.name)
+                        self.log('progress', f"[LIMIT-CHECK] Skipping remaining languages. Total sent in 24h: {emails_sent_in_last_24h}/{SMTP_24_HOUR_SEND_LIMIT}")
+                        raise Exception(error_message)
+                
                 await self._update_progress(work_order, f"Processing {lang} language...", step.name)
                 
                 # Get campaign string for this language
@@ -149,6 +158,16 @@ class SendBaseStep:
                             step.message = "Step interrupted by stop request."
                             return False
                     
+                    # Periodic send limit check (every 10 emails for non-dry-runs)
+                    if not self.dryrun and work_order.account and i > 0 and i % 10 == 0:
+                        emails_sent_in_last_24h = self.aws_client.count_emails_sent_by_account_in_last_24_hours(work_order.account)
+                        if emails_sent_in_last_24h >= SMTP_24_HOUR_SEND_LIMIT:
+                            error_message = f"24-hour send limit reached during sending for account '{work_order.account}'. Sent {emails_sent_in_last_24h}/{SMTP_24_HOUR_SEND_LIMIT} emails in the last 24 hours. Stopping to avoid exceeding limit."
+                            await self._update_progress(work_order, error_message, step.name)
+                            self.log('progress', f"[LIMIT-CHECK] Stopping send for {lang} after {emails_sent} emails. Total sent in 24h: {emails_sent_in_last_24h}/{SMTP_24_HOUR_SEND_LIMIT}")
+                            # Mark this as reaching the limit but still successful for the emails sent so far
+                            raise Exception(error_message)
+                    
                     try:
                         success = await self._send_student_email(
                             student, lang, work_order, event_data, pools_data, prompts_data, campaign_string, stage_record
@@ -191,6 +210,11 @@ class SendBaseStep:
                                 return False
                 
                 await self._update_progress(work_order, f"Completed {lang} language, sent {emails_sent} emails", step.name)
+            
+            # Final send limit verification (for non-dry-runs)
+            if not self.dryrun and work_order.account:
+                final_count = self.aws_client.count_emails_sent_by_account_in_last_24_hours(work_order.account)
+                self.log('progress', f"[LIMIT-CHECK] Final verification - Account '{work_order.account}' has sent {final_count}/{SMTP_24_HOUR_SEND_LIMIT} emails in the last 24 hours")
             
             if self.dryrun:
                 success_message = f"Dry-Run completed successfully. {total_emails_sent} emails would have been sent."
