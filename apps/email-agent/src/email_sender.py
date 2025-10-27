@@ -111,6 +111,45 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
         raise Exception("Student email not found")
     msg['To'] = email_to
 
+    # If #salutation directive in html, replace it with the langauge specific salutation
+    # replacing the ||name|| field in the prompts with the person's name
+    if "#salutation" in html:
+        full_language = code_to_full_language(language)
+        salutation_text = prompt_lookup(prompts_array, 'salutation', full_language, event['aid'])
+        if not salutation_text:
+            raise Exception(f"Can't use #salutation. No prompt found for prompt: salutation, {full_language}")
+        # name will get replaced with the person's name below
+        html = html.replace("#salutation", salutation_text)
+
+    # If #reglink directive in html, replace it with the langauge specific reg link language
+    # ||pid|| will get replaced with the participant's pid below
+    # ||name|| will get replaced with the person's name below
+    # ||aid|| will get replaced with the event's aid below
+    if "#reglink" in html:
+        full_language = code_to_full_language(language)
+        registration_link_text = prompt_lookup(prompts_array, 'reglink', full_language, event['aid'])
+        if not registration_link_text:
+            raise Exception(f"Can't use #reglink. No prompt found for prompt: reglink, {full_language}")
+        html = html.replace("#reglink", registration_link_text)
+
+    # If #offeringsection <subevent> directive in html, replace it with the langauge specific offering section language
+    # placeholder pid will get replaced with the participant's pid below
+    # ||pid|| will get replaced with the participant's pid below
+    # ||name|| will get replaced with the person's name below
+    # ||aid|| will get replaced with the event's aid below
+    if "#offeringsection" in html:
+        subevent = html.split("#offeringsection")[1].split(" ")[0]
+        full_language = code_to_full_language(language)
+        offering_section_text = prompt_lookup(prompts_array, 'offeringsection', full_language, event['aid'])
+        if not offering_section_text:
+            raise Exception(f"Can't use #offeringsection. No prompt found for prompt: offeringsection, {full_language}")
+        # Add the subevent to the offering section #if offering <subevent>
+        offering_section_text = offering_section_text.replace("<subevent>", subevent)
+        # remove the subevent from the original html
+        html = html.replace(f"{subevent}", "")
+        # Replace the #offeringsection directive with the offering section text
+        html = html.replace("#offeringsection", offering_section_text)
+
     # Replace any ||name|| fields with the person's name
     html = html.replace("||name||", f"{student.get('first', '')} {student.get('last', '')}")
 
@@ -200,8 +239,12 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
 
     msg['From'] = f"{DEFAULT_FROM_NAME}<{coord_email}>"
 
-    # Replace placeholder with student ID
+    # Replace placeholder pid with student ID
     html = html.replace("123456789", student.get('id', ''))
+    html = html.replace("||pid||", student.get('id', ''))
+
+    # Replace placeholder aid with event aid
+    html = html.replace("||aid||", event['aid'])
 
     # Filter the HTML via any #if/#else/#endif statements
     in_if = False

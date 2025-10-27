@@ -37,9 +37,18 @@ def passes_stage_filter(stage_record, eligible):
     
     # Check each pool in the pools list
     pools = stage_record.get('pools', [])
+    stage_name = stage_record.get('stage', 'unknown')
+    
     for pool in pools:
-        if not eligible.check_eligibility(pool):
-            return False
+        try:
+            if not eligible.check_eligibility(pool):
+                return False
+        except ValueError as e:
+            # Re-raise with additional context about which stage
+            raise ValueError(f"Stage '{stage_name}' has a configuration error: {str(e)}")
+        except KeyError as e:
+            # Catch any KeyError and provide helpful context
+            raise ValueError(f"Stage '{stage_name}' has a malformed pool definition. Missing required field: {str(e)}")
     
     return True
 
@@ -133,7 +142,11 @@ def find_eligible_students(student_data, pools_data, work_order, campaign_string
             continue
         
         # Apply stage-specific filtering using shared function
-        if passes_stage_filter(stage_record, create_eligible_object_func(student, work_order.eventCode, pools_data, work_order.subEvent)):
-            eligible_students.append(student)
+        try:
+            if passes_stage_filter(stage_record, create_eligible_object_func(student, work_order.eventCode, pools_data, work_order.subEvent)):
+                eligible_students.append(student)
+        except ValueError as e:
+            # Re-raise with full context so it bubbles up with clear error message
+            raise ValueError(f"Error checking eligibility for stage '{work_order.stage}': {str(e)}")
     
     return eligible_students 

@@ -187,6 +187,33 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
     const loadedWorkOrderRef = useRef<WorkOrder | null>(null)
     const lastValidationRef = useRef<{ eventCode: string, subEvent: string, stage: string } | null>(null)
     const attemptedStageRef = useRef<string>('')
+    
+    // Event search state
+    const [eventSearchText, setEventSearchText] = useState('')
+    const [eventDropdownOpen, setEventDropdownOpen] = useState(false)
+    const eventDropdownRef = useRef<HTMLDivElement>(null)
+
+    // Handle clicks outside the event dropdown to close it
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (eventDropdownRef.current && !eventDropdownRef.current.contains(event.target as Node)) {
+                setEventDropdownOpen(false)
+            }
+        }
+        
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside)
+        }
+    }, [])
+    
+    // Filter events based on search text
+    const filteredEvents = events.filter(ev => {
+        if (!eventSearchText) return true
+        const searchLower = eventSearchText.toLowerCase()
+        return ev.aid.toLowerCase().includes(searchLower) || 
+               ev.name.toLowerCase().includes(searchLower)
+    })
 
     // Fetch events and config on mount
     useEffect(() => {
@@ -604,7 +631,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             // 2. Otherwise, if editing, preserve the existing s3HTMLPaths
             // 3. Otherwise (new work order with no inheritance), leave undefined
             let s3HTMLPathsValue = inheritedFields.s3HTMLPaths;
-            if (!s3HTMLPathsValue && id && loadedWorkOrderRef.current) {
+            // Check if inheritedFields.s3HTMLPaths is empty or undefined, and if editing, preserve existing paths
+            if ((!s3HTMLPathsValue || Object.keys(s3HTMLPathsValue).length === 0) && id && loadedWorkOrderRef.current?.s3HTMLPaths) {
                 s3HTMLPathsValue = loadedWorkOrderRef.current.s3HTMLPaths;
             }
 
@@ -695,17 +723,113 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             </div>
             <Form.Group className="mb-3">
                 <Form.Label>Event Code</Form.Label>
-                <Form.Select
-                    value={eventCode}
-                    onChange={e => setEventCode(e.target.value)}
-                    required
-                    className="bg-dark text-light border-secondary"
-                >
-                    <option value="" disabled>Select event</option>
-                    {events.map(ev => (
-                        <option key={ev.aid} value={ev.aid}>{ev.aid} - {ev.name}</option>
-                    ))}
-                </Form.Select>
+                <div ref={eventDropdownRef} style={{ position: 'relative' }}>
+                    {!eventCode ? (
+                        <div
+                            className="form-control bg-dark text-light border-secondary"
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => {
+                                setEventDropdownOpen(true)
+                            }}
+                        >
+                            {eventSearchText || 'Select event'}
+                        </div>
+                    ) : (
+                        <div 
+                            className="form-control bg-dark text-light border-secondary"
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => {
+                                setEventSearchText('')
+                                setEventDropdownOpen(true)
+                            }}
+                        >
+                            <strong>{eventCode}</strong>
+                            {events.find(ev => ev.aid === eventCode) && (
+                                <span className="text-muted"> - {events.find(ev => ev.aid === eventCode)?.name}</span>
+                            )}
+                        </div>
+                    )}
+                    {eventDropdownOpen && (
+                        <div 
+                            style={{
+                                position: 'absolute',
+                                top: '100%',
+                                left: 0,
+                                right: 0,
+                                maxHeight: '300px',
+                                overflowY: 'auto',
+                                backgroundColor: '#212529',
+                                border: '1px solid #6c757d',
+                                borderRadius: '0.25rem',
+                                zIndex: 1000,
+                                marginTop: '0.25rem'
+                            }}
+                        >
+                            <style>
+                                {`
+                                    .event-search-input::placeholder {
+                                        color: #6c757d !important;
+                                        opacity: 1;
+                                    }
+                                `}
+                            </style>
+                            <Form.Control
+                                type="text"
+                                placeholder="Search..."
+                                value={eventSearchText}
+                                onChange={e => setEventSearchText(e.target.value)}
+                                autoFocus
+                                className="bg-dark text-light border-0 event-search-input"
+                                style={{ 
+                                    borderRadius: '0.25rem 0.25rem 0 0',
+                                    borderBottom: '1px solid #6c757d'
+                                }}
+                            />
+                            {filteredEvents.length > 0 ? (
+                                filteredEvents.map(ev => (
+                                    <div
+                                        key={ev.aid}
+                                        onClick={() => {
+                                            setEventCode(ev.aid)
+                                            setEventSearchText('')
+                                            setEventDropdownOpen(false)
+                                        }}
+                                        style={{
+                                            padding: '0.5rem 0.75rem',
+                                            cursor: 'pointer',
+                                            backgroundColor: ev.aid === eventCode ? '#495057' : '#212529',
+                                            borderBottom: '1px solid #343a40',
+                                            color: '#f8f9fa'
+                                        }}
+                                        onMouseEnter={e => {
+                                            if (ev.aid !== eventCode) {
+                                                (e.target as HTMLDivElement).style.backgroundColor = '#343a40'
+                                            }
+                                        }}
+                                        onMouseLeave={e => {
+                                            if (ev.aid !== eventCode) {
+                                                (e.target as HTMLDivElement).style.backgroundColor = '#212529'
+                                            }
+                                        }}
+                                    >
+                                        <div style={{ fontWeight: 'bold' }}>{ev.aid}</div>
+                                        <div style={{ fontSize: '0.875rem', color: '#adb5bd' }}>{ev.name}</div>
+                                    </div>
+                                ))
+                            ) : (
+                                <div 
+                                    style={{
+                                        padding: '0.75rem',
+                                        color: '#6c757d',
+                                        textAlign: 'center'
+                                    }}
+                                >
+                                    No events found
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
             </Form.Group>
 
             <Form.Group className="mb-3">

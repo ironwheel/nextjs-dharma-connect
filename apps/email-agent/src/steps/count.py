@@ -52,6 +52,15 @@ class CountStep:
             pools_data = self.aws_client.scan_table(POOLS_TABLE)
             await self._update_progress(work_order, f"Found {len(pools_data)} pool definitions")
             
+            # Get and log the pool being used for eligibility
+            pool_name = work_order.config.get('pool') if hasattr(work_order, 'config') and work_order.config else None
+            if pool_name:
+                await self._update_progress(work_order, f"Using pool '{pool_name}' for eligibility filtering")
+                self.log('progress', f"[COUNT] Using pool '{pool_name}' to determine eligible recipients")
+            else:
+                await self._update_progress(work_order, "Warning: No pool specified in work order config")
+                self.log('warning', f"[WARNING] [COUNT] No pool specified in work order config")
+            
             # Initialize counters for each language
             received_counts = {}
             will_receive_counts = {}
@@ -66,6 +75,10 @@ class CountStep:
                 # Get campaign string for this language
                 campaign_string = build_campaign_string(work_order.eventCode, work_order.subEvent, work_order.stage, lang)
                 await self._update_progress(work_order, f"Campaign string for {lang}: {campaign_string}")
+                
+                # Log pool usage per language
+                if pool_name:
+                    self.log('progress', f"[COUNT] Checking eligibility for {lang} using pool '{pool_name}'")
                 
                 # Count recipients for this language
                 received_count, will_receive_count = self._count_recipients(
@@ -118,6 +131,11 @@ class CountStep:
         will_receive_count = 0
         lang_full_name = code_to_full_language(lang).lower()
         
+        # Get pool name for this count operation
+        pool_name = work_order.config.get('pool') if hasattr(work_order, 'config') and work_order.config else None
+        if not pool_name:
+            self.log('warning', f"[WARNING] [COUNT] No pool name found in work order config for language {lang}")
+        
         for student in student_data:
             # Skip if unsubscribe is true
             if student.get('unsubscribe', False):
@@ -146,7 +164,6 @@ class CountStep:
                     continue
             
             # For "will receive" count, apply all filters
-            pool_name = work_order.config.get('pool') if hasattr(work_order, 'config') and work_order.config else None
             if not pool_name:
                 continue
                 
@@ -158,8 +175,12 @@ class CountStep:
                 continue
             
             # Apply stage-specific filtering using shared function
-            if passes_stage_filter(stage_record, self._create_eligible_object(student, work_order.eventCode, pools_data, work_order.subEvent)):
-                will_receive_count += 1
+            try:
+                if passes_stage_filter(stage_record, self._create_eligible_object(student, work_order.eventCode, pools_data, work_order.subEvent)):
+                    will_receive_count += 1
+            except ValueError as e:
+                # Re-raise with full context
+                raise ValueError(f"Error counting recipients for stage '{work_order.stage}': {str(e)}")
         
         return received_count, will_receive_count
 
