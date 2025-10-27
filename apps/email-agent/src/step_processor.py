@@ -169,6 +169,48 @@ class StepProcessor:
                     return False
                 except Exception as e:
                     error_message = str(e)
+                    
+                    # Check if this is a send limit error and we're in sendContinuously mode
+                    if "24-hour send limit reached" in error_message and getattr(work_order, 'sendContinuously', False):
+                        # Put the work order to sleep instead of marking as error
+                        now = datetime.now(timezone.utc)
+                        send_until = getattr(work_order, 'sendUntil', None)
+                        
+                        if send_until:
+                            send_until_dt = datetime.fromisoformat(send_until) if isinstance(send_until, str) else send_until
+                            if now < send_until_dt:
+                                # Use sendInterval from work order if available, otherwise use EMAIL_CONTINUOUS_SLEEP_SECS
+                                sleep_interval = getattr(work_order, 'sendInterval', EMAIL_CONTINUOUS_SLEEP_SECS)
+                                sleep_interval = int(sleep_interval) if sleep_interval is not None else EMAIL_CONTINUOUS_SLEEP_SECS
+                                sleep_until = now + timedelta(seconds=sleep_interval)
+                                
+                                # Set work order to sleeping with the send limit error message
+                                step_message = f"{error_message} Sleeping until {sleep_until.isoformat()}"
+                                await self._update_step_status(work_order, step, StepStatus.SLEEPING, step_message)
+                                self.aws_client.update_work_order({
+                                    'id': work_order.id,
+                                    'updates': {'state': 'Sleeping', 'sleepUntil': sleep_until.isoformat(), 'locked': True}
+                                })
+                                self.log('progress', f"[SEND-LIMIT] Work order {work_order.id} hit send limit, put to sleep until {sleep_until.isoformat()}")
+                                
+                                # Add to sleep queue if there's room
+                                if len(self.sleep_queue) < 8:
+                                    self.sleep_queue[:] = [entry for entry in self.sleep_queue if entry['work_order_id'] != work_order.id]
+                                    self.sleep_queue.append({'work_order_id': work_order.id, 'sleep_until': sleep_until})
+                                
+                                return True
+                        
+                        # If we get here, sendUntil has been exceeded or is not set - mark as complete
+                        self.log('progress', f"[SEND-LIMIT] Work order {work_order.id} hit send limit and sendUntil exceeded, marking as complete")
+                        await self._update_step_status(work_order, step, StepStatus.COMPLETE, error_message)
+                        self.aws_client.update_work_order({
+                            'id': work_order.id,
+                            'updates': {'state': 'Completed', 'sleepUntil': None}
+                        })
+                        self.aws_client.unlock_work_order(work_order.id)
+                        return True
+                    
+                    # For all other errors, mark as ERROR
                     self.log('error', f"[ERROR] Error in {step.name} step: {error_message}")
                     await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
                     return False
