@@ -15,17 +15,22 @@ import FingerprintJS from '@fingerprintjs/fingerprintjs';
  * @throws {Error} Throws an error if FingerprintJS fails to load or get the fingerprint.
  */
 export const getFingerprint = async () => {
-    try {
-        // Initialize an agent at application startup.
-        const fpPromise = FingerprintJS.load();
-        const fp = await fpPromise;
-        const result = await fp.get();
-        // This is the visitor identifier:
-        return result.visitorId;
-    } catch (error) {
-        console.error("Error generating fingerprint:", error);
-        // Re-throw the error to allow the caller to handle it,
-        // or return a default/null value if appropriate for your error handling strategy.
-        throw error;
-    }
+    // TODO: Revisit and implement a more robust fingerprint/visitorId solution in the future.
+    // For now, returning a placeholder value.
+    return "placeholder";
+    
+    // Commented out actual fingerprint implementation:
+    // try {
+    //     // Initialize an agent at application startup.
+    //     const fpPromise = FingerprintJS.load();
+    //     const fp = await fpPromise;
+    //     const result = await fp.get();
+    //     // This is the visitor identifier:
+    //     return result.visitorId;
+    // } catch (error) {
+    //     console.error("Error generating fingerprint:", error);
+    //     // Re-throw the error to allow the caller to handle it,
+    //     // or return a default/null value if appropriate for your error handling strategy.
+    //     throw error;
+    // }
 }; 

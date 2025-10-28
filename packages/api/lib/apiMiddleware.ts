@@ -66,7 +66,13 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
   .use(cookieParser())
   .use(cors({ origin: corsOrigin, credentials: true }))
   .use(csurf({
-    cookie: true,
+    cookie: {
+      httpOnly: true,  // Prevent XSS access to CSRF secret
+      secure: process.env.NODE_ENV === 'production',  // HTTPS only in production
+      sameSite: 'strict',  // Strict since CSRF cookie only read by backend (same-site traffic)
+      // Scope to API domain only (not parent domain) for least privilege
+      domain: process.env.NODE_ENV === 'production' ? process.env.API_DOMAIN : undefined
+    },
     ignoreMethods: [] // no methods are excluded
   }))
   .use(async (req, res, next) => {

@@ -43,7 +43,15 @@ declare module 'next' {
 const handler = nextConnect<NextApiRequest, NextApiResponse>()
     .use(cors({ origin: corsOrigin, credentials: true }))
     .use(cookieParser())
-    .use(csurf({ cookie: true }))
+    .use(csurf({ 
+        cookie: {
+            httpOnly: true,  // Prevent XSS access to CSRF secret
+            secure: process.env.NODE_ENV === 'production',  // HTTPS only in production
+            sameSite: 'strict',  // Strict since CSRF cookie only read by backend (same-site traffic)
+            // Scope to API domain only (not parent domain) for least privilege
+            domain: process.env.NODE_ENV === 'production' ? process.env.API_DOMAIN : undefined
+        }
+    }))
     .get((req, res) => {
         // Send back a fresh CSRF token; secret cookie is set by csurf
         console.log("CSRF: req.csrfToken()", req.csrfToken());
