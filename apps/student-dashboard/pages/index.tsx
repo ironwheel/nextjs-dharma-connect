@@ -32,7 +32,6 @@ import {
     // New cache system imports
     setPromptCache,
     setTier1Loaded,
-    setTier2Loaded,
     setCurrentLanguage,
     promptLookupCache,
     promptLookupCacheAIDSpecific,
@@ -462,7 +461,7 @@ const HomeContent = () => {
                                 }
 
                                 setPrompts(combinedPrompts);
-                                setTier2Loaded(true);
+                                setTier2PromptsLoaded(true);
                             } else {
                                 console.warn('Failed to load tier 2 prompts:', tier2Response.error);
                             }
