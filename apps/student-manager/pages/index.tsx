@@ -885,9 +885,9 @@ const Home = () => {
             }
 
             // Save OWYAA state if it has changed
-            if (selectedStudent) {
-                const currentStudent = allStudents.find(s => s.id === formData.studentId);
-                if (currentStudent && currentStudent.owyaaLease !== selectedStudent.owyaaLease) {
+            if (selectedStudent && originalStudent) {
+                // Compare against originalStudent to detect actual changes
+                if (originalStudent.owyaaLease !== selectedStudent.owyaaLease) {
                     await updateStudentField(formData.studentId, 'owyaaLease', selectedStudent.owyaaLease || '');
 
                     // Update local student data
@@ -955,7 +955,8 @@ const Home = () => {
             }
 
             // Determine success message based on what was actually saved
-            const studentChanged = Object.keys(studentChanges).length > 0 || (selectedStudent && allStudents.find(s => s.id === formData.studentId)?.owyaaLease !== selectedStudent.owyaaLease);
+            const owyaaChanged = selectedStudent && originalStudent && (originalStudent.owyaaLease !== selectedStudent.owyaaLease);
+            const studentChanged = Object.keys(studentChanges).length > 0 || owyaaChanged;
             let successMessage = '';
             if (studentChanged && authChanged) {
                 successMessage = 'Student profile and auth record saved successfully';

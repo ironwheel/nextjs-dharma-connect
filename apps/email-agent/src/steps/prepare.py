@@ -99,7 +99,7 @@ class PrepareStep:
                 raise ValueError(f"Template '{template_name}' not found")
 
             # Use default values if fromName or replyTo are not set
-            from_name = work_order.fromName or "Sakyong Lineage"
+            from_name = work_order.fromName
             reply_to = work_order.replyTo or self.reply_to
 
             try:
