@@ -1,4 +1,22 @@
 {
   "name": "nextjs-dharma-connect",
-  "private": true
+  "private": true,
+  "scripts": {
+    "dev:api": "pnpm --filter api dev",
+    "dev:student-manager": "pnpm --filter student-manager dev",
+    "dev:student-dashboard": "pnpm --filter student-dashboard dev",
+    "dev:event-manager": "pnpm --filter event-manager dev",
+    "dev:event-dashboard": "pnpm --filter event-dashboard dev",
+    "dev:email-manager": "pnpm --filter email-manager dev",
+    "dev:translation-manager": "pnpm --filter translation-manager dev",
+    "build:api": "pnpm --filter api build",
+    "build:student-manager": "pnpm --filter student-manager build",
+    "build:student-dashboard": "pnpm --filter student-dashboard build",
+    "build:event-manager": "pnpm --filter event-manager build",
+    "build:event-dashboard": "pnpm --filter event-dashboard build",
+    "build:email-manager": "pnpm --filter email-manager build",
+    "build:translation-manager": "pnpm --filter translation-manager build",
+    "build:all": "pnpm -r build",
+    "lint:all": "pnpm -r lint"
+  }
 }

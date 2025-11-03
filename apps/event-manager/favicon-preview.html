@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event Manager Favicon Preview</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background: #f9fafb;
+        }
+        h1 {
+            color: #1f2937;
+            border-bottom: 3px solid #3b82f6;
+            padding-bottom: 10px;
+        }
+        .preview-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 30px;
+            margin: 40px 0;
+        }
+        .preview-item {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .preview-item h3 {
+            margin: 0 0 15px 0;
+            color: #374151;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .preview-item p {
+            margin: 10px 0 0 0;
+            color: #6b7280;
+            font-size: 12px;
+        }
+        .icon-display {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100px;
+            background: #f3f4f6;
+            border-radius: 4px;
+            padding: 20px;
+        }
+        .dark-bg {
+            background: #1f2937;
+        }
+        img {
+            image-rendering: crisp-edges;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: pixelated;
+        }
+        .instructions {
+            background: #eff6ff;
+            border-left: 4px solid #3b82f6;
+            padding: 20px;
+            border-radius: 4px;
+            margin: 30px 0;
+        }
+        .instructions h2 {
+            margin-top: 0;
+            color: #1e40af;
+        }
+        .instructions ol {
+            margin: 0;
+            padding-left: 20px;
+        }
+        .instructions li {
+            margin: 10px 0;
+            color: #1e3a8a;
+        }
+        code {
+            background: #dbeafe;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <h1>⚙️ Event Manager Favicon Preview</h1>
+    
+    <div class="instructions">
+        <h2>How to Generate PNG Files</h2>
+        <p><strong>Option 1: Automated (Recommended)</strong></p>
+        <ol>
+            <li>Install ImageMagick: <code>brew install imagemagick</code></li>
+            <li>Run the generation script: <code>node generate-favicons.js</code></li>
+        </ol>
+        
+        <p><strong>Option 2: Manual Screenshot Method</strong></p>
+        <ol>
+            <li>Open this page in your browser</li>
+            <li>Take screenshots of each icon at the exact pixel sizes shown</li>
+            <li>Save them with the filenames listed below</li>
+            <li>Place all files in the <code>public/</code> directory</li>
+        </ol>
+
+        <p><strong>Option 3: Online Converter</strong></p>
+        <ol>
+            <li>Upload <code>public/favicon.svg</code> to <a href="https://realfavicongenerator.net/" target="_blank">RealFaviconGenerator.net</a></li>
+            <li>Download the generated package</li>
+            <li>Replace the files in <code>public/</code> directory</li>
+        </ol>
+    </div>
+
+    <div class="preview-grid">
+        <div class="preview-item">
+            <h3>16×16 Standard Favicon</h3>
+            <div class="icon-display">
+                <img src="public/favicon.svg" width="16" height="16" alt="16x16">
+            </div>
+            <p>filename: <code>favicon-16x16.png</code></p>
+        </div>
+
+        <div class="preview-item">
+            <h3>32×32 High-DPI Favicon</h3>
+            <div class="icon-display">
+                <img src="public/favicon.svg" width="32" height="32" alt="32x32">
+            </div>
+            <p>filename: <code>favicon-32x32.png</code></p>
+        </div>
+
+        <div class="preview-item">
+            <h3>180×180 Apple Touch Icon</h3>
+            <div class="icon-display">
+                <img src="public/favicon.svg" width="180" height="180" alt="180x180">
+            </div>
+            <p>filename: <code>apple-touch-icon.png</code></p>
+        </div>
+
+        <div class="preview-item">
+            <h3>192×192 Android Chrome</h3>
+            <div class="icon-display">
+                <img src="public/favicon.svg" width="192" height="192" alt="192x192">
+            </div>
+            <p>filename: <code>android-chrome-192x192.png</code></p>
+        </div>
+
+        <div class="preview-item">
+            <h3>512×512 Android Chrome</h3>
+            <div class="icon-display">
+                <img src="public/favicon.svg" width="192" height="192" alt="512x512 preview">
+            </div>
+            <p>filename: <code>android-chrome-512x512.png</code></p>
+            <p style="margin-top: 5px;"><em>(Shown at 192px for display)</em></p>
+        </div>
+
+        <div class="preview-item">
+            <h3>Dark Background Test</h3>
+            <div class="icon-display dark-bg">
+                <img src="public/favicon.svg" width="64" height="64" alt="dark bg">
+            </div>
+            <p>Verifying visibility on dark themes</p>
+        </div>
+    </div>
+
+    <div class="instructions">
+        <h2>Next Steps After Generation</h2>
+        <ol>
+            <li>Generate the .ico file using <a href="https://favicon.io/favicon-converter/" target="_blank">favicon.io converter</a></li>
+            <li>Update <code>site.webmanifest</code> with proper app name and metadata</li>
+            <li>Test in multiple browsers (Chrome, Firefox, Safari, Edge)</li>
+            <li>Verify the favicon appears in tabs, bookmarks, and mobile home screens</li>
+        </ol>
+    </div>
+</body>
+</html>
+
