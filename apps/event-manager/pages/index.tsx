@@ -191,6 +191,8 @@ const Home = () => {
     // Prompt editing state
     const [promptsEditAid, setPromptsEditAid] = useState<string>('');
     const [promptsEditData, setPromptsEditData] = useState<Prompt[]>([]);
+    const [promptsFindText, setPromptsFindText] = useState<string>('');
+    const [promptsReplaceText, setPromptsReplaceText] = useState<string>('');
 
     const initialLoadStarted = useRef(false);
 
@@ -580,6 +582,8 @@ const Home = () => {
         setSelectedPromptGroup(promptGroup);
         setPromptsEditAid(promptGroup.aid);
         setPromptsEditData(JSON.parse(JSON.stringify(promptGroup.prompts))); // Deep copy
+        setPromptsFindText('');
+        setPromptsReplaceText('');
         setShowPromptsModal(true);
     };
 
@@ -629,8 +633,38 @@ const Home = () => {
         
         setPromptsEditAid(newAid);
         setPromptsEditData(duplicatedPrompts);
+        setPromptsFindText('');
+        setPromptsReplaceText('');
         setShowPromptsModal(true);
         toast.info(`Duplicating prompts from "${promptGroup.aid}". Review and modify before saving.`);
+    };
+
+    const handleReplaceAllInPrompts = () => {
+        if (!promptsFindText) {
+            toast.warning('Please enter text to find');
+            return;
+        }
+
+        let replacementCount = 0;
+        const updatedPrompts = promptsEditData.map(prompt => {
+            if (prompt.text && prompt.text.includes(promptsFindText)) {
+                const occurrences = (prompt.text.match(new RegExp(promptsFindText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+                replacementCount += occurrences;
+                return {
+                    ...prompt,
+                    text: prompt.text.split(promptsFindText).join(promptsReplaceText)
+                };
+            }
+            return prompt;
+        });
+
+        setPromptsEditData(updatedPrompts);
+        
+        if (replacementCount > 0) {
+            toast.success(`Replaced ${replacementCount} occurrence(s) of "${promptsFindText}"`);
+        } else {
+            toast.info(`No occurrences of "${promptsFindText}" found`);
+        }
     };
 
     const handleSavePrompts = async () => {
@@ -2155,6 +2189,48 @@ const Home = () => {
                                     </div>
                                 </Col>
                             </Row>
+                        </div>
+
+                        <div className="card" style={{ backgroundColor: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.3)' }}>
+                            <h5 style={{ color: '#818cf8', marginBottom: '1rem' }}>Global Find & Replace (Case-Sensitive)</h5>
+                            <Row>
+                                <Col md={5}>
+                                    <Form.Group className="mb-3">
+                                        <Form.Label>Find</Form.Label>
+                                        <Form.Control
+                                            type="text"
+                                            value={promptsFindText}
+                                            onChange={(e) => setPromptsFindText(e.target.value)}
+                                            placeholder="e.g., Dec 7-8"
+                                            style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                                        />
+                                    </Form.Group>
+                                </Col>
+                                <Col md={5}>
+                                    <Form.Group className="mb-3">
+                                        <Form.Label>Replace With</Form.Label>
+                                        <Form.Control
+                                            type="text"
+                                            value={promptsReplaceText}
+                                            onChange={(e) => setPromptsReplaceText(e.target.value)}
+                                            placeholder="e.g., Dec 13-14"
+                                            style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                                        />
+                                    </Form.Group>
+                                </Col>
+                                <Col md={2} style={{ display: 'flex', alignItems: 'end' }}>
+                                    <Button 
+                                        variant="primary" 
+                                        onClick={handleReplaceAllInPrompts}
+                                        style={{ marginBottom: '1rem', width: '100%' }}
+                                    >
+                                        Replace All
+                                    </Button>
+                                </Col>
+                            </Row>
+                            <Form.Text className="text-muted">
+                                This will replace all occurrences in the text fields of all prompts shown below (case-sensitive).
+                            </Form.Text>
                         </div>
 
                         <div className="card">
