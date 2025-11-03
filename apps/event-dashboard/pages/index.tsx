@@ -113,6 +113,28 @@ function fromDynamo(item: any): any {
 // StudentHistoryModal component
 const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, allPools, emailDisplayPermission, userEventAccess }) => {
     const [copying, setCopying] = React.useState(false);
+    const [sortColumn, setSortColumn] = React.useState<'date' | 'event' | 'eligible' | 'joined' | 'offering'>('date');
+    const [sortDirection, setSortDirection] = React.useState<'asc' | 'desc'>('desc');
+    const [regDomain, setRegDomain] = React.useState<string>('');
+    const [fallbackUrl, setFallbackUrl] = React.useState<string | null>(null);
+
+    // Pre-fetch registration domain when modal opens (fixes Safari clipboard issue)
+    React.useEffect(() => {
+        if (show) {
+            const loadRegDomain = async () => {
+                try {
+                    const regDomainConfig = await fetchConfig('registrationDomain');
+                    const domain = typeof regDomainConfig === 'string' ? regDomainConfig : regDomainConfig?.value || '';
+                    setRegDomain(domain);
+                } catch (err) {
+                    console.error('Error fetching registration domain:', err);
+                }
+            };
+            loadRegDomain();
+            // Clear fallback when modal opens
+            setFallbackUrl(null);
+        }
+    }, [show, fetchConfig]);
 
     // Helper function to mask email in demo mode
     const maskEmail = (email: string, emailDisplayValue: boolean = emailDisplayPermission): string => {
@@ -172,8 +194,6 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
             }
         });
     }
-    // Sort subevents by date descending
-    subEvents.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     // Use eligibility logic
     const getEligibility = (event: Event, subEventKey: string) => {
         if (!event.config?.pool) return false;
@@ -211,23 +231,78 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
         navigator.clipboard.writeText(value);
         toast.info(`Copied ${label} to the clipboard`, { autoClose: 2000 });
     };
-    // Add click handler for event row
-    const handleEventRowClick = async (sub) => {
+    // Add click handler for event row - uses cached regDomain for Safari compatibility
+    const handleEventRowClick = (sub) => {
         const eligible = getEligibility(sub.event, sub.subEventKey);
         if (!eligible) return;
-        setCopying(true);
-        try {
-            const regDomainConfig = await fetchConfig('registrationDomain');
-            const regDomain = typeof regDomainConfig === 'string' ? regDomainConfig : regDomainConfig?.value || '';
-            if (!regDomain) throw new Error('No registration domain configured');
-            const url = `${regDomain}/?pid=${student.id}&aid=${sub.event.aid}`;
-            await navigator.clipboard.writeText(url);
-            toast.success(`Registration link copied: ${url}`, { autoClose: 4000 });
-        } catch (err) {
-            toast.error('Failed to copy registration link');
-        } finally {
-            setCopying(false);
+        
+        if (!regDomain) {
+            toast.error('Registration domain not loaded yet');
+            return;
         }
+        
+        setCopying(true);
+        const url = `${regDomain}/?pid=${student.id}&aid=${sub.event.aid}`;
+        
+        // Try synchronous clipboard write (required for Safari)
+        navigator.clipboard.writeText(url)
+            .then(() => {
+                toast.success(`Registration link copied: ${url}`, { autoClose: 4000 });
+                setFallbackUrl(null);
+            })
+            .catch((err) => {
+                console.error('Clipboard write failed:', err);
+                // Show fallback UI with the URL for manual copying
+                setFallbackUrl(url);
+                toast.warning('Could not auto-copy. Please copy the link shown below.', { autoClose: 4000 });
+            })
+            .finally(() => {
+                setCopying(false);
+            });
+    };
+    // Handle column header click for sorting
+    const handleSort = (column: 'date' | 'event' | 'eligible' | 'joined' | 'offering') => {
+        if (sortColumn === column) {
+            // Toggle direction if clicking same column
+            setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+        } else {
+            // Set new column and default to descending
+            setSortColumn(column);
+            setSortDirection('desc');
+        }
+    };
+    // Sort subEvents based on current sort column and direction
+    const sortedSubEvents = [...subEvents].sort((a, b) => {
+        let compareResult = 0;
+        switch (sortColumn) {
+            case 'date':
+                compareResult = (a.date || '').localeCompare(b.date || '');
+                break;
+            case 'event':
+                compareResult = a.displayText.localeCompare(b.displayText);
+                break;
+            case 'eligible':
+                const aEligible = getEligibility(a.event, a.subEventKey);
+                const bEligible = getEligibility(b.event, b.subEventKey);
+                compareResult = (aEligible ? 1 : 0) - (bEligible ? 1 : 0);
+                break;
+            case 'joined':
+                const aJoined = getJoined(a.event, a.subEventKey);
+                const bJoined = getJoined(b.event, b.subEventKey);
+                compareResult = (aJoined ? 1 : 0) - (bJoined ? 1 : 0);
+                break;
+            case 'offering':
+                const aOffering = getOffering(a.event, a.subEventKey);
+                const bOffering = getOffering(b.event, b.subEventKey);
+                compareResult = (aOffering || '').localeCompare(bOffering || '');
+                break;
+        }
+        return sortDirection === 'asc' ? compareResult : -compareResult;
+    });
+    // Render sort indicator arrow
+    const renderSortArrow = (column: 'date' | 'event' | 'eligible' | 'joined' | 'offering') => {
+        if (sortColumn !== column) return '';
+        return sortDirection === 'asc' ? ' ↑' : ' ↓';
     };
     // Modal header info
     return (
@@ -260,21 +335,67 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
                     <br />
                     <b>Country:</b> {student.country || 'Unknown'} <br />
                     <b>Languages:</b> {student.spokenLangPref || ''}{student.writtenLangPref ? ` / ${student.writtenLangPref}` : ''} <br />
+                    <b>Refuge:</b> {checkEligibility('refuge', student, 'refuge', allPools) ? <span style={{ color: '#60a5fa', fontSize: '1.2em', fontWeight: 'bold' }}>✓</span> : <span style={{ color: '#ef4444', fontSize: '1.2em', fontWeight: 'bold' }}>✗</span>} <br />
+                    <b>Oathed:</b> {checkEligibility('oath', student, 'oath', allPools) ? <span style={{ color: '#60a5fa', fontSize: '1.2em', fontWeight: 'bold' }}>✓</span> : <span style={{ color: '#ef4444', fontSize: '1.2em', fontWeight: 'bold' }}>✗</span>}
+                    <br />
                 </div>
+                {fallbackUrl && (
+                    <div style={{ 
+                        marginBottom: 16, 
+                        padding: 12, 
+                        backgroundColor: '#fef3c7',
+                        border: '1px solid #f59e0b',
+                        borderRadius: 6,
+                        color: '#92400e'
+                    }}>
+                        <div style={{ fontWeight: 'bold', marginBottom: 8 }}>
+                            📋 Registration Link (Copy manually):
+                        </div>
+                        <input 
+                            type="text" 
+                            value={fallbackUrl} 
+                            readOnly 
+                            onClick={(e) => e.currentTarget.select()}
+                            style={{ 
+                                width: '100%', 
+                                padding: 8, 
+                                border: '1px solid #d97706',
+                                borderRadius: 4,
+                                backgroundColor: '#fffbeb',
+                                color: '#92400e',
+                                fontFamily: 'monospace',
+                                fontSize: 13
+                            }}
+                        />
+                        <div style={{ fontSize: 12, marginTop: 6, fontStyle: 'italic' }}>
+                            Click the text box above to select the link, then press Cmd+C (Mac) or Ctrl+C (Windows) to copy.
+                        </div>
+                    </div>
+                )}
                 <div style={{ fontWeight: 'bold', marginBottom: 8 }}>Event Participation</div>
                 <div style={{ maxHeight: 400, overflowY: 'auto' }}>
                     <table className="table table-sm table-bordered" style={{ position: 'relative' }}>
                         <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                             <tr>
-                                <th>Date</th>
-                                <th>Event</th>
-                                <th>Eligible</th>
-                                <th>Joined</th>
-                                <th>Offering</th>
+                                <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => handleSort('date')}>
+                                    Date{renderSortArrow('date')}
+                                </th>
+                                <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => handleSort('event')}>
+                                    Event{renderSortArrow('event')}
+                                </th>
+                                <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => handleSort('eligible')}>
+                                    Eligible{renderSortArrow('eligible')}
+                                </th>
+                                <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => handleSort('joined')}>
+                                    Joined{renderSortArrow('joined')}
+                                </th>
+                                <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => handleSort('offering')}>
+                                    Offering{renderSortArrow('offering')}
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
-                            {subEvents.map(sub => {
+                            {sortedSubEvents.map(sub => {
                                 const eligible = getEligibility(sub.event, sub.subEventKey);
                                 const joined = getJoined(sub.event, sub.subEventKey);
                                 const offering = getOffering(sub.event, sub.subEventKey);
