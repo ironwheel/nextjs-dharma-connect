@@ -549,6 +549,7 @@ const Home = () => {
                 }
 
                 setSelectedStudent(student);
+                setOriginalStudent({ ...student }); // Store a copy of the original state
                 setSelectedAuthRecord(rowData.authRecord);
                 const permittedHosts = Array.isArray(rowData.authRecord?.['permitted-hosts'])
                     ? [...rowData.authRecord['permitted-hosts']]
