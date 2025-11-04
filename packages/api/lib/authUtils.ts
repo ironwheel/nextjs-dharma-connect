@@ -1043,9 +1043,43 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
         throw new Error(`AUTH_OPERATION_NOT_ALLOWED: Operation '${operation}' is not permitted for user across all apps`);
     }
 
+    // SECURITY FIX: Distinguish between NO TOKEN (new login) and EXPIRED TOKEN (refresh attempt)
+    // If NO token was provided, this is a new login attempt and should ALWAYS require verification,
+    // regardless of whether a valid session exists. This prevents session reuse without proper authentication.
+    tableCfg = tableGetConfig('sessions');
+    if (!token) {
+        console.log(`SECURITY CHECK [pid=${pid}]: NO TOKEN PROVIDED - treating as new login attempt`);
+        
+        // Look for any existing session for this user/device
+        const existingSession = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        
+        if (existingSession) {
+            // Delete the existing session even if it's not expired
+            // This forces the user through verification flow for new login attempts
+            console.log(`SECURITY CHECK [pid=${pid}]: Deleting existing session - no token provided requires new verification`);
+            console.log(`  - Session was created: ${new Date(existingSession.createdAt || 0).toISOString()}`);
+            console.log(`  - Session TTL: ${existingSession.ttl} (expires: ${new Date((existingSession.ttl || 0) * 1000).toISOString()})`);
+            
+            await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        } else {
+            console.log(`SECURITY CHECK [pid=${pid}]: No existing session found - proceeding to verification flow`);
+        }
+        
+        // Force user into verification flow - do not allow session-based refresh
+        console.log(`SECURITY CHECK [pid=${pid}]: Forcing verification flow for no-token request`);
+        const verificationAccessToken = createToken(pid, deviceFingerprint, verificationActionList);
+        return {
+            status: verificationActionList.includes(operation) ? 'expired-auth-flow' : 'needs-verification',
+            accessToken: verificationAccessToken,
+        };
+    }
+
+    // If we reach here, a token WAS provided but verification failed (expired/invalid)
+    // This is a legitimate token refresh scenario - check for existing session
+    console.log(`TOKEN REFRESH CHECK [pid=${pid}]: Token was provided but invalid/expired - checking for valid session to refresh`);
+    
     // Check for existing session which is only created after email verification
     // Sessions records use a primary key of pid-deviceFingerprint
-    tableCfg = tableGetConfig('sessions');
     const session = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
     
     // If session found, generate fresh access token if the session isn't expired
