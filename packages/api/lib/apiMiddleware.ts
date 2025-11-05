@@ -13,17 +13,6 @@ import cors from 'cors';
 import csurf from 'csurf';
 import { checkAccess } from './authUtils';
 
-// Get access token duration from environment and calculate cookie max age (5 seconds less)
-const ACCESS_TOKEN_DURATION_SECONDS = process.env.ACCESS_TOKEN_DURATION;
-if (!ACCESS_TOKEN_DURATION_SECONDS) {
-  throw new Error('ACCESS_TOKEN_DURATION environment variable is required');
-}
-const ACCESS_TOKEN_DURATION_NUM = parseInt(ACCESS_TOKEN_DURATION_SECONDS, 10);
-if (isNaN(ACCESS_TOKEN_DURATION_NUM) || ACCESS_TOKEN_DURATION_NUM <= 0) {
-  throw new Error(`Invalid ACCESS_TOKEN_DURATION value: ${ACCESS_TOKEN_DURATION_SECONDS}`);
-}
-const COOKIE_MAX_AGE = ACCESS_TOKEN_DURATION_NUM - 5; // 5 seconds less than token duration
-
 // Parse allowed origins from environment
 let allowedOrigins: string[] = [];
 // console.log('API CORS_ORIGIN_LIST:', process.env.CORS_ORIGIN_LIST);
@@ -96,7 +85,7 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
             sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
             domain: process.env.NODE_ENV === 'production' ? process.env.MONOREPO_PARENT_DOMAIN : req.headers['x-host'] as string,
             path: '/',
-            maxAge: COOKIE_MAX_AGE, // 5 seconds less than access token duration
+            // Session cookie - no maxAge means it expires when browser closes
           });
           res.setHeader('Set-Cookie', cookieStr);
         }
