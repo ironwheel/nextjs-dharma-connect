@@ -24,11 +24,12 @@ class PrepareStep:
         self.server_prefix = os.getenv('MAILCHIMP_SERVER_PREFIX')
         self.audience_name = os.getenv('MAILCHIMP_AUDIENCE')
         self.reply_to = os.getenv('MAILCHIMP_REPLY_TO')
+        self.from_name = os.getenv('DEFAULT_FROM_NAME')
         self.s3_bucket = os.getenv('S3_BUCKET')
         self.logging_config = logging_config
         
-        if not all([self.api_key, self.server_prefix, self.audience_name, self.reply_to, self.s3_bucket]):
-            raise ValueError("Missing required environment variables: MAILCHIMP_API_KEY, MAILCHIMP_SERVER_PREFIX, MAILCHIMP_AUDIENCE, MAILCHIMP_REPLY_TO, S3_BUCKET")
+        if not all([self.api_key, self.server_prefix, self.audience_name, self.reply_to, self.from_name, self.s3_bucket]):
+            raise ValueError("Missing required environment variables: MAILCHIMP_API_KEY, MAILCHIMP_SERVER_PREFIX, MAILCHIMP_AUDIENCE, MAILCHIMP_REPLY_TO, DEFAULT_FROM_NAME, S3_BUCKET")
         
         self.headers = {'Authorization': f'Bearer {self.api_key}'}
 
@@ -99,7 +100,7 @@ class PrepareStep:
                 raise ValueError(f"Template '{template_name}' not found")
 
             # Use default values if fromName or replyTo are not set
-            from_name = work_order.fromName
+            from_name = work_order.fromName or self.from_name
             reply_to = work_order.replyTo or self.reply_to
 
             try:
@@ -355,7 +356,7 @@ class PrepareStep:
                     else:
                         raise ValueError(f"QA Failure: registration link missing 'aid' parameter. Expected '{work_order.eventCode}'")
             
-                if pid_ok:
+                if not pid_ok:
                     # Find what pid values are actually present
                     pid_values_found = []
                     for link in reg_links:
