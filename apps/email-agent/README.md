@@ -33,9 +33,9 @@ WEBSOCKET_API_URL=your-websocket-api-url  # e.g., wss://api-id.execute-api.regio
 S3_BUCKET=your-s3-bucket-name  # e.g., your-email-templates-bucket
 
 # Mailchimp Configuration
-MAILCHIMP_API_KEY=your-mailchimp-api-key  # e.g., d795281f186c40dc4b876a99d45122fe-us18
-MAILCHIMP_AUDIENCE=your-audience-name     # The name of your Mailchimp audience/list
-MAILCHIMP_REPLY_TO=connect@sakyonglineage.org  # Reply-to email address for Mailchimp templates
+MAILCHIMP_API_KEY=your-mailchimp-api-key  
+MAILCHIMP_AUDIENCE=your-audience-name     
+MAILCHIMP_REPLY_TO=example@example.com  # Reply-to email address for Mailchimp templates
 MAILCHIMP_SERVER_PREFIX=us18  # The server prefix for your Mailchimp account (e.g., us18)
 
 # Logging Configuration
