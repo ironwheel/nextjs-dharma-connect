@@ -65,6 +65,9 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
     ignoreMethods: [] // no methods are excluded
   }))
   .use(async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     const operation = req.method + '/' + req.query.slug?.[0] + '/' + req.query.slug?.[1];
     console.log("API MIDDLEWARE: operation:", operation);
     try {
