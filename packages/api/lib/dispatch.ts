@@ -9,7 +9,7 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import { tables, TableConfig } from './tableConfig';
 import { websockets, WebSocketConfig, websocketGetConfig } from './websocketConfig';
 import { listAll, listAllChunked, getOne, deleteOne, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll, batchGetItems, listAllQueryBeginsWithSortKeyMultiple } from './dynamoClient';
-import { verificationEmailSend, verificationEmailCallback, createToken, getActionsProfiles, getAuthList, getViews, getViewsProfiles, putAuthItem, linkEmailSend, getConfigValue } from './authUtils';
+import { verificationEmailSend, verificationEmailCallback, verificationCheck, createToken, getActionsProfiles, getAuthList, getViews, getViewsProfiles, putAuthItem, linkEmailSend, getConfigValue } from './authUtils';
 import { serialize } from 'cookie';
 import { v4 as uuidv4 } from 'uuid';
 import { sendWorkOrderMessage } from './sqsClient';
@@ -237,6 +237,9 @@ async function dispatchAuth(
         }
         const callbackResult = await verificationEmailCallback(pid, hash, host, deviceFingerprint, id);
         return res.status(200).json(callbackResult);
+      case 'verificationCheck':
+        const checkResult = await verificationCheck(pid, hash, host, deviceFingerprint);
+        return res.status(200).json(checkResult);
       case 'getActionsProfiles':
         const profileNames = await getActionsProfiles();
         return res.status(200).json({ profileNames });
