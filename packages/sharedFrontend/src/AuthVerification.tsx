@@ -5,9 +5,35 @@
  * @description Defines the AuthVerification component for handling email verification.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-import { publicIpv4 } from 'public-ip';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { api } from './httpClient';
+
+const getPublicIp = async (): Promise<string | null> => {
+    try {
+        if (typeof window !== 'undefined') {
+            const { publicIpv4 } = await import('public-ip');
+            return await publicIpv4();
+        }
+        return null;
+    } catch (error) {
+        console.warn('Failed to get public IP:', error);
+        return null;
+    }
+};
+
+const isRedirectedResponse = (value: unknown): value is { redirected: true } => {
+    return typeof value === 'object' && value !== null && (value as { redirected?: boolean }).redirected === true;
+};
+
+type VerificationSendResult =
+    | { status: 'success' }
+    | { status: 'expired' }
+    | { status: 'error'; error: unknown };
+
+type VerificationSendOutcome =
+    | { status: 'success'; retried: boolean }
+    | { status: 'expired'; retried: boolean }
+    | { status: 'error'; retried: boolean; error: unknown };
 
 interface AuthVerificationProps {
     pid: string | null;
@@ -31,6 +57,103 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
     const [isRedirecting, setIsRedirecting] = useState(false);
     const [expiredAuthFlow, setExpiredAuthFlow] = useState(false);
     const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+    const redirectToDashboard = useCallback(() => {
+        if (!pid || !hash) {
+            return;
+        }
+        setIsRedirecting(true);
+        const redirectUrl = `/?pid=${pid}&hash=${hash}`;
+        window.location.href = redirectUrl;
+    }, [pid, hash]);
+
+    const deriveErrorMessage = useCallback((err: unknown, fallback: string) => {
+        if (err instanceof Error && err.message) {
+            return err.message;
+        }
+        if (typeof err === 'string' && err.length > 0) {
+            return err;
+        }
+        if (
+            typeof err === 'object' &&
+            err !== null &&
+            'message' in err &&
+            typeof (err as { message?: unknown }).message === 'string'
+        ) {
+            return (err as { message: string }).message;
+        }
+        return fallback;
+    }, []);
+
+    const sendVerificationEmailOnce = useCallback(async (): Promise<VerificationSendResult> => {
+        if (!pid || !hash) {
+            return { status: 'error', error: new Error('Missing authentication parameters') };
+        }
+
+        try {
+            const clientIp = await getPublicIp();
+            const result = await api.post(`/api/auth/verificationEmailSend/${pid}`, pid, hash, clientIp);
+
+            if (result && typeof result === 'object' && (result as { expiredAuthFlow?: boolean }).expiredAuthFlow) {
+                return { status: 'expired' };
+            }
+
+            return { status: 'success' };
+        } catch (error) {
+            return { status: 'error', error };
+        }
+    }, [hash, pid]);
+
+    const sendVerificationEmailWithSingleRetry = useCallback(async (): Promise<VerificationSendOutcome> => {
+        const firstAttempt = await sendVerificationEmailOnce();
+
+        if (firstAttempt.status === 'expired') {
+            console.warn('[AuthVerification] Initial verificationEmailSend expired. Retrying once automatically.');
+            const retryAttempt = await sendVerificationEmailOnce();
+
+            if (retryAttempt.status === 'success') {
+                return { status: 'success', retried: true };
+            }
+
+            if (retryAttempt.status === 'expired') {
+                return { status: 'expired', retried: true };
+            }
+
+            return { status: 'error', retried: true, error: retryAttempt.error };
+        }
+
+        if (firstAttempt.status === 'error') {
+            return { status: 'error', retried: false, error: firstAttempt.error };
+        }
+
+        return { status: 'success', retried: false };
+    }, [sendVerificationEmailOnce]);
+
+    const preflightVerificationCheck = useCallback(async (): Promise<boolean> => {
+        if (!pid || !hash) {
+            return false;
+        }
+
+        try {
+            const result = await api.post('/api/auth/verificationCheck', pid, hash, {});
+
+            if (isRedirectedResponse(result)) {
+                return false;
+            }
+
+            if (result?.status === 'authenticated') {
+                console.log('[AuthVerification] Existing session detected, redirecting without sending email.');
+                redirectToDashboard();
+                return true;
+            }
+
+            console.log('[AuthVerification] No active session found during preflight check.');
+            return false;
+        } catch (error) {
+            console.warn('[AuthVerification] Preflight verification check failed:', error);
+            return false;
+        }
+    }, [hash, pid, redirectToDashboard]);
 
     // Global paste handler for when code input is visible
     useEffect(() => {
@@ -90,21 +213,28 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
         setError(null); // Clear previous errors
         setExpiredAuthFlow(false); // Clear expired auth flow state
         try {
-            const clientIp = await publicIpv4().catch(() => null);
-            const result = await api.post(`/api/auth/verificationEmailSend/${pid}`, pid, hash, clientIp);
+            const hasExistingSession = await preflightVerificationCheck();
+            if (hasExistingSession) {
+                return;
+            }
 
-            // Check if this is an expired auth flow response
-            if (result && result.expiredAuthFlow) {
+            const outcome = await sendVerificationEmailWithSingleRetry();
+
+            if (outcome.status === 'success') {
+                setIsSent(true);
+                setAttempts(0); // Reset attempts when new code is sent
+                return;
+            }
+
+            if (outcome.status === 'expired') {
                 setExpiredAuthFlow(true);
                 setAttempts(0);
                 return;
             }
 
-            setIsSent(true);
-            setAttempts(0); // Reset attempts when new code is sent
-        } catch (err: any) {
-            setError(err.message || 'An unexpected error occurred while sending the email.');
-            console.error('Verification email send error:', err);
+            const message = deriveErrorMessage(outcome.error, 'An unexpected error occurred while sending the email.');
+            setError(message);
+            console.error('Verification email send error:', outcome.error);
         } finally {
             setIsSending(false);
         }
@@ -223,11 +353,7 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
             const result = await api.post(`/api/auth/verificationEmailCallback/${codeToVerify}`, pid, hash, {});
 
             if (result.status === 'authenticated') {
-                // Success - set redirecting state to prevent UI changes
-                setIsRedirecting(true);
-                // Redirect to main app
-                const redirectUrl = `/?pid=${pid}&hash=${hash}`;
-                window.location.href = redirectUrl;
+                redirectToDashboard();
             } else {
                 setError('You have entered an invalid code.');
                 setAttempts(attempts + 1);
@@ -274,11 +400,7 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
             const result = await api.post(`/api/auth/verificationEmailCallback/${codeString}`, pid, hash, {});
 
             if (result.status === 'authenticated') {
-                // Success - set redirecting state to prevent UI changes
-                setIsRedirecting(true);
-                // Redirect to main app
-                const redirectUrl = `/?pid=${pid}&hash=${hash}`;
-                window.location.href = redirectUrl;
+                redirectToDashboard();
             } else {
                 setError('You have entered an invalid code.');
                 setAttempts(attempts + 1);
@@ -315,26 +437,29 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
         setExpiredAuthFlow(false); // Clear expired auth flow state
 
         try {
-            const clientIp = await publicIpv4().catch(() => null);
-            const result = await api.post(`/api/auth/verificationEmailSend/${pid}`, pid, hash, clientIp);
+            const outcome = await sendVerificationEmailWithSingleRetry();
 
-            // Check if this is an expired auth flow response
-            if (result && result.expiredAuthFlow) {
+            if (outcome.status === 'success') {
+                setCode(['', '', '', '', '', '']); // Clear the code inputs
+                setAttempts(0); // Reset attempts
+                setIsSent(true);
+                return;
+            }
+
+            if (outcome.status === 'expired') {
                 setExpiredAuthFlow(true);
                 setCode(['', '', '', '', '', '']); // Clear the code inputs
                 setAttempts(0); // Reset attempts
                 return;
             }
 
-            setCode(['', '', '', '', '', '']); // Clear the code inputs
-            setAttempts(0); // Reset attempts
-        } catch (err: any) {
-            if (err.message?.includes('RATE_LIMIT_EXCEEDED')) {
+            const message = deriveErrorMessage(outcome.error, 'An unexpected error occurred while sending the email.');
+            if (message.includes('RATE_LIMIT_EXCEEDED')) {
                 setError('Too many attempts. Please wait 5 minutes before requesting a new code.');
             } else {
-                setError(err.message || 'An unexpected error occurred while sending the email.');
+                setError(message);
             }
-            console.error('Verification email resend error:', err);
+            console.error('Verification email resend error:', outcome.error);
         } finally {
             setIsResending(false);
         }

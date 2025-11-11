@@ -906,6 +906,103 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
 }
 
 /**
+ * @async
+ * @function verificationCheck
+ * @description Checks if a device has an active session (used for preflight verification flows)
+ * @param {string} pid - Participant ID
+ * @param {string} hash - Verification hash
+ * @param {string} host - Host of the calling app
+ * @param {string} deviceFingerprint - Device fingerprint (from headers)
+ */
+export async function verificationCheck(pid: string, hash: string, host: string, deviceFingerprint: string): Promise<any> {
+    if (!pid || !hash || !host || !deviceFingerprint) {
+        throw new Error('verificationCheck(): Missing required parameters');
+    }
+
+    const accessJson = process.env.APP_ACCESS_JSON;
+    if (!accessJson) {
+        throw new Error('APP_ACCESS_JSON environment variable not set');
+    }
+
+    let accessList: any[];
+    try {
+        accessList = JSON.parse(accessJson);
+    } catch (e) {
+        throw new Error('APP_ACCESS_JSON is not valid JSON');
+    }
+
+    const entry = accessList.find((e: any) => e.host === host);
+    if (!entry) {
+        throw new Error('UNKNOWN_HOST');
+    }
+
+    if (entry.secret !== 'none') {
+        const expectedHash = generateAuthHash(pid, entry.secret);
+        if (expectedHash !== hash) {
+            throw new Error('AUTHUSER_ACCESS_NOT_ALLOWED_BAD_HASH');
+        }
+    }
+
+    let tableCfg = tableGetConfig('auth');
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+
+    if (!data) {
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        if (!data) {
+            throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
+        }
+    }
+
+    const permittedHosts: string[] = data['permitted-hosts'] || [];
+    if (!permittedHosts.includes(host)) {
+        throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
+    }
+
+    tableCfg = tableGetConfig('sessions');
+    const session = await getOneWithSort(
+        tableCfg.tableName,
+        tableCfg.pk,
+        pid,
+        tableCfg.sk,
+        deviceFingerprint,
+        process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID
+    );
+
+    if (session) {
+        const currentTimeSeconds = Math.floor(Date.now() / 1000);
+        const sessionTTL = session.ttl;
+
+        if (sessionTTL <= currentTimeSeconds) {
+            console.log(`VERIFICATION CHECK [pid=${pid}]: Session expired, deleting and returning pending state`);
+            await deleteOneWithSort(
+                tableCfg.tableName,
+                tableCfg.pk,
+                pid,
+                tableCfg.sk,
+                deviceFingerprint,
+                process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID
+            );
+            return {
+                status: 'pending-verification'
+            };
+        }
+
+        console.log(`VERIFICATION CHECK [pid=${pid}]: Active session found, returning authenticated state`);
+        const allActionsList = await getAllActionsForUser(permittedHosts);
+        const accessToken = createToken(pid, deviceFingerprint, allActionsList);
+        return {
+            status: 'authenticated',
+            accessToken
+        };
+    }
+
+    console.log(`VERIFICATION CHECK [pid=${pid}]: No session found, pending verification`);
+    return {
+        status: 'pending-verification'
+    };
+}
+
+/**
  * @function getPermissionsLogic
  * @description Retrieves language permissions for a given PID.
  * @param {string} pid - The participant ID.
@@ -943,6 +1040,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     const verificationActionList = [
         'POST/auth/verificationEmailSend',
         'POST/auth/verificationEmailCallback',
+        'POST/auth/verificationCheck',
     ];
 
     // Validate inputs

@@ -222,20 +222,20 @@ const Home = () => {
         }
     };
 
-    const fetchAuthRecords = async () => {
+    const fetchAuthRecords = async (): Promise<{ records: AuthRecord[]; requiresAuth: boolean }> => {
         try {
             const authRecords = await authGetAuthList(pid as string, hash as string);
 
             if (authRecords && 'redirected' in authRecords) {
                 console.log('Auth records fetch redirected - authentication required');
-                return [];
+                return { records: [], requiresAuth: true };
             }
 
-            return authRecords as AuthRecord[];
+            return { records: authRecords as AuthRecord[], requiresAuth: false };
         } catch (error) {
             console.error('Error fetching auth records:', error);
             toast.error('Failed to fetch auth records');
-            return [];
+            return { records: [], requiresAuth: false };
         }
     };
 
@@ -1124,7 +1124,7 @@ const Home = () => {
                 calculateVersion();
 
                 // Fetch all data in parallel
-                const [students, authRecords, pools, viewsProfiles] = await Promise.all([
+                const [students, authRecordsResult, pools, viewsProfiles] = await Promise.all([
                     fetchStudents(),
                     fetchAuthRecords(),
                     fetchPools(),
@@ -1133,9 +1133,16 @@ const Home = () => {
 
                 // Defensive coding: ensure we have arrays before processing
                 const studentsArray = Array.isArray(students) ? students : [];
-                const authRecordsArray = Array.isArray(authRecords) ? authRecords : [];
+                const { records: authRecordsArray, requiresAuth } = authRecordsResult;
                 const poolsArray = Array.isArray(pools) ? pools : [];
                 const viewsProfilesArray = Array.isArray(viewsProfiles) ? viewsProfiles : [];
+
+                if (requiresAuth) {
+                    console.log('Authentication required before loading student-manager data.');
+                    setErrMsg('Authentication required. Please complete the verification flow to continue.');
+                    setLoaded(true);
+                    return;
+                }
 
                 // Set global variables
                 allStudents = studentsArray;
