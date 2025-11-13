@@ -915,6 +915,40 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
  * @param {string} deviceFingerprint - Device fingerprint (from headers)
  */
 export async function verificationCheck(pid: string, hash: string, host: string, deviceFingerprint: string): Promise<any> {
+    const determineVerificationStatusResponse = async (): Promise<{ status: 'pending-verification' | 'needs-verification' }> => {
+        const verificationTokensCfg = tableGetConfig('verification-tokens');
+        const verificationTokens = await listAllFiltered(
+            verificationTokensCfg.tableName,
+            'pid',
+            pid,
+            process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID
+        );
+
+        const currentTimeSeconds = Math.floor(Date.now() / 1000);
+        const activeToken = verificationTokens.find((token: any) => {
+            const tokenTtl = typeof token.ttl === 'number' ? token.ttl : Number(token.ttl);
+            return (
+                token.pid === pid &&
+                token.deviceFingerprint === deviceFingerprint &&
+                !token.failedAttempt &&
+                Number.isFinite(tokenTtl) &&
+                tokenTtl > currentTimeSeconds
+            );
+        });
+
+        if (activeToken) {
+            console.log(`VERIFICATION CHECK [pid=${pid}]: Active verification token found, pending verification`);
+            return {
+                status: 'pending-verification'
+            };
+        }
+
+        console.log(`VERIFICATION CHECK [pid=${pid}]: No active verification token found, needs verification`);
+        return {
+            status: 'needs-verification'
+        };
+    };
+
     if (!pid || !hash || !host || !deviceFingerprint) {
         throw new Error('verificationCheck(): Missing required parameters');
     }
@@ -982,9 +1016,7 @@ export async function verificationCheck(pid: string, hash: string, host: string,
                 deviceFingerprint,
                 process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID
             );
-            return {
-                status: 'pending-verification'
-            };
+            return await determineVerificationStatusResponse();
         }
 
         console.log(`VERIFICATION CHECK [pid=${pid}]: Active session found, returning authenticated state`);
@@ -997,9 +1029,7 @@ export async function verificationCheck(pid: string, hash: string, host: string,
     }
 
     console.log(`VERIFICATION CHECK [pid=${pid}]: No session found, pending verification`);
-    return {
-        status: 'pending-verification'
-    };
+    return await determineVerificationStatusResponse();
 }
 
 /**
