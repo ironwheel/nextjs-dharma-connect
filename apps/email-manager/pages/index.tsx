@@ -63,6 +63,7 @@ export default function Home() {
     const [loadingParticipantNames, setLoadingParticipantNames] = useState(false)
     const [formLoading, setFormLoading] = useState(false)
     const [editedWorkOrderId, setEditedWorkOrderId] = useState<string | null>(null)
+    const [unarchivingId, setUnarchivingId] = useState<string | null>(null)
     const [userEventAccess, setUserEventAccess] = useState<string[]>([])
     const initialWorkOrdersLoaded = useRef(false)
 
@@ -413,6 +414,21 @@ export default function Home() {
         }
     }
 
+    const handleUnarchiveWorkOrder = async (workOrderId: string) => {
+        if (!workOrderId) return
+
+        setUnarchivingId(workOrderId)
+        try {
+            await updateTableItem('work-orders', workOrderId, 'archived', false, userPid, userHash)
+            setArchivedWorkOrders(prev => prev.filter(wo => wo.id !== workOrderId))
+            setRefreshCounter(prev => prev + 1)
+        } catch (error) {
+            console.error(`Failed to unarchive work order ${workOrderId}:`, error)
+        } finally {
+            setUnarchivingId(null)
+        }
+    }
+
     const loadParticipantNamesForArchived = async (archivedOrders: WorkOrder[]) => {
         setLoadingParticipantNames(true)
         const uniquePids = new Set<string>()
@@ -670,6 +686,7 @@ export default function Home() {
                                         <th style={{ border: 'none' }}>Email Account</th>
                                         <th style={{ border: 'none' }}>Created By</th>
                                         <th style={{ border: 'none' }}>Archived</th>
+                                        <th style={{ border: 'none' }}>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -710,6 +727,30 @@ export default function Home() {
                                                         )}
                                                     </div>
                                                 </div>
+                                            </td>
+                                            <td style={{ border: 'none', verticalAlign: 'middle' }}>
+                                                <Button
+                                                    variant="outline-success"
+                                                    size="sm"
+                                                    disabled={!writePermission || unarchivingId === workOrder.id}
+                                                    onClick={() => handleUnarchiveWorkOrder(workOrder.id)}
+                                                >
+                                                    {unarchivingId === workOrder.id ? (
+                                                        <>
+                                                            <Spinner
+                                                                as="span"
+                                                                animation="border"
+                                                                size="sm"
+                                                                role="status"
+                                                                aria-hidden="true"
+                                                                className="me-2"
+                                                            />
+                                                            Unarchiving...
+                                                        </>
+                                                    ) : (
+                                                        'Unarchive'
+                                                    )}
+                                                </Button>
                                             </td>
                                         </tr>
                                     ))}
