@@ -157,7 +157,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         })
     }
 
-    const loadParticipantName = async (pid: string) => {
+    const loadParticipantName = useCallback(async (pid: string) => {
         if (!pid || participantNames[pid]) return
         try {
             const result = await getTableItem('students', pid, userPid, userHash)
@@ -169,9 +169,9 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         } catch {
             setParticipantNames(prev => ({ ...prev, [pid]: pid }))
         }
-    }
+    }, [participantNames, userPid, userHash])
 
-    const loadEventName = async (eventCode: string) => {
+    const loadEventName = useCallback(async (eventCode: string) => {
         if (!eventCode || eventNames[eventCode]) return
         try {
             const result = await getTableItem('events', eventCode, userPid, userHash)
@@ -183,7 +183,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         } catch {
             setEventNames(prev => ({ ...prev, [eventCode]: eventCode }))
         }
-    }
+    }, [eventNames, userPid, userHash])
 
     // Helper function to check if a work order should be visible based on user's event access
     const isWorkOrderAccessible = useCallback((workOrder: WorkOrder): boolean => {
@@ -310,6 +310,44 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         }
     }, [userPid, userHash]);
 
+    // Helper to prefetch campaign existence for all enabled languages for a work order
+    const prefetchCampaignExistence = useCallback(async (workOrder: WorkOrder) => {
+        if (!workOrder) return;
+        const langs = Object.keys(workOrder.languages ?? {}).filter(lang => !!workOrder.languages?.[lang]);
+        if (langs.length === 0) return;
+        const eventCode = workOrder.eventCode;
+        const subEvent = workOrder.subEvent;
+        const stage = workOrder.stage;
+        const workOrderId = workOrder.id;
+        setCampaignExistenceLoading(prev => ({ ...prev, [workOrderId]: true }));
+        const newExistence: Record<string, { dryrun: boolean; send: boolean; dryrunCount?: number; sendCount?: number }> = {};
+        await Promise.all(langs.map(async (lang) => {
+            const campaignString = `${eventCode}_${subEvent}_${stage}_${lang}`;
+            let dryrun = false;
+            let send = false;
+            let dryrunCount = undefined;
+            let sendCount = undefined;
+            try {
+                const dryrunResult = await getTableItemOrNull('dryrun-recipients', campaignString, userPid, userHash);
+                dryrun = !!(dryrunResult && dryrunResult.entries && Array.isArray(dryrunResult.entries) && dryrunResult.entries.length > 0);
+                dryrunCount = dryrunResult && dryrunResult.entries && Array.isArray(dryrunResult.entries) ? dryrunResult.entries.length : undefined;
+            } catch {
+                dryrun = false;
+                dryrunCount = undefined;
+            }
+            try {
+                const sendResult = await getTableItemOrNull('send-recipients', campaignString, userPid, userHash);
+                send = !!(sendResult && sendResult.entries && Array.isArray(sendResult.entries) && sendResult.entries.length > 0);
+                sendCount = sendResult && sendResult.entries && Array.isArray(sendResult.entries) ? sendResult.entries.length : undefined;
+            } catch {
+                send = false;
+                sendCount = undefined;
+            }
+            newExistence[lang] = { dryrun, send, dryrunCount, sendCount };
+        }));
+        setCampaignExistence(prev => ({ ...prev, [workOrderId]: newExistence }));
+        setCampaignExistenceLoading(prev => ({ ...prev, [workOrderId]: false }));
+    }, [userPid, userHash]);
 
     useEffect(() => {
         if (lastMessage && lastMessage.type === 'workOrderUpdate') {
@@ -655,45 +693,6 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
             // This will be done by the parent component
         }
     }, [newlyCreatedWorkOrder, onWorkOrderIndexChange, setCurrentWorkOrderIndex]);
-
-    // Helper to prefetch campaign existence for all enabled languages for a work order
-    const prefetchCampaignExistence = useCallback(async (workOrder: WorkOrder) => {
-        if (!workOrder) return;
-        const langs = Object.keys(workOrder.languages ?? {}).filter(lang => !!workOrder.languages?.[lang]);
-        if (langs.length === 0) return;
-        const eventCode = workOrder.eventCode;
-        const subEvent = workOrder.subEvent;
-        const stage = workOrder.stage;
-        const workOrderId = workOrder.id;
-        setCampaignExistenceLoading(prev => ({ ...prev, [workOrderId]: true }));
-        const newExistence: Record<string, { dryrun: boolean; send: boolean; dryrunCount?: number; sendCount?: number }> = {};
-        await Promise.all(langs.map(async (lang) => {
-            const campaignString = `${eventCode}_${subEvent}_${stage}_${lang}`;
-            let dryrun = false;
-            let send = false;
-            let dryrunCount = undefined;
-            let sendCount = undefined;
-            try {
-                const dryrunResult = await getTableItemOrNull('dryrun-recipients', campaignString, userPid, userHash);
-                dryrun = !!(dryrunResult && dryrunResult.entries && Array.isArray(dryrunResult.entries) && dryrunResult.entries.length > 0);
-                dryrunCount = dryrunResult && dryrunResult.entries && Array.isArray(dryrunResult.entries) ? dryrunResult.entries.length : undefined;
-            } catch {
-                dryrun = false;
-                dryrunCount = undefined;
-            }
-            try {
-                const sendResult = await getTableItemOrNull('send-recipients', campaignString, userPid, userHash);
-                send = !!(sendResult && sendResult.entries && Array.isArray(sendResult.entries) && sendResult.entries.length > 0);
-                sendCount = sendResult && sendResult.entries && Array.isArray(sendResult.entries) ? sendResult.entries.length : undefined;
-            } catch {
-                send = false;
-                sendCount = undefined;
-            }
-            newExistence[lang] = { dryrun, send, dryrunCount, sendCount };
-        }));
-        setCampaignExistence(prev => ({ ...prev, [workOrderId]: newExistence }));
-        setCampaignExistenceLoading(prev => ({ ...prev, [workOrderId]: false }));
-    }, [userPid, userHash]);
 
     // Prefetch campaign existence when workOrders or currentWorkOrderIndex changes
     useEffect(() => {
