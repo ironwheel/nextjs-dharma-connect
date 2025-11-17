@@ -10,7 +10,8 @@ import {
     updateTableItem,
     getTableItemOrNull,
     deleteTableItem,
-    putTableItem
+    putTableItem,
+    VersionBadge
 } from 'sharedFrontend';
 
 // Types
@@ -38,17 +39,51 @@ interface SubEvent {
     [key: string]: any;
 }
 
+type PoolAttributeType =
+    | 'true'
+    | 'pool'
+    | 'pooldiff'
+    | 'pooland'
+    | 'practice'
+    | 'offering'
+    | 'currenteventoffering'
+    | 'currenteventtest'
+    | 'currenteventnotoffering'
+    | 'offeringandpools'
+    | 'oath'
+    | 'attended'
+    | 'join'
+    | 'currenteventjoin'
+    | 'currenteventmanualinclude'
+    | 'currenteventaccepted'
+    | 'currenteventnotjoin'
+    | 'joinwhich'
+    | 'offeringwhich'
+    | 'eligible';
+
+interface PoolAttribute {
+    type: PoolAttributeType;
+    // Common / legacy fields
+    name?: string;
+    aid?: string;
+    // Pool composition
+    inpool?: string;
+    outpool?: string;
+    pool1?: string;
+    pool2?: string;
+    pools?: string[];
+    // Practice-based
+    field?: string;
+    // Program / event context
+    subevent?: string;
+    retreat?: string;
+}
+
 interface Pool {
     name: string;
     description?: string;
     attributes?: PoolAttribute[];
     [key: string]: any;
-}
-
-interface PoolAttribute {
-    name?: string;
-    aid?: string;
-    type: string;
 }
 
 interface Script {
@@ -80,7 +115,30 @@ interface PromptGroup {
     eventDate?: string;
 }
 
-type ResourceType = 'prompts' | 'events' | 'pools' | 'scripts' | 'offerings';
+interface View {
+    name: string;
+    columnDefs: Array<{
+        name: string;
+        headerName?: string;
+        boolName?: string;
+        stringName?: string;
+        numberName?: string;
+        pool?: string;
+        aid?: string;
+        map?: string;
+        writeEnabled?: boolean;
+    }>;
+    viewConditions: Array<{
+        name: string;
+        boolName?: string;
+        boolValue?: boolean;
+        stringValue?: string;
+        pool?: string;
+        map?: string;
+    }>;
+}
+
+type ResourceType = 'prompts' | 'events' | 'pools' | 'scripts' | 'offerings' | 'views';
 
 // Available script step definitions (from join.js stepDefs)
 const AVAILABLE_SCRIPT_STEPS = [
@@ -107,6 +165,186 @@ let allScripts: Script[] = [];
 let allOfferings: OfferingConfig[] = [];
 let allPrompts: Prompt[] = [];
 let promptGroups: PromptGroup[] = [];
+let allViews: View[] = [];
+
+// Autocomplete component for event codes
+const EventCodeAutocomplete = ({ value, onChange, placeholder, label, id }: {
+    value: string;
+    onChange: (value: string) => void;
+    placeholder?: string;
+    label?: string;
+    id: string;
+}) => {
+    const [inputValue, setInputValue] = useState(value || '');
+    const [isValid, setIsValid] = useState(true);
+    const eventCodes = allEvents.map(e => e.aid).filter(Boolean).sort();
+    const uniqueId = `event-code-${id}`;
+
+    // Sync with external value changes
+    React.useEffect(() => {
+        setInputValue(value || '');
+    }, [value]);
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newValue = e.target.value;
+        setInputValue(newValue);
+        onChange(newValue);
+        
+        // Validate if value is in the list (only if not empty)
+        if (newValue.trim()) {
+            setIsValid(eventCodes.includes(newValue));
+        } else {
+            setIsValid(true);
+        }
+    };
+
+    const handleBlur = () => {
+        // On blur, validate and clear if invalid
+        if (inputValue.trim() && !eventCodes.includes(inputValue)) {
+            setIsValid(false);
+            // Don't clear, but show error - user can see the issue
+        }
+    };
+
+    return (
+        <>
+            {label && <Form.Label>{label}</Form.Label>}
+            <Form.Control
+                type="text"
+                list={uniqueId}
+                value={inputValue}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                placeholder={placeholder}
+                isInvalid={!isValid && inputValue.trim() !== ''}
+            />
+            <datalist id={uniqueId}>
+                {eventCodes.map(code => (
+                    <option key={code} value={code} />
+                ))}
+            </datalist>
+            {!isValid && inputValue.trim() !== '' && (
+                <Form.Control.Feedback type="invalid" style={{ display: 'block' }}>
+                    Please select a valid event code from the list
+                </Form.Control.Feedback>
+            )}
+        </>
+    );
+};
+
+// Autocomplete component for pool names
+const PoolNameAutocomplete = ({ value, onChange, placeholder, label, id, excludePoolName }: {
+    value: string;
+    onChange: (value: string) => void;
+    placeholder?: string;
+    label?: string;
+    id: string;
+    excludePoolName?: string; // Exclude current pool name when editing
+}) => {
+    const [inputValue, setInputValue] = useState(value || '');
+    const [isValid, setIsValid] = useState(true);
+    const poolNames = allPools
+        .map(p => p.name)
+        .filter(Boolean)
+        .filter(name => name !== excludePoolName) // Exclude current pool if editing
+        .sort();
+    const uniqueId = `pool-name-${id}`;
+
+    // Sync with external value changes
+    React.useEffect(() => {
+        setInputValue(value || '');
+    }, [value]);
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newValue = e.target.value;
+        setInputValue(newValue);
+        onChange(newValue);
+        
+        // Validate if value is in the list (only if not empty)
+        if (newValue.trim()) {
+            setIsValid(poolNames.includes(newValue));
+        } else {
+            setIsValid(true);
+        }
+    };
+
+    const handleBlur = () => {
+        // On blur, validate
+        if (inputValue.trim() && !poolNames.includes(inputValue)) {
+            setIsValid(false);
+        }
+    };
+
+    return (
+        <>
+            {label && <Form.Label>{label}</Form.Label>}
+            <Form.Control
+                type="text"
+                list={uniqueId}
+                value={inputValue}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                placeholder={placeholder}
+                isInvalid={!isValid && inputValue.trim() !== ''}
+            />
+            <datalist id={uniqueId}>
+                {poolNames.map(name => (
+                    <option key={name} value={name} />
+                ))}
+            </datalist>
+            {!isValid && inputValue.trim() !== '' && (
+                <Form.Control.Feedback type="invalid" style={{ display: 'block' }}>
+                    Please select a valid pool name from the list
+                </Form.Control.Feedback>
+            )}
+        </>
+    );
+};
+
+// Autocomplete component for multiple pool names (comma-separated)
+const PoolNamesAutocomplete = ({ value, onChange, placeholder, label, id }: {
+    value: string;
+    onChange: (value: string) => void;
+    placeholder?: string;
+    label?: string;
+    id: string;
+}) => {
+    const [inputValue, setInputValue] = useState(value || '');
+    const poolNames = allPools.map(p => p.name).filter(Boolean).sort();
+    const uniqueId = `pool-names-${id}`;
+
+    // Sync with external value changes
+    React.useEffect(() => {
+        setInputValue(value || '');
+    }, [value]);
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newValue = e.target.value;
+        setInputValue(newValue);
+        onChange(newValue);
+    };
+
+    return (
+        <>
+            {label && <Form.Label>{label}</Form.Label>}
+            <Form.Control
+                type="text"
+                list={uniqueId}
+                value={inputValue}
+                onChange={handleChange}
+                placeholder={placeholder}
+            />
+            <datalist id={uniqueId}>
+                {poolNames.map(name => (
+                    <option key={name} value={name} />
+                ))}
+            </datalist>
+            <Form.Text className="text-muted" style={{ fontSize: '0.75rem' }}>
+                Type pool names separated by commas. Use autocomplete to select valid pools.
+            </Form.Text>
+        </>
+    );
+};
 
 const Home = () => {
     const router = useRouter();
@@ -119,7 +357,6 @@ const Home = () => {
     const [currentResource, setCurrentResource] = useState<ResourceType>('events');
     const [searchTerm, setSearchTerm] = useState('');
     const [currentUserName, setCurrentUserName] = useState<string>("Unknown");
-    const [version, setVersion] = useState<string>("dev");
 
     // Filtered lists
     const [filteredEvents, setFilteredEvents] = useState<Event[]>([]);
@@ -127,6 +364,7 @@ const Home = () => {
     const [filteredScripts, setFilteredScripts] = useState<Script[]>([]);
     const [filteredOfferings, setFilteredOfferings] = useState<OfferingConfig[]>([]);
     const [filteredPromptGroups, setFilteredPromptGroups] = useState<PromptGroup[]>([]);
+    const [filteredViews, setFilteredViews] = useState<View[]>([]);
 
     // Modal states
     const [showEventModal, setShowEventModal] = useState(false);
@@ -135,15 +373,18 @@ const Home = () => {
     const [showOfferingModal, setShowOfferingModal] = useState(false);
     const [showPromptsModal, setShowPromptsModal] = useState(false);
     const [showSubEventModal, setShowSubEventModal] = useState(false);
+    const [showViewsModal, setShowViewsModal] = useState(false);
     const [showDeleteEventConfirm, setShowDeleteEventConfirm] = useState(false);
     const [showDeletePoolConfirm, setShowDeletePoolConfirm] = useState(false);
     const [showDeleteScriptConfirm, setShowDeleteScriptConfirm] = useState(false);
     const [showDeleteOfferingConfirm, setShowDeleteOfferingConfirm] = useState(false);
+    const [showDeleteViewConfirm, setShowDeleteViewConfirm] = useState(false);
     const [isNewEvent, setIsNewEvent] = useState(false);
     const [isNewPool, setIsNewPool] = useState(false);
     const [isNewScript, setIsNewScript] = useState(false);
     const [isNewOffering, setIsNewOffering] = useState(false);
     const [isNewSubEvent, setIsNewSubEvent] = useState(false);
+    const [isNewView, setIsNewView] = useState(false);
     const [isDuplicatingPrompts, setIsDuplicatingPrompts] = useState(false);
 
     // Selected items
@@ -152,6 +393,7 @@ const Home = () => {
     const [selectedScript, setSelectedScript] = useState<Script | null>(null);
     const [selectedOffering, setSelectedOffering] = useState<OfferingConfig | null>(null);
     const [selectedPromptGroup, setSelectedPromptGroup] = useState<PromptGroup | null>(null);
+    const [selectedView, setSelectedView] = useState<View | null>(null);
     const [selectedSubEventKey, setSelectedSubEventKey] = useState<string>('');
 
     // Form data for editing
@@ -180,6 +422,12 @@ const Home = () => {
         prompts: []
     });
 
+    const [viewFormData, setViewFormData] = useState<View>({
+        name: '',
+        columnDefs: [],
+        viewConditions: []
+    });
+
     const [subEventFormData, setSubEventFormData] = useState<SubEvent>({
         date: '',
         eventComplete: false,
@@ -193,6 +441,7 @@ const Home = () => {
     const [promptsEditData, setPromptsEditData] = useState<Prompt[]>([]);
     const [promptsFindText, setPromptsFindText] = useState<string>('');
     const [promptsReplaceText, setPromptsReplaceText] = useState<string>('');
+    const [viewsProfileKeys, setViewsProfileKeys] = useState<string[]>([]);
 
     const initialLoadStarted = useRef(false);
 
@@ -272,6 +521,21 @@ const Home = () => {
         }
     };
 
+    const fetchViews = async () => {
+        try {
+            const views = await getAllTableItems('views', pid as string, hash as string);
+            if (views && 'redirected' in views) {
+                console.log('Views fetch redirected - authentication required');
+                return [];
+            }
+            return views as View[];
+        } catch (error) {
+            console.error('Error fetching views:', error);
+            toast.error('Failed to fetch views');
+            return [];
+        }
+    };
+
     // Group prompts by aid and enrich with event data
     const groupPromptsByAid = () => {
         const groups: { [aid: string]: Prompt[] } = {};
@@ -308,18 +572,6 @@ const Home = () => {
         
         promptGroups = groupsArray;
         return groupsArray;
-    };
-
-    const calculateVersion = () => {
-        if (typeof window !== 'undefined') {
-            const hostname = window.location.hostname;
-            if (hostname === 'localhost' || hostname === '127.0.0.1') {
-                setVersion('localhost');
-            } else {
-                const commitSha = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || 'dev';
-                setVersion(commitSha.substring(0, 7));
-            }
-        }
     };
 
     // Helper function to get the earliest date from an event's subevents
@@ -403,6 +655,18 @@ const Home = () => {
         setFilteredOfferings(filtered);
     };
 
+    const filterViews = (search: string) => {
+        const searchLower = search.toLowerCase().trim();
+        if (!searchLower) {
+            setFilteredViews(allViews);
+            return;
+        }
+        const filtered = allViews.filter(view =>
+            view.name.toLowerCase().includes(searchLower)
+        );
+        setFilteredViews(filtered);
+    };
+
     const filterPromptGroups = (search: string) => {
         const searchLower = search.toLowerCase().trim();
         if (!searchLower) {
@@ -426,8 +690,10 @@ const Home = () => {
             filterPools(value);
         } else if (currentResource === 'scripts') {
             filterScripts(value);
-        } else {
+        } else if (currentResource === 'offerings') {
             filterOfferings(value);
+        } else if (currentResource === 'views') {
+            filterViews(value);
         }
     };
 
@@ -443,13 +709,15 @@ const Home = () => {
             filterPools('');
         } else if (resource === 'scripts') {
             filterScripts('');
-        } else {
+        } else if (resource === 'offerings') {
             filterOfferings('');
+        } else if (resource === 'views') {
+            filterViews('');
         }
     };
 
     // Event handlers
-    const handleCreateNew = () => {
+    const handleCreateNew = async () => {
         if (currentResource === 'events') {
             setIsNewEvent(true);
             setEventFormData({
@@ -466,6 +734,22 @@ const Home = () => {
                 subEvents: {},
                 embeddedEmails: {}
             });
+            
+            // Fetch views-profiles 'default' record to get available keys
+            // If this fails due to permissions, we'll continue without it
+            try {
+                const defaultProfile = await getTableItemOrNull('views-profiles', 'default', pid as string, hash as string);
+                if (defaultProfile && defaultProfile.views && Array.isArray(defaultProfile.views)) {
+                    setViewsProfileKeys(defaultProfile.views);
+                } else {
+                    setViewsProfileKeys([]);
+                }
+            } catch (error: any) {
+                console.warn('Could not fetch views-profiles default (may be a permissions issue):', error?.message || error);
+                // Continue without views profile keys - user can still manually enter dashboardViews
+                setViewsProfileKeys([]);
+            }
+            
             setShowEventModal(true);
         } else if (currentResource === 'pools') {
             setIsNewPool(true);
@@ -482,7 +766,7 @@ const Home = () => {
                 steps: []
             });
             setShowScriptModal(true);
-        } else {
+        } else if (currentResource === 'offerings') {
             setIsNewOffering(true);
             setOfferingFormData({
                 oid: '',
@@ -491,13 +775,37 @@ const Home = () => {
                 prompts: []
             });
             setShowOfferingModal(true);
+        } else if (currentResource === 'views') {
+            setIsNewView(true);
+            setViewFormData({
+                name: '',
+                columnDefs: [],
+                viewConditions: []
+            });
+            setShowViewsModal(true);
         }
     };
 
-    const handleEditEvent = (event: Event) => {
+    const handleEditEvent = async (event: Event) => {
         setIsNewEvent(false);
         setSelectedEvent(event);
         setEventFormData({ ...event });
+        
+        // Fetch views-profiles 'default' record to get available keys
+        // If this fails due to permissions, we'll continue without it
+        try {
+            const defaultProfile = await getTableItemOrNull('views-profiles', 'default', pid as string, hash as string);
+            if (defaultProfile && defaultProfile.views && Array.isArray(defaultProfile.views)) {
+                setViewsProfileKeys(defaultProfile.views);
+            } else {
+                setViewsProfileKeys([]);
+            }
+        } catch (error: any) {
+            console.warn('Could not fetch views-profiles default (may be a permissions issue):', error?.message || error);
+            // Continue without views profile keys - user can still manually enter dashboardViews
+            setViewsProfileKeys([]);
+        }
+        
         setShowEventModal(true);
     };
 
@@ -575,6 +883,13 @@ const Home = () => {
         setSelectedOffering(offering);
         setOfferingFormData({ ...offering });
         setShowOfferingModal(true);
+    };
+
+    const handleEditView = (view: View) => {
+        setIsNewView(false);
+        setSelectedView(view);
+        setViewFormData({ ...view });
+        setShowViewsModal(true);
     };
 
     const handleEditPrompts = (promptGroup: PromptGroup) => {
@@ -769,7 +1084,25 @@ const Home = () => {
                 eventFormData.config['lambda-url'] = "https://729jjip6ik.execute-api.us-east-1.amazonaws.com/prod";
             }
 
-            await putTableItem('events', eventFormData.aid, eventFormData, pid as string, hash as string);
+            // Remove dashboardViews if it's empty
+            const configToSave = { ...eventFormData.config };
+            if (configToSave.dashboardViews) {
+                const dashboardViews = configToSave.dashboardViews;
+                const hasAnyValues = Object.values(dashboardViews).some(value => {
+                    const strValue = typeof value === 'string' ? value : String(value || '');
+                    return strValue && strValue.trim() !== '';
+                });
+                if (!hasAnyValues) {
+                    delete configToSave.dashboardViews;
+                }
+            }
+            
+            const eventToSave = {
+                ...eventFormData,
+                config: configToSave
+            };
+            
+            await putTableItem('events', eventFormData.aid, eventToSave, pid as string, hash as string);
             toast.success('Event saved successfully');
             
             // Refresh events list
@@ -1023,6 +1356,107 @@ const Home = () => {
         }));
     };
 
+    // View handlers
+    const handleSaveView = async () => {
+        if (!viewFormData.name.trim()) {
+            toast.error('View name is required');
+            return;
+        }
+
+        try {
+            await putTableItem('views', viewFormData.name, viewFormData, pid as string, hash as string);
+            toast.success('View saved successfully');
+            
+            // Close modal
+            setShowViewsModal(false);
+            
+            // Refresh views list
+            const views = await fetchViews();
+            allViews = Array.isArray(views) ? views : [];
+            filterViews(searchTerm);
+        } catch (error) {
+            console.error('Error saving view:', error);
+            toast.error('Failed to save view');
+        }
+    };
+
+    const handleDeleteView = async () => {
+        if (!selectedView) return;
+        
+        try {
+            await deleteTableItem('views', selectedView.name, pid as string, hash as string);
+            toast.success('View deleted successfully');
+            
+            // Close modals
+            setShowDeleteViewConfirm(false);
+            setShowViewsModal(false);
+            
+            // Refresh views list
+            const views = await fetchViews();
+            allViews = Array.isArray(views) ? views : [];
+            filterViews(searchTerm);
+        } catch (error) {
+            console.error('Error deleting view:', error);
+            toast.error('Failed to delete view');
+        }
+    };
+
+    const handleAddColumnDef = () => {
+        setViewFormData(prev => ({
+            ...prev,
+            columnDefs: [...(prev.columnDefs || []), { name: '' }]
+        }));
+    };
+
+    const handleUpdateColumnDef = (index: number, field: string, value: any) => {
+        setViewFormData(prev => {
+            const newColumnDefs = [...(prev.columnDefs || [])];
+            newColumnDefs[index] = {
+                ...newColumnDefs[index],
+                [field]: value
+            };
+            return {
+                ...prev,
+                columnDefs: newColumnDefs
+            };
+        });
+    };
+
+    const handleDeleteColumnDef = (index: number) => {
+        setViewFormData(prev => ({
+            ...prev,
+            columnDefs: (prev.columnDefs || []).filter((_, i) => i !== index)
+        }));
+    };
+
+    const handleAddViewCondition = () => {
+        setViewFormData(prev => ({
+            ...prev,
+            viewConditions: [...(prev.viewConditions || []), { name: 'currentAIDBool', boolValue: true }]
+        }));
+    };
+
+    const handleUpdateViewCondition = (index: number, field: string, value: any) => {
+        setViewFormData(prev => {
+            const newViewConditions = [...(prev.viewConditions || [])];
+            newViewConditions[index] = {
+                ...newViewConditions[index],
+                [field]: value
+            };
+            return {
+                ...prev,
+                viewConditions: newViewConditions
+            };
+        });
+    };
+
+    const handleDeleteViewCondition = (index: number) => {
+        setViewFormData(prev => ({
+            ...prev,
+            viewConditions: (prev.viewConditions || []).filter((_, i) => i !== index)
+        }));
+    };
+
     // Main initialization effect
     useEffect(() => {
         if (!router.isReady || !pid || !hash) return;
@@ -1033,15 +1467,15 @@ const Home = () => {
         const loadInitialData = async () => {
             try {
                 setLoadingProgress({ current: 0, total: 1, message: 'Starting data load...' });
-                calculateVersion();
 
                 // Fetch all data
-                const [events, pools, scripts, offerings, prompts] = await Promise.all([
+                const [events, pools, scripts, offerings, prompts, views] = await Promise.all([
                     fetchEvents(),
                     fetchPools(),
                     fetchScripts(),
                     fetchOfferings(),
-                    fetchPrompts()
+                    fetchPrompts(),
+                    fetchViews()
                 ]);
 
                 const eventsArray = Array.isArray(events) ? events : [];
@@ -1049,12 +1483,14 @@ const Home = () => {
                 const scriptsArray = Array.isArray(scripts) ? scripts : [];
                 const offeringsArray = Array.isArray(offerings) ? offerings : [];
                 const promptsArray = Array.isArray(prompts) ? prompts : [];
+                const viewsArray = Array.isArray(views) ? views : [];
 
                 allEvents = eventsArray;
                 allPools = poolsArray;
                 allScripts = scriptsArray;
                 allOfferings = offeringsArray;
                 allPrompts = promptsArray;
+                allViews = viewsArray;
 
                 // Group prompts by aid after events are loaded
                 groupPromptsByAid();
@@ -1065,8 +1501,9 @@ const Home = () => {
                 filterPools('');
                 filterScripts('');
                 filterOfferings('');
+                filterViews('');
 
-                console.log('Data loaded - Events:', eventsArray.length, 'Pools:', poolsArray.length, 'Scripts:', scriptsArray.length, 'Offerings:', offeringsArray.length, 'Prompts:', promptsArray.length);
+                console.log('Data loaded - Events:', eventsArray.length, 'Pools:', poolsArray.length, 'Scripts:', scriptsArray.length, 'Offerings:', offeringsArray.length, 'Prompts:', promptsArray.length, 'Views:', viewsArray.length);
 
                 setLoaded(true);
             } catch (error) {
@@ -1122,7 +1559,11 @@ const Home = () => {
                     <div className="navbar-container">
                         <div className="navbar-left">
                             <h2 style={{ color: 'white', margin: 0 }}>Event Manager</h2>
-                            <Badge bg="secondary">v{version}</Badge>
+                            {pid && hash && (
+                                <Badge bg="secondary">
+                                    <VersionBadge pid={pid as string} hash={hash as string} />
+                                </Badge>
+                            )}
                         </div>
                         <div className="navbar-right">
                             <input
@@ -1134,7 +1575,7 @@ const Home = () => {
                             />
                             {currentResource !== 'prompts' && (
                                 <Button variant="warning" onClick={handleCreateNew}>
-                                    + Create New {currentResource === 'events' ? 'Event' : currentResource === 'pools' ? 'Pool' : currentResource === 'scripts' ? 'Script' : 'Offering'}
+                                    + Create New {currentResource === 'events' ? 'Event' : currentResource === 'pools' ? 'Pool' : currentResource === 'scripts' ? 'Script' : currentResource === 'offerings' ? 'Offering' : currentResource === 'views' ? 'View' : 'Item'}
                                 </Button>
                             )}
                         </div>
@@ -1172,6 +1613,12 @@ const Home = () => {
                         onClick={() => handleResourceChange('offerings')}
                     >
                         Offerings ({allOfferings.length})
+                    </button>
+                    <button
+                        className={`resource-button ${currentResource === 'views' ? 'active' : ''}`}
+                        onClick={() => handleResourceChange('views')}
+                    >
+                        Views ({allViews.length})
                     </button>
                 </div>
 
@@ -1311,6 +1758,25 @@ const Home = () => {
                                 </h5>
                                 <div style={{ fontSize: '0.9rem', color: '#aaa' }}>
                                     {offering.amounts?.length || 0} price levels • {offering.prompts?.length || 0} prompts
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {/* Views List */}
+                {currentResource === 'views' && (
+                    <div>
+                        <h4 style={{ color: '#ffc107', marginBottom: '1rem' }}>
+                            Views ({filteredViews.length})
+                        </h4>
+                        {filteredViews.map(view => (
+                            <div key={view.name} className="pool-item" onClick={() => handleEditView(view)}>
+                                <h5 style={{ color: '#ffc107', marginBottom: '0.5rem' }}>
+                                    {view.name}
+                                </h5>
+                                <div style={{ fontSize: '0.9rem', color: '#aaa' }}>
+                                    {view.columnDefs?.length || 0} columns • {view.viewConditions?.length || 0} conditions
                                 </div>
                             </div>
                         ))}
@@ -1464,6 +1930,132 @@ const Home = () => {
                                     </Form.Group>
                                 </Col>
                             </Row>
+                            
+                            {/* Dashboard Views Section */}
+                            <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid #555' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                    <h5 style={{ color: '#ffc107', margin: 0 }}>Dashboard Views</h5>
+                                    {viewsProfileKeys.length > 0 && (
+                                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                            <Form.Select
+                                                size="sm"
+                                                style={{ width: 'auto', backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                                                onChange={(e) => {
+                                                    const selectedKey = e.target.value;
+                                                    if (selectedKey) {
+                                                        const dashboardViews = eventFormData.config?.dashboardViews || {};
+                                                        if (!dashboardViews[selectedKey]) {
+                                                            const newDashboardViews = {
+                                                                ...dashboardViews,
+                                                                [selectedKey]: ''
+                                                            };
+                                                            setEventFormData({
+                                                                ...eventFormData,
+                                                                config: {
+                                                                    ...eventFormData.config,
+                                                                    dashboardViews: newDashboardViews
+                                                                }
+                                                            });
+                                                            e.target.value = ''; // Reset select
+                                                        } else {
+                                                            toast.info(`Profile key "${selectedKey}" is already mapped`);
+                                                            e.target.value = ''; // Reset select
+                                                        }
+                                                    }
+                                                }}
+                                                defaultValue=""
+                                            >
+                                                <option value="">+ Add View Mapping</option>
+                                                {viewsProfileKeys
+                                                    .filter(key => !eventFormData.config?.dashboardViews?.[key])
+                                                    .map(key => (
+                                                        <option key={key} value={key}>{key}</option>
+                                                    ))}
+                                            </Form.Select>
+                                        </div>
+                                    )}
+                                </div>
+                                {eventFormData.config?.dashboardViews && Object.keys(eventFormData.config.dashboardViews).length > 0 ? (
+                                    Object.entries(eventFormData.config.dashboardViews).map(([profileKey, viewName]) => (
+                                        <Row key={profileKey} className="mb-3">
+                                            <Col md={5}>
+                                                <Form.Group>
+                                                    <Form.Label>Profile Key</Form.Label>
+                                                    <Form.Control
+                                                        type="text"
+                                                        value={profileKey}
+                                                        disabled
+                                                        style={{ 
+                                                            backgroundColor: '#1a1a1a', 
+                                                            color: '#aaa',
+                                                            border: '1px solid #555',
+                                                            cursor: 'not-allowed'
+                                                        }}
+                                                    />
+                                                </Form.Group>
+                                            </Col>
+                                            <Col md={6}>
+                                                <Form.Group>
+                                                    <Form.Label>View Name</Form.Label>
+                                                    <Form.Control
+                                                        type="text"
+                                                        list={`view-name-${profileKey}`}
+                                                        value={viewName as string || ''}
+                                                        onChange={(e) => {
+                                                            const dashboardViews = { ...eventFormData.config?.dashboardViews };
+                                                            dashboardViews[profileKey] = e.target.value;
+                                                            setEventFormData({
+                                                                ...eventFormData,
+                                                                config: {
+                                                                    ...eventFormData.config,
+                                                                    dashboardViews
+                                                                }
+                                                            });
+                                                        }}
+                                                        placeholder="Select view"
+                                                    />
+                                                    <datalist id={`view-name-${profileKey}`}>
+                                                        {allViews.map(view => (
+                                                            <option key={view.name} value={view.name} />
+                                                        ))}
+                                                    </datalist>
+                                                </Form.Group>
+                                            </Col>
+                                            <Col md={1} style={{ display: 'flex', alignItems: 'end', paddingBottom: '0.5rem' }}>
+                                                <Button
+                                                    variant="outline-danger"
+                                                    size="sm"
+                                                    onClick={() => {
+                                                        const dashboardViews = { ...eventFormData.config?.dashboardViews };
+                                                        delete dashboardViews[profileKey];
+                                                        const newConfig = { ...eventFormData.config };
+                                                        if (Object.keys(dashboardViews).length === 0) {
+                                                            delete newConfig.dashboardViews;
+                                                        } else {
+                                                            newConfig.dashboardViews = dashboardViews;
+                                                        }
+                                                        setEventFormData({
+                                                            ...eventFormData,
+                                                            config: newConfig
+                                                        });
+                                                    }}
+                                                >
+                                                    ×
+                                                </Button>
+                                            </Col>
+                                        </Row>
+                                    ))
+                                ) : (
+                                    <div style={{ color: '#aaa', textAlign: 'center', padding: '1rem' }}>
+                                        No dashboard view mappings. Click "+ Add View Mapping" to add one.
+                                    </div>
+                                )}
+                                {viewsProfileKeys.length === 0 && (
+                                    <div style={{ color: '#ffc107', fontSize: '0.85rem', marginTop: '0.5rem' }}>
+                                        Note: View profile keys not available. You can still manually configure dashboardViews in the Advanced Configuration section below, or ensure IAM permissions allow access to the views-profiles table.
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         {/* Config Section (collapsed by default) */}
@@ -1609,50 +2201,335 @@ const Home = () => {
                                 </Button>
                             </div>
                             {poolFormData.attributes && poolFormData.attributes.length > 0 ? (
-                                poolFormData.attributes.map((attr, index) => (
-                                    <div key={index} className="subevent-item mb-2">
-                                        <Row>
-                                            <Col md={4}>
-                                                <Form.Group>
-                                                    <Form.Label>Type</Form.Label>
-                                                    <Form.Select
-                                                        value={attr.type}
-                                                        onChange={(e) => handleUpdatePoolAttribute(index, 'type', e.target.value)}
-                                                    >
-                                                        <option value="pool">pool</option>
-                                                        <option value="oath">oath</option>
-                                                        <option value="join">join</option>
-                                                    </Form.Select>
-                                                </Form.Group>
-                                            </Col>
-                                            <Col md={attr.type === 'pool' ? 6 : 6}>
-                                                <Form.Group>
-                                                    <Form.Label>{attr.type === 'pool' ? 'Pool Name' : 'Event AID'}</Form.Label>
-                                                    <Form.Control
-                                                        type="text"
-                                                        value={attr.type === 'pool' ? attr.name || '' : attr.aid || ''}
-                                                        onChange={(e) => handleUpdatePoolAttribute(
-                                                            index,
-                                                            attr.type === 'pool' ? 'name' : 'aid',
-                                                            e.target.value
+                                poolFormData.attributes.map((attr, index) => {
+                                    const type = attr.type || 'pool';
+
+                                    const handleStringArrayChange = (field: keyof PoolAttribute, value: string) => {
+                                        const parts = value
+                                            .split(',')
+                                            .map(p => p.trim())
+                                            .filter(p => p.length > 0);
+                                        handleUpdatePoolAttribute(index, field as string, parts);
+                                    };
+
+                                    const poolsValue = Array.isArray(attr.pools) ? attr.pools.join(', ') : '';
+
+                                    const typeHelpText = (() => {
+                                        switch (type) {
+                                            case 'true':
+                                                return 'Always eligible when this attribute is evaluated. This is a pass-through condition that makes any student eligible regardless of other criteria.';
+                                            case 'pool':
+                                                return 'Uses the eligibility result of another pool by name. Recursively checks if the student is eligible for the referenced pool. The referenced pool must exist in the pools data.';
+                                            case 'pooldiff':
+                                                return 'Eligible if in one pool but NOT in another (set difference: inpool minus outpool). Requires both inpool and outpool parameters. Student must be eligible for inpool AND NOT eligible for outpool.';
+                                            case 'pooland':
+                                                return 'Eligible only if the student is in BOTH referenced pools (set intersection). Requires both pool1 and pool2 parameters. Student must be eligible for pool1 AND pool2 simultaneously.';
+                                            case 'practice':
+                                                return 'Checks a boolean field on the student\'s practice record. The field parameter specifies the key to check (e.g., "currentPractice"). Returns true if student.practice[field] is truthy.';
+                                            case 'offering':
+                                                return 'Checks whether the student has an offering in a specific program (aid) and subevent. If subevent is "any", checks if student has ANY offering in any subevent for the program. Otherwise, checks the specific subevent\'s offeringSKU.';
+                                            case 'currenteventoffering':
+                                                return 'Checks offering history for the CURRENT event (aid is automatically the current event context) and a given subevent. Also requires that the student is NOT withdrawn. Returns true if offeringSKU exists for the subevent and student.programs[currentAid].withdrawn is false.';
+                                            case 'currenteventtest':
+                                                return 'Checks the test flag for the CURRENT event. Returns true if student.programs[currentAid].test is truthy. No additional parameters required.';
+                                            case 'currenteventnotoffering':
+                                                return 'Eligible only if there is NO offering for the CURRENT event subevent. Returns true when student.programs[currentAid].offeringHistory[subevent] does NOT have an offeringSKU. The inverse of currenteventoffering.';
+                                            case 'offeringandpools':
+                                                return 'Requires both an offering (aid + subevent) AND membership in at least one of the listed pools. First checks if student has an offering for the specified program and subevent, then checks if student is eligible for at least one pool in the pools array. Both conditions must be true.';
+                                            case 'oath':
+                                                return 'Checks whether the student has taken an oath in the given program (aid). Returns true if student.programs[aid].oath is truthy.';
+                                            case 'attended':
+                                                return 'Checks whether the student has attended the given program (aid). Returns true if student.programs[aid].attended is truthy.';
+                                            case 'join':
+                                                return 'Checks whether the student has joined the given program (aid). Returns true if student.programs[aid].join is truthy.';
+                                            case 'currenteventjoin':
+                                                return 'Checks whether the student has joined the CURRENT event. Returns true if student.programs[currentAid].join is truthy. No additional parameters required.';
+                                            case 'currenteventmanualinclude':
+                                                return 'Checks whether the student has been manually included for the CURRENT event. Returns true if student.programs[currentAid].manualInclude is truthy. This is typically set by administrators.';
+                                            case 'currenteventaccepted':
+                                                return 'Checks whether the student is accepted (and not withdrawn) for the CURRENT event. Returns true if student.programs[currentAid].accepted is truthy AND student.programs[currentAid].withdrawn is false. Both conditions must be met.';
+                                            case 'currenteventnotjoin':
+                                                return 'Eligible only if the student has NOT joined the CURRENT event. Returns true when student.programs[currentAid].join is falsy. The inverse of currenteventjoin.';
+                                            case 'joinwhich':
+                                                return 'Checks whichRetreats for a given program (aid) and retreat key prefix. Requires: student has joined (join is true), student is not withdrawn, and at least one key in student.programs[aid].whichRetreats starts with the retreat prefix and has a truthy value. Used for retreat-specific eligibility.';
+                                            case 'offeringwhich':
+                                                return 'Requires both whichRetreats and offeringHistory to match retreat and subevent patterns for a given program (aid). First checks: student has joined, not withdrawn, and whichRetreats has a key starting with retreat prefix. Then checks: offeringHistory has a key starting with subevent prefix and has an offeringSKU. Both conditions must be true. Used for complex retreat + offering combinations.';
+                                            case 'eligible':
+                                                return 'Checks the generic eligible flag for the CURRENT event. Returns true if student.programs[currentAid].eligible is truthy. This is a general-purpose eligibility flag that can be set by various processes.';
+                                            default:
+                                                return '';
+                                        }
+                                    })();
+
+                                    return (
+                                        <div key={index} className="subevent-item mb-3">
+                                            <Row>
+                                                <Col md={4}>
+                                                    <Form.Group>
+                                                        <Form.Label>Type</Form.Label>
+                                                        <Form.Select
+                                                            value={type}
+                                                            onChange={(e) => handleUpdatePoolAttribute(index, 'type', e.target.value)}
+                                                        >
+                                                            <option value="true">true – always eligible</option>
+                                                            <option value="pool">pool – reference another pool</option>
+                                                            <option value="pooldiff">pooldiff – in one pool but not another</option>
+                                                            <option value="pooland">pooland – in both pools</option>
+                                                            <option value="practice">practice – practice field</option>
+                                                            <option value="offering">offering – program + subevent</option>
+                                                            <option value="currenteventoffering">currenteventoffering – current event + subevent</option>
+                                                            <option value="currenteventtest">currenteventtest – current event test flag</option>
+                                                            <option value="currenteventnotoffering">currenteventnotoffering – no current event offering</option>
+                                                            <option value="offeringandpools">offeringandpools – offering + pools</option>
+                                                            <option value="oath">oath – program oath</option>
+                                                            <option value="attended">attended – program attendance</option>
+                                                            <option value="join">join – program join</option>
+                                                            <option value="currenteventjoin">currenteventjoin – join current event</option>
+                                                            <option value="currenteventmanualinclude">currenteventmanualinclude – manual include</option>
+                                                            <option value="currenteventaccepted">currenteventaccepted – accepted (not withdrawn)</option>
+                                                            <option value="currenteventnotjoin">currenteventnotjoin – not joined current event</option>
+                                                            <option value="joinwhich">joinwhich – joined + whichRetreats</option>
+                                                            <option value="offeringwhich">offeringwhich – offering + whichRetreats</option>
+                                                            <option value="eligible">eligible – current event eligible flag</option>
+                                                        </Form.Select>
+                                                        {typeHelpText && (
+                                                            <Form.Text className="text-muted">
+                                                                {typeHelpText}
+                                                            </Form.Text>
                                                         )}
-                                                        placeholder={attr.type === 'pool' ? 'Pool name' : 'Event AID'}
-                                                    />
-                                                </Form.Group>
-                                            </Col>
-                                            <Col md={2} style={{ display: 'flex', alignItems: 'end' }}>
-                                                <Button
-                                                    variant="outline-danger"
-                                                    size="sm"
-                                                    onClick={() => handleDeletePoolAttribute(index)}
-                                                    style={{ marginBottom: '1rem' }}
-                                                >
-                                                    Delete
-                                                </Button>
-                                            </Col>
-                                        </Row>
-                                    </div>
-                                ))
+                                                    </Form.Group>
+                                                </Col>
+                                                <Col md={6}>
+                                                    {type === 'pool' && (
+                                                        <Form.Group className="mb-2">
+                                                            <PoolNameAutocomplete
+                                                                value={attr.name || ''}
+                                                                onChange={(value) => handleUpdatePoolAttribute(index, 'name', value)}
+                                                                placeholder="Name of another eligibility pool (must exist in pools data)"
+                                                                label="Pool Name (name)"
+                                                                id={`pool-name-${index}`}
+                                                                excludePoolName={poolFormData.name}
+                                                            />
+                                                        </Form.Group>
+                                                    )}
+                                                    {type === 'pooldiff' && (
+                                                        <>
+                                                            <Form.Group className="mb-2">
+                                                                <PoolNameAutocomplete
+                                                                    value={attr.inpool || ''}
+                                                                    onChange={(value) => handleUpdatePoolAttribute(index, 'inpool', value)}
+                                                                    placeholder="Pool the student must be IN"
+                                                                    label="In Pool (inpool)"
+                                                                    id={`pooldiff-inpool-${index}`}
+                                                                    excludePoolName={poolFormData.name}
+                                                                />
+                                                            </Form.Group>
+                                                            <Form.Group className="mb-2">
+                                                                <PoolNameAutocomplete
+                                                                    value={attr.outpool || ''}
+                                                                    onChange={(value) => handleUpdatePoolAttribute(index, 'outpool', value)}
+                                                                    placeholder="Pool the student must NOT be in"
+                                                                    label="Out Pool (outpool)"
+                                                                    id={`pooldiff-outpool-${index}`}
+                                                                    excludePoolName={poolFormData.name}
+                                                                />
+                                                            </Form.Group>
+                                                        </>
+                                                    )}
+                                                    {type === 'pooland' && (
+                                                        <>
+                                                            <Form.Group className="mb-2">
+                                                                <PoolNameAutocomplete
+                                                                    value={attr.pool1 || ''}
+                                                                    onChange={(value) => handleUpdatePoolAttribute(index, 'pool1', value)}
+                                                                    placeholder="First pool name"
+                                                                    label="First Pool (pool1)"
+                                                                    id={`pooland-pool1-${index}`}
+                                                                    excludePoolName={poolFormData.name}
+                                                                />
+                                                            </Form.Group>
+                                                            <Form.Group className="mb-2">
+                                                                <PoolNameAutocomplete
+                                                                    value={attr.pool2 || ''}
+                                                                    onChange={(value) => handleUpdatePoolAttribute(index, 'pool2', value)}
+                                                                    placeholder="Second pool name"
+                                                                    label="Second Pool (pool2)"
+                                                                    id={`pooland-pool2-${index}`}
+                                                                    excludePoolName={poolFormData.name}
+                                                                />
+                                                            </Form.Group>
+                                                        </>
+                                                    )}
+                                                    {type === 'practice' && (
+                                                        <Form.Group className="mb-2">
+                                                            <Form.Label>Practice Field (field)</Form.Label>
+                                                            <Form.Control
+                                                                type="text"
+                                                                value={attr.field || ''}
+                                                                onChange={(e) => handleUpdatePoolAttribute(index, 'field', e.target.value)}
+                                                                placeholder="Key on student.practice object (e.g., currentPractice, vipassana, etc.)"
+                                                            />
+                                                        </Form.Group>
+                                                    )}
+                                                    {type === 'offering' && (
+                                                        <>
+                                                            <Form.Group className="mb-2">
+                                                                <EventCodeAutocomplete
+                                                                    value={attr.aid || ''}
+                                                                    onChange={(value) => handleUpdatePoolAttribute(index, 'aid', value)}
+                                                                    placeholder="Program / event code (aid) - checks programs[aid].offeringHistory"
+                                                                    label="Program AID (aid)"
+                                                                    id={`offering-aid-${index}`}
+                                                                />
+                                                            </Form.Group>
+                                                            <Form.Group className="mb-2">
+                                                                <Form.Label>Subevent (subevent)</Form.Label>
+                                                                <Form.Control
+                                                                    type="text"
+                                                                    value={attr.subevent || ''}
+                                                                    onChange={(e) => handleUpdatePoolAttribute(index, 'subevent', e.target.value)}
+                                                                    placeholder="Subevent key (e.g., 'retreat-2024') or 'any' for any subevent"
+                                                                />
+                                                            </Form.Group>
+                                                        </>
+                                                    )}
+                                                    {type === 'currenteventoffering' && (
+                                                        <Form.Group className="mb-2">
+                                                            <Form.Label>Subevent (subevent) - Current Event</Form.Label>
+                                                            <Form.Control
+                                                                type="text"
+                                                                value={attr.subevent || ''}
+                                                                onChange={(e) => handleUpdatePoolAttribute(index, 'subevent', e.target.value)}
+                                                                placeholder="Subevent key for current event (aid is auto-set to current event context)"
+                                                            />
+                                                            <Form.Text className="text-muted" style={{ fontSize: '0.75rem' }}>
+                                                                Also requires student is not withdrawn
+                                                            </Form.Text>
+                                                        </Form.Group>
+                                                    )}
+                                                    {type === 'currenteventnotoffering' && (
+                                                        <Form.Group className="mb-2">
+                                                            <Form.Label>Subevent (subevent) - Current Event</Form.Label>
+                                                            <Form.Control
+                                                                type="text"
+                                                                value={attr.subevent || ''}
+                                                                onChange={(e) => handleUpdatePoolAttribute(index, 'subevent', e.target.value)}
+                                                                placeholder="Subevent key for current event (returns true if NO offeringSKU exists)"
+                                                            />
+                                                            <Form.Text className="text-muted" style={{ fontSize: '0.75rem' }}>
+                                                                Inverse of currenteventoffering - eligible when offering does NOT exist
+                                                            </Form.Text>
+                                                        </Form.Group>
+                                                    )}
+                                                    {type === 'offeringandpools' && (
+                                                        <>
+                                                            <Form.Group className="mb-2">
+                                                                <EventCodeAutocomplete
+                                                                    value={attr.aid || ''}
+                                                                    onChange={(value) => handleUpdatePoolAttribute(index, 'aid', value)}
+                                                                    placeholder="Program / event code (aid) - must have offering"
+                                                                    label="Program AID (aid)"
+                                                                    id={`offeringandpools-aid-${index}`}
+                                                                />
+                                                            </Form.Group>
+                                                            <Form.Group className="mb-2">
+                                                                <Form.Label>Subevent (subevent)</Form.Label>
+                                                                <Form.Control
+                                                                    type="text"
+                                                                    value={attr.subevent || ''}
+                                                                    onChange={(e) => handleUpdatePoolAttribute(index, 'subevent', e.target.value)}
+                                                                    placeholder="Subevent key - must have offeringSKU"
+                                                                />
+                                                            </Form.Group>
+                                                            <Form.Group className="mb-2">
+                                                                <PoolNamesAutocomplete
+                                                                    value={poolsValue}
+                                                                    onChange={(value) => handleStringArrayChange('pools', value)}
+                                                                    placeholder="pool-a, pool-b, pool-c (student must be in at least one)"
+                                                                    label="Pools (pools) - comma-separated"
+                                                                    id={`offeringandpools-pools-${index}`}
+                                                                />
+                                                            </Form.Group>
+                                                        </>
+                                                    )}
+                                                    {(type === 'oath' ||
+                                                        type === 'attended' ||
+                                                        type === 'join') && (
+                                                        <Form.Group className="mb-2">
+                                                            <EventCodeAutocomplete
+                                                                value={attr.aid || ''}
+                                                                onChange={(value) => handleUpdatePoolAttribute(index, 'aid', value)}
+                                                                placeholder={`Program / event code (aid) - checks programs[aid].${type}`}
+                                                                label="Program AID (aid)"
+                                                                id={`${type}-aid-${index}`}
+                                                            />
+                                                        </Form.Group>
+                                                    )}
+                                                    {(type === 'joinwhich' || type === 'offeringwhich') && (
+                                                        <>
+                                                            <Form.Group className="mb-2">
+                                                                <EventCodeAutocomplete
+                                                                    value={attr.aid || ''}
+                                                                    onChange={(value) => handleUpdatePoolAttribute(index, 'aid', value)}
+                                                                    placeholder="Program / event code (aid) - must have join=true and not withdrawn"
+                                                                    label="Program AID (aid)"
+                                                                    id={`${type}-aid-${index}`}
+                                                                />
+                                                            </Form.Group>
+                                                            <Form.Group className="mb-2">
+                                                                <Form.Label>Retreat Key Prefix (retreat)</Form.Label>
+                                                                <Form.Control
+                                                                    type="text"
+                                                                    value={attr.retreat || ''}
+                                                                    onChange={(e) => handleUpdatePoolAttribute(index, 'retreat', e.target.value)}
+                                                                    placeholder="Prefix for whichRetreats keys (e.g., 'retreat-2024' matches 'retreat-2024-spring')"
+                                                                />
+                                                            </Form.Group>
+                                                            {type === 'offeringwhich' && (
+                                                                <Form.Group className="mb-2">
+                                                                    <Form.Label>Subevent Key Prefix (subevent)</Form.Label>
+                                                                    <Form.Control
+                                                                        type="text"
+                                                                        value={attr.subevent || ''}
+                                                                        onChange={(e) => handleUpdatePoolAttribute(index, 'subevent', e.target.value)}
+                                                                        placeholder="Prefix for offeringHistory keys (e.g., 'retreat' matches 'retreat-2024')"
+                                                                    />
+                                                                </Form.Group>
+                                                            )}
+                                                        </>
+                                                    )}
+                                                    {(type === 'currenteventtest' ||
+                                                        type === 'currenteventjoin' ||
+                                                        type === 'currenteventmanualinclude' ||
+                                                        type === 'currenteventaccepted' ||
+                                                        type === 'currenteventnotjoin' ||
+                                                        type === 'eligible' ||
+                                                        type === 'true') && (
+                                                        <div style={{ fontSize: '0.85rem', color: '#aaa', marginTop: '0.5rem' }}>
+                                                            {type === 'currenteventaccepted' && 'No parameters. Checks programs[currentAid].accepted AND not withdrawn.'}
+                                                            {type === 'currenteventtest' && 'No parameters. Checks programs[currentAid].test flag.'}
+                                                            {type === 'currenteventjoin' && 'No parameters. Checks programs[currentAid].join flag.'}
+                                                            {type === 'currenteventmanualinclude' && 'No parameters. Checks programs[currentAid].manualInclude flag.'}
+                                                            {type === 'currenteventnotjoin' && 'No parameters. Returns true if programs[currentAid].join is falsy.'}
+                                                            {type === 'eligible' && 'No parameters. Checks programs[currentAid].eligible flag.'}
+                                                            {type === 'true' && 'No parameters. Always returns true (pass-through condition).'}
+                                                        </div>
+                                                    )}
+                                                </Col>
+                                                <Col md={2} style={{ display: 'flex', alignItems: 'end' }}>
+                                                    <Button
+                                                        variant="outline-danger"
+                                                        size="sm"
+                                                        onClick={() => handleDeletePoolAttribute(index)}
+                                                        style={{ marginBottom: '1rem' }}
+                                                    >
+                                                        Delete
+                                                    </Button>
+                                                </Col>
+                                            </Row>
+                                        </div>
+                                    );
+                                })
                             ) : (
                                 <div style={{ color: '#aaa', textAlign: 'center', padding: '1rem' }}>
                                     No attributes defined
@@ -2151,6 +3028,387 @@ const Home = () => {
                     </Button>
                     <Button variant="danger" onClick={handleDeleteOffering}>
                         Delete Offering
+                    </Button>
+                </Modal.Footer>
+            </Modal>
+
+            {/* View Edit Modal */}
+            <Modal show={showViewsModal} onHide={() => setShowViewsModal(false)} size="xl">
+                <Modal.Header closeButton>
+                    <Modal.Title style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginRight: '2rem' }}>
+                        <span>{isNewView ? 'Create New View' : `Edit View: ${viewFormData.name}`}</span>
+                        {!isNewView && (
+                            <Button
+                                variant="outline-danger"
+                                size="sm"
+                                onClick={() => setShowDeleteViewConfirm(true)}
+                                style={{ marginLeft: 'auto' }}
+                            >
+                                🗑️ Delete
+                            </Button>
+                        )}
+                    </Modal.Title>
+                </Modal.Header>
+                <Modal.Body style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+                    <Form>
+                        <div className="card">
+                            <h5 style={{ color: '#ffc107', marginBottom: '1rem' }}>Basic Information</h5>
+                            <Form.Group className="mb-3">
+                                <Form.Label>View Name*</Form.Label>
+                                <Form.Control
+                                    type="text"
+                                    value={viewFormData.name}
+                                    onChange={(e) => setViewFormData({ ...viewFormData, name: e.target.value })}
+                                    disabled={!isNewView}
+                                    placeholder="e.g., joined-vermont"
+                                    style={{ 
+                                        backgroundColor: '#2b2b2b', 
+                                        color: !isNewView ? '#aaa' : 'white',
+                                        border: '1px solid #555',
+                                        cursor: !isNewView ? 'not-allowed' : 'text'
+                                    }}
+                                />
+                            </Form.Group>
+                        </div>
+
+                        <div className="card">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                <h5 style={{ color: '#ffc107', margin: 0 }}>Column Definitions</h5>
+                                <Button variant="outline-warning" size="sm" onClick={handleAddColumnDef}>
+                                    + Add Column
+                                </Button>
+                            </div>
+                            {viewFormData.columnDefs && viewFormData.columnDefs.length > 0 ? (
+                                viewFormData.columnDefs.map((colDef, index) => {
+                                    const colName = colDef.name || ''
+                                    const isPredefined = ['rowIndex', 'name', 'email', 'accepted', 'withdrawn', 'installmentsTotal', 'installmentsReceived', 'installmentsDue', 'installmentsLF', 'spokenLanguage'].includes(colName)
+                                    
+                                    return (
+                                        <div key={index} className="subevent-item mb-3">
+                                            <Row>
+                                                <Col md={12}>
+                                                    <Form.Group className="mb-2">
+                                                        <Form.Label>Column Name*</Form.Label>
+                                                        <Form.Control
+                                                            type="text"
+                                                            list={`col-name-${index}`}
+                                                            value={colName}
+                                                            onChange={(e) => handleUpdateColumnDef(index, 'name', e.target.value)}
+                                                            placeholder="e.g., rowIndex, poolMember-xyz"
+                                                        />
+                                                        <datalist id={`col-name-${index}`}>
+                                                            <option value="rowIndex" />
+                                                            <option value="name" />
+                                                            <option value="email" />
+                                                            <option value="accepted" />
+                                                            <option value="withdrawn" />
+                                                            <option value="installmentsTotal" />
+                                                            <option value="installmentsReceived" />
+                                                            <option value="installmentsDue" />
+                                                            <option value="installmentsLF" />
+                                                            <option value="spokenLanguage" />
+                                                        </datalist>
+                                                    </Form.Group>
+                                                </Col>
+                                            </Row>
+                                            {!isPredefined && (
+                                                <>
+                                                    <Row>
+                                                        <Col md={6}>
+                                                            <Form.Group className="mb-2">
+                                                                <Form.Label>Header Name</Form.Label>
+                                                                <Form.Control
+                                                                    type="text"
+                                                                    value={colDef.headerName || ''}
+                                                                    onChange={(e) => handleUpdateColumnDef(index, 'headerName', e.target.value)}
+                                                                    placeholder="Display name"
+                                                                />
+                                                            </Form.Group>
+                                                        </Col>
+                                                    </Row>
+                                                    {colName.includes('poolMember') && (
+                                                        <Row>
+                                                            <Col md={6}>
+                                                                <Form.Group className="mb-2">
+                                                                    <Form.Label>Pool Name*</Form.Label>
+                                                                    <Form.Control
+                                                                        type="text"
+                                                                        list={`pool-${index}`}
+                                                                        value={colDef.pool || ''}
+                                                                        onChange={(e) => handleUpdateColumnDef(index, 'pool', e.target.value)}
+                                                                        placeholder="Select pool"
+                                                                    />
+                                                                    <datalist id={`pool-${index}`}>
+                                                                        {allPools.map(pool => (
+                                                                            <option key={pool.name} value={pool.name} />
+                                                                        ))}
+                                                                    </datalist>
+                                                                </Form.Group>
+                                                            </Col>
+                                                        </Row>
+                                                    )}
+                                                    {(colName.includes('currentAIDBool') || colName.includes('baseBool') || colName.includes('currentAIDMapBool')) && (
+                                                        <Row>
+                                                            <Col md={colName.includes('currentAIDMapBool') ? 6 : 12}>
+                                                                <Form.Group className="mb-2">
+                                                                    <Form.Label>Bool Name*</Form.Label>
+                                                                    <Form.Control
+                                                                        type="text"
+                                                                        value={colDef.boolName || ''}
+                                                                        onChange={(e) => handleUpdateColumnDef(index, 'boolName', e.target.value)}
+                                                                        placeholder="e.g., join, accepted"
+                                                                    />
+                                                                </Form.Group>
+                                                            </Col>
+                                                            {colName.includes('currentAIDMapBool') && (
+                                                                <Col md={6}>
+                                                                    <Form.Group className="mb-2">
+                                                                        <Form.Label>Map Name*</Form.Label>
+                                                                        <Form.Control
+                                                                            type="text"
+                                                                            value={colDef.map || ''}
+                                                                            onChange={(e) => handleUpdateColumnDef(index, 'map', e.target.value)}
+                                                                            placeholder="e.g., whichRetreats"
+                                                                        />
+                                                                    </Form.Group>
+                                                                </Col>
+                                                            )}
+                                                        </Row>
+                                                    )}
+                                                    {(colName.includes('currentAIDString') || colName.includes('baseString')) && (
+                                                        <Row>
+                                                            <Col md={6}>
+                                                                <Form.Group className="mb-2">
+                                                                    <Form.Label>String Name*</Form.Label>
+                                                                    <Form.Control
+                                                                        type="text"
+                                                                        value={colDef.stringName || ''}
+                                                                        onChange={(e) => handleUpdateColumnDef(index, 'stringName', e.target.value)}
+                                                                        placeholder="e.g., submitTime"
+                                                                    />
+                                                                </Form.Group>
+                                                            </Col>
+                                                        </Row>
+                                                    )}
+                                                    {colName.includes('offeringCount') && (
+                                                        <Row>
+                                                            <Col md={6}>
+                                                                <Form.Group className="mb-2">
+                                                                    <Form.Label>AID*</Form.Label>
+                                                                    <Form.Control
+                                                                        type="text"
+                                                                        value={colDef.aid || ''}
+                                                                        onChange={(e) => handleUpdateColumnDef(index, 'aid', e.target.value)}
+                                                                        placeholder="Event code"
+                                                                    />
+                                                                </Form.Group>
+                                                            </Col>
+                                                        </Row>
+                                                    )}
+                                                    {colName.includes('currentAIDMapList') && (
+                                                        <Row>
+                                                            <Col md={6}>
+                                                                <Form.Group className="mb-2">
+                                                                    <Form.Label>Map Name*</Form.Label>
+                                                                    <Form.Control
+                                                                        type="text"
+                                                                        value={colDef.map || ''}
+                                                                        onChange={(e) => handleUpdateColumnDef(index, 'map', e.target.value)}
+                                                                        placeholder="e.g., setup"
+                                                                    />
+                                                                </Form.Group>
+                                                            </Col>
+                                                        </Row>
+                                                    )}
+                                                </>
+                                            )}
+                                            <Row className="mt-2">
+                                                <Col md={6}>
+                                                    <Form.Group>
+                                                        <Form.Check
+                                                            type="checkbox"
+                                                            label={<span style={{ color: 'white' }}>Write Enabled</span>}
+                                                            checked={colDef.writeEnabled || false}
+                                                            onChange={(e) => handleUpdateColumnDef(index, 'writeEnabled', e.target.checked)}
+                                                        />
+                                                        <Form.Text className="text-muted" style={{ fontSize: '0.75rem' }}>
+                                                            Allow users to edit values in this column (requires write permission)
+                                                        </Form.Text>
+                                                    </Form.Group>
+                                                </Col>
+                                                <Col md={6} className="d-flex justify-content-end align-items-end">
+                                                    <Button
+                                                        variant="outline-danger"
+                                                        size="sm"
+                                                        onClick={() => handleDeleteColumnDef(index)}
+                                                    >
+                                                        Delete
+                                                    </Button>
+                                                </Col>
+                                            </Row>
+                                        </div>
+                                    )
+                                })
+                            ) : (
+                                <div style={{ color: '#aaa', textAlign: 'center', padding: '1rem' }}>
+                                    No column definitions
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="card">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                <h5 style={{ color: '#ffc107', margin: 0 }}>View Conditions</h5>
+                                <Button variant="outline-warning" size="sm" onClick={handleAddViewCondition}>
+                                    + Add Condition
+                                </Button>
+                            </div>
+                            {viewFormData.viewConditions && viewFormData.viewConditions.length > 0 ? (
+                                viewFormData.viewConditions.map((condition, index) => (
+                                    <div key={index} className="subevent-item mb-3">
+                                        <Row>
+                                            <Col md={4}>
+                                                <Form.Group className="mb-2">
+                                                    <Form.Label>Condition Type*</Form.Label>
+                                                    <Form.Select
+                                                        value={condition.name || 'currentAIDBool'}
+                                                        onChange={(e) => handleUpdateViewCondition(index, 'name', e.target.value)}
+                                                    >
+                                                        <option value="currentAIDBool">currentAIDBool</option>
+                                                        <option value="currentAIDMapBool">currentAIDMapBool</option>
+                                                        <option value="baseBool">baseBool</option>
+                                                        <option value="poolMember">poolMember</option>
+                                                    </Form.Select>
+                                                </Form.Group>
+                                            </Col>
+                                            {(condition.name === 'currentAIDBool' || condition.name === 'baseBool') && (
+                                                <>
+                                                    <Col md={4}>
+                                                        <Form.Group className="mb-2">
+                                                            <Form.Label>Bool Name*</Form.Label>
+                                                            <Form.Control
+                                                                type="text"
+                                                                value={condition.boolName || ''}
+                                                                onChange={(e) => handleUpdateViewCondition(index, 'boolName', e.target.value)}
+                                                                placeholder="e.g., join"
+                                                            />
+                                                        </Form.Group>
+                                                    </Col>
+                                                    <Col md={4}>
+                                                        <Form.Group className="mb-2">
+                                                            <Form.Label>Bool Value*</Form.Label>
+                                                            <Form.Select
+                                                                value={condition.boolValue === true ? 'true' : condition.boolValue === false ? 'false' : ''}
+                                                                onChange={(e) => handleUpdateViewCondition(index, 'boolValue', e.target.value === 'true')}
+                                                            >
+                                                                <option value="true">true</option>
+                                                                <option value="false">false</option>
+                                                            </Form.Select>
+                                                        </Form.Group>
+                                                    </Col>
+                                                </>
+                                            )}
+                                            {condition.name === 'currentAIDMapBool' && (
+                                                <>
+                                                    <Col md={3}>
+                                                        <Form.Group className="mb-2">
+                                                            <Form.Label>Map Name*</Form.Label>
+                                                            <Form.Control
+                                                                type="text"
+                                                                value={condition.map || ''}
+                                                                onChange={(e) => handleUpdateViewCondition(index, 'map', e.target.value)}
+                                                                placeholder="e.g., whichRetreats"
+                                                            />
+                                                        </Form.Group>
+                                                    </Col>
+                                                    <Col md={3}>
+                                                        <Form.Group className="mb-2">
+                                                            <Form.Label>Bool Name*</Form.Label>
+                                                            <Form.Control
+                                                                type="text"
+                                                                value={condition.boolName || ''}
+                                                                onChange={(e) => handleUpdateViewCondition(index, 'boolName', e.target.value)}
+                                                                placeholder="e.g., mahayana"
+                                                            />
+                                                        </Form.Group>
+                                                    </Col>
+                                                    <Col md={2}>
+                                                        <Form.Group className="mb-2">
+                                                            <Form.Label>Bool Value*</Form.Label>
+                                                            <Form.Select
+                                                                value={condition.boolValue === true ? 'true' : condition.boolValue === false ? 'false' : ''}
+                                                                onChange={(e) => handleUpdateViewCondition(index, 'boolValue', e.target.value === 'true')}
+                                                            >
+                                                                <option value="true">true</option>
+                                                                <option value="false">false</option>
+                                                            </Form.Select>
+                                                        </Form.Group>
+                                                    </Col>
+                                                </>
+                                            )}
+                                            {condition.name === 'poolMember' && (
+                                                <Col md={8}>
+                                                    <Form.Group className="mb-2">
+                                                        <Form.Label>Pool Name*</Form.Label>
+                                                        <Form.Control
+                                                            type="text"
+                                                            list={`condition-pool-${index}`}
+                                                            value={condition.pool || ''}
+                                                            onChange={(e) => handleUpdateViewCondition(index, 'pool', e.target.value)}
+                                                            placeholder="Select pool"
+                                                        />
+                                                        <datalist id={`condition-pool-${index}`}>
+                                                            {allPools.map(pool => (
+                                                                <option key={pool.name} value={pool.name} />
+                                                            ))}
+                                                        </datalist>
+                                                    </Form.Group>
+                                                </Col>
+                                            )}
+                                        </Row>
+                                        <div className="d-flex justify-content-end mt-2">
+                                            <Button
+                                                variant="outline-danger"
+                                                size="sm"
+                                                onClick={() => handleDeleteViewCondition(index)}
+                                            >
+                                                Delete
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                <div style={{ color: '#aaa', textAlign: 'center', padding: '1rem' }}>
+                                    No view conditions
+                                </div>
+                            )}
+                        </div>
+                    </Form>
+                </Modal.Body>
+                <Modal.Footer>
+                    <Button variant="secondary" onClick={() => setShowViewsModal(false)}>
+                        Cancel
+                    </Button>
+                    <Button variant="warning" onClick={handleSaveView}>
+                        Save View
+                    </Button>
+                </Modal.Footer>
+            </Modal>
+
+            {/* Delete View Confirmation Modal */}
+            <Modal show={showDeleteViewConfirm} onHide={() => setShowDeleteViewConfirm(false)}>
+                <Modal.Header closeButton>
+                    <Modal.Title>Confirm Delete</Modal.Title>
+                </Modal.Header>
+                <Modal.Body>
+                    Are you sure you want to delete the view "{viewFormData.name}"? This action cannot be undone.
+                </Modal.Body>
+                <Modal.Footer>
+                    <Button variant="secondary" onClick={() => setShowDeleteViewConfirm(false)}>
+                        Cancel
+                    </Button>
+                    <Button variant="danger" onClick={handleDeleteView}>
+                        Delete View
                     </Button>
                 </Modal.Footer>
             </Modal>

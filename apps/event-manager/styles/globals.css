@@ -228,3 +228,8 @@ body {
   border: 1px solid rgba(255, 193, 7, 0.4);
 }
 
+/* Ensure modal close button is visible on dark headers */
+.modal-header .btn-close {
+  filter: invert(1) !important;
+}
+

@@ -107,52 +107,100 @@ async function dispatchTable(
     if (req.method === 'POST' && id && req.body && req.body.fieldName && req.body.fieldValue !== undefined) {
       const { fieldName, fieldValue } = req.body;
 
-      // Handle nested field updates (e.g., "programs.sw2025.accepted")
-      let expressionAttributeNames: Record<string, string>;
-      let updateExpression: string;
-      const expressionAttributeValues = { ':fieldValue': fieldValue };
+      // Handle field deletion when fieldValue is null
+      if (fieldValue === null) {
+        let expressionAttributeNames: Record<string, string>;
+        let updateExpression: string;
 
-      if (fieldName.includes('.')) {
-        const pathParts = fieldName.split('.');
-        expressionAttributeNames = {};
+        if (fieldName.includes('.')) {
+          const pathParts = fieldName.split('.');
+          expressionAttributeNames = {};
 
-        // Create expression attribute names for each path part
-        pathParts.forEach((part, index) => {
-          expressionAttributeNames[`#part${index}`] = part;
-        });
+          // Create expression attribute names for each path part
+          pathParts.forEach((part, index) => {
+            expressionAttributeNames[`#part${index}`] = part;
+          });
 
-        // Build the update expression for nested path
-        updateExpression = 'SET ';
-        for (let i = 0; i < pathParts.length; i++) {
-          if (i === 0) {
-            updateExpression += `#part${i}`;
-          } else {
-            updateExpression += `.#part${i}`;
+          // Build the REMOVE expression for nested path
+          updateExpression = 'REMOVE ';
+          for (let i = 0; i < pathParts.length; i++) {
+            if (i === 0) {
+              updateExpression += `#part${i}`;
+            } else {
+              updateExpression += `.#part${i}`;
+            }
           }
+        } else {
+          // Handle simple field removal
+          expressionAttributeNames = { '#fieldName': fieldName };
+          updateExpression = `REMOVE #fieldName`;
         }
-        updateExpression += ' = :fieldValue';
-      } else {
-        // Handle simple field updates
-        expressionAttributeNames = { '#fieldName': fieldName };
-        updateExpression = `SET #fieldName = :fieldValue`;
-      }
 
-      // Use conditional update for work-orders to prevent recreating deleted items
-      if (resource === 'work-orders') {
-        try {
-          await updateItemWithCondition(tableName, { [cfg.pk]: id }, updateExpression, expressionAttributeValues, expressionAttributeNames);
-          return res.status(200).json({ success: true });
-        } catch (error: any) {
-          // If the item doesn't exist, return success since the goal (unlocked state) is achieved
-          if (error.name === 'ConditionalCheckFailedException') {
-            console.log(`[API] Work order ${id} does not exist, skipping update`);
+        // Use conditional update for work-orders to prevent recreating deleted items
+        if (resource === 'work-orders') {
+          try {
+            await updateItemWithCondition(tableName, { [cfg.pk]: id }, updateExpression, {}, expressionAttributeNames);
             return res.status(200).json({ success: true });
+          } catch (error: any) {
+            // If the item doesn't exist, return success since the goal (unlocked state) is achieved
+            if (error.name === 'ConditionalCheckFailedException') {
+              console.log(`[API] Work order ${id} does not exist, skipping update`);
+              return res.status(200).json({ success: true });
+            }
+            throw error;
           }
-          throw error;
+        } else {
+          await updateItem(tableName, { [cfg.pk]: id }, updateExpression, {}, expressionAttributeNames);
+          return res.status(200).json({ success: true });
         }
       } else {
-        await updateItem(tableName, { [cfg.pk]: id }, updateExpression, expressionAttributeValues, expressionAttributeNames);
-        return res.status(200).json({ success: true });
+        // Handle nested field updates (e.g., "programs.sw2025.accepted")
+        let expressionAttributeNames: Record<string, string>;
+        let updateExpression: string;
+        const expressionAttributeValues = { ':fieldValue': fieldValue };
+
+        if (fieldName.includes('.')) {
+          const pathParts = fieldName.split('.');
+          expressionAttributeNames = {};
+
+          // Create expression attribute names for each path part
+          pathParts.forEach((part, index) => {
+            expressionAttributeNames[`#part${index}`] = part;
+          });
+
+          // Build the update expression for nested path
+          updateExpression = 'SET ';
+          for (let i = 0; i < pathParts.length; i++) {
+            if (i === 0) {
+              updateExpression += `#part${i}`;
+            } else {
+              updateExpression += `.#part${i}`;
+            }
+          }
+          updateExpression += ' = :fieldValue';
+        } else {
+          // Handle simple field updates
+          expressionAttributeNames = { '#fieldName': fieldName };
+          updateExpression = `SET #fieldName = :fieldValue`;
+        }
+
+        // Use conditional update for work-orders to prevent recreating deleted items
+        if (resource === 'work-orders') {
+          try {
+            await updateItemWithCondition(tableName, { [cfg.pk]: id }, updateExpression, expressionAttributeValues, expressionAttributeNames);
+            return res.status(200).json({ success: true });
+          } catch (error: any) {
+            // If the item doesn't exist, return success since the goal (unlocked state) is achieved
+            if (error.name === 'ConditionalCheckFailedException') {
+              console.log(`[API] Work order ${id} does not exist, skipping update`);
+              return res.status(200).json({ success: true });
+            }
+            throw error;
+          }
+        } else {
+          await updateItem(tableName, { [cfg.pk]: id }, updateExpression, expressionAttributeValues, expressionAttributeNames);
+          return res.status(200).json({ success: true });
+        }
       }
     }
 

@@ -463,7 +463,6 @@ const Home = () => {
     const [currentViewConditions, setCurrentViewConditions] = useState<any[]>([]);
     const [canViewStudentHistory, setCanViewStudentHistory] = useState<boolean>(false);
     const [currentUserName, setCurrentUserName] = useState<string>("Unknown");
-    const [version, setVersion] = useState<string>("dev");
     const [emailDisplayPermission, setEmailDisplayPermission] = useState<boolean>(false);
     const [userEventAccess, setUserEventAccess] = useState<string[]>([]);
     // Add new state for currentEligibleStudents
@@ -1000,18 +999,6 @@ const Home = () => {
         } catch (error) {
             console.error('Error updating user eventDashboardLastUsedConfig:', error);
             return false;
-        }
-    };
-
-    const calculateVersion = () => {
-        if (typeof window !== 'undefined') {
-            const hostname = window.location.hostname;
-            if (hostname === 'localhost' || hostname === '127.0.0.1') {
-                setVersion('localhost');
-            } else {
-                const commitSha = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || 'dev';
-                setVersion(commitSha.substring(0, 7));
-            }
         }
     };
 
@@ -2428,9 +2415,6 @@ const Home = () => {
                     setEmailDisplayPermission(false);
                 }
 
-                // Calculate version
-                calculateVersion();
-
                 // Fetch events, pools, and views in parallel (but not students yet)
                 const [events, pools, viewsData] = await Promise.all([
                     fetchEvents(),
@@ -2717,7 +2701,8 @@ const Home = () => {
                     canExportCSV={canExportCSV}
                     canViewStudentHistory={canViewStudentHistory}
                     currentUserName={currentUserName}
-                    version={version}
+                    pid={pid as string}
+                    hash={hash as string}
                 />
             </Container>
             <StudentHistoryModal show={showHistoryModal} onClose={() => setShowHistoryModal(false)} student={selectedStudent} fetchConfig={fetchConfig} allEvents={allEvents} allPools={allPools} emailDisplayPermission={emailDisplayPermission} userEventAccess={userEventAccess} />

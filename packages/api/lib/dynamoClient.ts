@@ -368,15 +368,23 @@ export async function updateItem(
 ) {
   const client = getDocClient(identityPoolIdOverride);
   try {
-    await client.send(
-      new UpdateCommand({
-        TableName: tableName,
-        Key: key,
-        UpdateExpression: updateExpression,
-        ExpressionAttributeValues: expressionAttributeValues,
-        ExpressionAttributeNames: expressionAttributeNames,
-      })
-    );
+    const updateParams: any = {
+      TableName: tableName,
+      Key: key,
+      UpdateExpression: updateExpression,
+    };
+
+    // Only include ExpressionAttributeValues if it's not empty (needed for REMOVE operations)
+    if (Object.keys(expressionAttributeValues).length > 0) {
+      updateParams.ExpressionAttributeValues = expressionAttributeValues;
+    }
+
+    // Only include ExpressionAttributeNames if provided
+    if (expressionAttributeNames) {
+      updateParams.ExpressionAttributeNames = expressionAttributeNames;
+    }
+
+    await client.send(new UpdateCommand(updateParams));
   } catch (error) {
     console.error(`Failed to update item in table ${tableName}:`, error);
     if (error instanceof Error) {
@@ -409,16 +417,24 @@ export async function updateItemWithCondition(
 ) {
   const client = getDocClient(identityPoolIdOverride);
   try {
-    await client.send(
-      new UpdateCommand({
-        TableName: tableName,
-        Key: key,
-        UpdateExpression: updateExpression,
-        ExpressionAttributeValues: expressionAttributeValues,
-        ExpressionAttributeNames: expressionAttributeNames,
-        ConditionExpression: "attribute_exists(id)",
-      })
-    );
+    const updateParams: any = {
+      TableName: tableName,
+      Key: key,
+      UpdateExpression: updateExpression,
+      ConditionExpression: "attribute_exists(id)",
+    };
+
+    // Only include ExpressionAttributeValues if it's not empty (needed for REMOVE operations)
+    if (Object.keys(expressionAttributeValues).length > 0) {
+      updateParams.ExpressionAttributeValues = expressionAttributeValues;
+    }
+
+    // Only include ExpressionAttributeNames if provided
+    if (expressionAttributeNames) {
+      updateParams.ExpressionAttributeNames = expressionAttributeNames;
+    }
+
+    await client.send(new UpdateCommand(updateParams));
   } catch (error) {
     console.error(`Failed to update item with condition in table ${tableName}:`, error);
     if (error instanceof Error) {
