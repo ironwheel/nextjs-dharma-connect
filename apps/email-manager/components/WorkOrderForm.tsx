@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Form, Button, Spinner, Badge } from 'react-bootstrap'
 import { toast } from 'react-toastify'
 import { getTableItem, putTableItem, deleteTableItem, getAllTableItems, getAllTableItemsFiltered } from 'sharedFrontend'
@@ -400,39 +400,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
         }
     }, [eventCode, subEvent, userPid, userHash, id])
 
-    // Re-validate parent stages when eventCode or subEvent changes
-    useEffect(() => {
-        if (stage && selectedStageRecord?.parentStages && selectedStageRecord.parentStages.length > 0 && eventCode && subEvent) {
-            const currentValidation = { eventCode, subEvent, stage }
-            const lastValidation = lastValidationRef.current
-
-            // Only re-validate if the event/sub-event combination has actually changed
-            if (!lastValidation ||
-                lastValidation.eventCode !== eventCode ||
-                lastValidation.subEvent !== subEvent) {
-                lastValidationRef.current = currentValidation
-                handleStageChange(stage)
-            }
-        }
-    }, [eventCode, subEvent, stage, selectedStageRecord?.parentStages, handleStageChange])
-
-    // Sync selectedStageRecord when stage changes and stages are available
-    useEffect(() => {
-        if (stage && stages.length > 0) {
-            const stageRecord = stages.find(s => s.stage === stage)
-            setSelectedStageRecord(stageRecord || null)
-            
-            // Auto-set regLinkPresent based on stage's qaStepCheckRegLink property
-            if (stageRecord) {
-                setRegLinkPresent(Boolean(stageRecord.qaStepCheckRegLink))
-            } else {
-                setRegLinkPresent(false)
-            }
-        }
-    }, [stage, stages])
-
     // New function to handle stage selection with immediate validation
-    const handleStageChange = async (newStage: string) => {
+    const handleStageChange = useCallback(async (newStage: string) => {
         // Store the attempted stage selection
         attemptedStageRef.current = newStage;
 
@@ -509,7 +478,38 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 setRegLinkPresent(false)
             }
         }
-    }
+    }, [eventCode, subEvent, existingWorkOrders, stages, stage, userPid, userHash])
+
+    // Re-validate parent stages when eventCode or subEvent changes
+    useEffect(() => {
+        if (stage && selectedStageRecord?.parentStages && selectedStageRecord.parentStages.length > 0 && eventCode && subEvent) {
+            const currentValidation = { eventCode, subEvent, stage }
+            const lastValidation = lastValidationRef.current
+
+            // Only re-validate if the event/sub-event combination has actually changed
+            if (!lastValidation ||
+                lastValidation.eventCode !== eventCode ||
+                lastValidation.subEvent !== subEvent) {
+                lastValidationRef.current = currentValidation
+                handleStageChange(stage)
+            }
+        }
+    }, [eventCode, subEvent, stage, selectedStageRecord?.parentStages, handleStageChange])
+
+    // Sync selectedStageRecord when stage changes and stages are available
+    useEffect(() => {
+        if (stage && stages.length > 0) {
+            const stageRecord = stages.find(s => s.stage === stage)
+            setSelectedStageRecord(stageRecord || null)
+            
+            // Auto-set regLinkPresent based on stage's qaStepCheckRegLink property
+            if (stageRecord) {
+                setRegLinkPresent(Boolean(stageRecord.qaStepCheckRegLink))
+            } else {
+                setRegLinkPresent(false)
+            }
+        }
+    }, [stage, stages])
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
