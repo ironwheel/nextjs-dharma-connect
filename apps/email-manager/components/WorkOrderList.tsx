@@ -186,7 +186,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
     }
 
     // Helper function to check if a work order should be visible based on user's event access
-    const isWorkOrderAccessible = (workOrder: WorkOrder): boolean => {
+    const isWorkOrderAccessible = useCallback((workOrder: WorkOrder): boolean => {
         if (userEventAccess.length === 0) {
             return false; // No access configured
         }
@@ -194,7 +194,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
             return true; // All access
         }
         return userEventAccess.includes(workOrder.eventCode); // Specific event access
-    }
+    }, [userEventAccess])
 
     const loadWorkOrders = useCallback(async () => {
         setLoading(true)
@@ -253,7 +253,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         } finally {
             setLoading(false)
         }
-    }, [userPid, userHash, setWorkOrders, userEventAccess, eventNames, loadEventName, loadParticipantName, participantNames])
+    }, [userPid, userHash, userEventAccess, eventNames, loadEventName, loadParticipantName, participantNames])
 
     useEffect(() => {
         loadWorkOrders()
@@ -657,7 +657,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
     }, [newlyCreatedWorkOrder, onWorkOrderIndexChange, setCurrentWorkOrderIndex]);
 
     // Helper to prefetch campaign existence for all enabled languages for a work order
-    const prefetchCampaignExistence = async (workOrder: WorkOrder) => {
+    const prefetchCampaignExistence = useCallback(async (workOrder: WorkOrder) => {
         if (!workOrder) return;
         const langs = Object.keys(workOrder.languages ?? {}).filter(lang => !!workOrder.languages?.[lang]);
         if (langs.length === 0) return;
@@ -693,7 +693,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         }));
         setCampaignExistence(prev => ({ ...prev, [workOrderId]: newExistence }));
         setCampaignExistenceLoading(prev => ({ ...prev, [workOrderId]: false }));
-    };
+    }, [userPid, userHash]);
 
     // Prefetch campaign existence when workOrders or currentWorkOrderIndex changes
     useEffect(() => {
