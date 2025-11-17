@@ -83,7 +83,7 @@ export default function TestValidationPage() {
         };
 
         loadData();
-    }, []);
+    }, [userEventAccess]);
 
     useEffect(() => {
         if (eventCode) {

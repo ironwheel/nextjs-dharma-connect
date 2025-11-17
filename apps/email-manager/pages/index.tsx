@@ -61,7 +61,7 @@ interface View {
 
 interface Pool {
     name: string;
-    [key: string]: any;
+    [key: string]: unknown;
 }
 
 function getQueryParam(name: string): string | null {
@@ -617,7 +617,7 @@ export default function Home() {
         })
     }
 
-    const handleUpdateColumnDef = (index: number, field: string, value: any) => {
+    const handleUpdateColumnDef = (index: number, field: string, value: unknown) => {
         const updated = [...viewFormData.columnDefs]
         updated[index] = { ...updated[index], [field]: value }
         setViewFormData({ ...viewFormData, columnDefs: updated })
@@ -637,7 +637,7 @@ export default function Home() {
         })
     }
 
-    const handleUpdateViewCondition = (index: number, field: string, value: any) => {
+    const handleUpdateViewCondition = (index: number, field: string, value: unknown) => {
         const updated = [...viewFormData.viewConditions]
         updated[index] = { ...updated[index], [field]: value }
         setViewFormData({ ...viewFormData, viewConditions: updated })
@@ -1375,7 +1375,7 @@ export default function Home() {
                     <Modal.Title>Confirm Delete</Modal.Title>
                 </Modal.Header>
                 <Modal.Body className="bg-dark text-light">
-                    Are you sure you want to delete the view "{viewFormData.name}"? This action cannot be undone.
+                    Are you sure you want to delete the view &quot;{viewFormData.name}&quot;? This action cannot be undone.
                 </Modal.Body>
                 <Modal.Footer className="bg-dark text-light">
                     <Button variant="secondary" onClick={() => setShowDeleteViewConfirm(false)}>
