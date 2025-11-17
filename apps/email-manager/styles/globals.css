@@ -89,3 +89,8 @@
     color: #60a5fa;
     font-weight: 600;
 }
+
+/* Ensure modal close button is visible on dark headers */
+.modal-header .btn-close {
+    filter: invert(1) !important;
+}

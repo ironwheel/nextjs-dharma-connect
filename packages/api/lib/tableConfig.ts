@@ -18,7 +18,7 @@ export const tables: TableConfig[] = [
   { resource: 'send-recipients', envVar: 'DYNAMODB_TABLE_SEND_RECIPIENTS', pk: 'campaignString', sk: '', ops: ['get', 'list'] },
   { resource: 'work-orders', envVar: 'DYNAMODB_TABLE_WORK_ORDERS', pk: 'id', sk: '', ops: ['get', 'list', 'put', 'delete', 'update'] },
   { resource: 'work-order-audit-logs', envVar: 'DYNAMODB_TABLE_WORK_ORDER_AUDIT_LOGS', pk: 'workOrderId', sk: 'timestamp', ops: ['get', 'list', 'put'] },
-  { resource: 'students', envVar: 'DYNAMODB_TABLE_PARTICIPANTS', pk: 'id', sk: '', ops: ['get', 'put', 'list', 'count'] },
+  { resource: 'students', envVar: 'DYNAMODB_TABLE_PARTICIPANTS', pk: 'id', sk: '', ops: ['get', 'put', 'list', 'count', 'update'] },
   { resource: 'prompts', envVar: 'DYNAMODB_TABLE_PROMPTS', pk: 'prompt', sk: 'language', ops: ['get', 'list', 'put', 'delete'] },
   { resource: 'events', envVar: 'DYNAMODB_TABLE_EVENTS', pk: 'aid', sk: '', ops: ['get', 'list', 'count', 'put', 'delete'] },
   { resource: 'stages', envVar: 'DYNAMODB_TABLE_STAGES', pk: 'stage', sk: '', ops: ['get', 'list'] },
@@ -30,13 +30,15 @@ export const tables: TableConfig[] = [
   { resource: 'pools', envVar: 'DYNAMODB_TABLE_POOLS', pk: 'name', sk: '', ops: ['get', 'list', 'count', 'put', 'delete'] },
   { resource: 'scripts', envVar: 'DYNAMODB_TABLE_SCRIPTS', pk: 'name', sk: '', ops: ['get', 'list', 'count', 'put', 'delete'] },
   { resource: 'offering-config', envVar: 'DYNAMODB_TABLE_OFFERING_CONFIG', pk: 'oid', sk: '', ops: ['get', 'list', 'count', 'put', 'delete'] },
-  { resource: 'views', envVar: 'DYNAMODB_TABLE_VIEWS', pk: 'name', sk: '', ops: ['get', 'list', 'count'] },
+  { resource: 'views', envVar: 'DYNAMODB_TABLE_VIEWS', pk: 'name', sk: '', ops: ['get', 'list', 'count', 'put', 'delete'] },
   { resource: 'views-profiles', envVar: 'DYNAMODB_TABLE_VIEWS_PROFILES', pk: 'profile', sk: '', ops: ['get', 'list'] },
   { resource: 'app.actions', envVar: 'DYNAMODB_TABLE_APP_ACTIONS', pk: 'host', sk: '', ops: ['get'] },
   { resource: 'eligibility-cache', envVar: 'DYNAMODB_TABLE_ELIGIBILITY_CACHE', pk: 'aid', sk: '', ops: ['get', 'put', 'list'] },
   { resource: 'mantra-count', envVar: 'DYNAMODB_TABLE_MANTRA_COUNT', pk: 'id', sk: '', ops: ['get', 'put', 'list', 'update'] },
   { resource: 'mantra-config', envVar: 'DYNAMODB_TABLE_MANTRA_CONFIG', pk: 'id', sk: '', ops: ['get', 'put', 'list', 'update'] },
   { resource: 'sd-prompts-cache', envVar: 'DYNAMODB_TABLE_PROMPTS_CACHE', pk: 'eventCode', sk: 'promptKey', ops: ['get', 'list', 'query'] },
+  // Version records for deployments (git SHA keyed)
+  { resource: 'versions', envVar: 'DYNAMODB_TABLE_VERSIONS', pk: 'gitSHA', sk: '', ops: ['get', 'list', 'put'] },
 ];
 
 /**

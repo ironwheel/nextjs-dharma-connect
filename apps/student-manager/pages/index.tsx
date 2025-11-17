@@ -90,7 +90,6 @@ const Home = () => {
     const [rowData, setRowData] = useState<any[]>([]);
     const [itemCount, setItemCount] = useState(0);
     const [currentUserName, setCurrentUserName] = useState<string>("Unknown");
-    const [version, setVersion] = useState<string>("dev");
     const [canWriteViews, setCanWriteViews] = useState<boolean>(true);
     const [emailDisplayPermission, setEmailDisplayPermission] = useState<boolean>(false);
 
@@ -105,6 +104,12 @@ const Home = () => {
     // Event access state
     const [eventAccessList, setEventAccessList] = useState<string[]>([]);
     const [eventNames, setEventNames] = useState<Record<string, string>>({});
+    const [eventNamesLoading, setEventNamesLoading] = useState<boolean>(false);
+
+    // Friends and Family state
+    const [fafList, setFafList] = useState<string[]>([]);
+    const [fafSearchTerm, setFafSearchTerm] = useState('');
+    const [fafSearchResults, setFafSearchResults] = useState<Student[]>([]);
 
     // Modal state
     const [showEditModal, setShowEditModal] = useState(false);
@@ -329,6 +334,7 @@ const Home = () => {
 
             // Fetch event access list and then look up individual event names
             try {
+                setEventNamesLoading(true);
                 const eventListConfig = await fetchConfig('eventAccessList');
                 let eventCodes: string[] = [];
                 
@@ -371,11 +377,13 @@ const Home = () => {
                 });
                 
                 setEventNames(eventNamesMap);
+                setEventNamesLoading(false);
 
             } catch (error) {
                 console.error('Error fetching event data:', error);
                 setEventAccessList(['all']);
                 setEventNames({ 'all': 'All Events (Wildcard)' });
+                setEventNamesLoading(false);
             }
 
             setConfigSchema(schema);
@@ -413,18 +421,6 @@ const Home = () => {
         } catch (error) {
             console.error('Error setting current user name:', error);
             setCurrentUserName(`User ${pid || 'Unknown'}`);
-        }
-    };
-
-    const calculateVersion = () => {
-        if (typeof window !== 'undefined') {
-            const hostname = window.location.hostname;
-            if (hostname === 'localhost' || hostname === '127.0.0.1') {
-                setVersion('localhost');
-            } else {
-                const commitSha = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || 'dev';
-                setVersion(commitSha.substring(0, 7));
-            }
         }
     };
 
@@ -538,7 +534,7 @@ const Home = () => {
         handleSearch(searchValue);
     };
 
-    const handleCellClicked = (field: string, rowData: any) => {
+    const handleCellClicked = async (field: string, rowData: any) => {
         if (field === 'studentName') {
             const student = allStudents.find(s => s.id === rowData.studentId);
             if (student) {
@@ -548,28 +544,46 @@ const Home = () => {
                     return;
                 }
 
-                setSelectedStudent(student);
-                setOriginalStudent({ ...student }); // Store a copy of the original state
+                // Fetch full student record to get faf field
+                let fullStudent = student;
+                try {
+                    const fullRecord = await getTableItemOrNull('students', rowData.studentId, pid as string, hash as string);
+                    if (fullRecord && !('redirected' in fullRecord)) {
+                        fullStudent = { ...student, ...fullRecord };
+                    }
+                } catch (error) {
+                    console.error('Error fetching full student record:', error);
+                    // Continue with partial student record
+                }
+
+                setSelectedStudent(fullStudent);
+                setOriginalStudent({ ...fullStudent }); // Store a copy of the original state
                 setSelectedAuthRecord(rowData.authRecord);
                 const permittedHosts = Array.isArray(rowData.authRecord?.['permitted-hosts'])
                     ? [...rowData.authRecord['permitted-hosts']]
                     : [];
 
+                // Initialize faf list from student record
+                const initialFafList = Array.isArray(fullStudent.faf) ? [...fullStudent.faf] : [];
+                setFafList(initialFafList);
+                setFafSearchTerm('');
+                setFafSearchResults([]);
+
                 setFormData({
                     studentId: rowData.studentId,
                     studentProfile: {
-                        first: student?.first || '',
-                        last: student?.last || '',
-                        email: student?.email || '',
-                        writtenLangPref: student?.writtenLangPref || 'English',
-                        spokenLangPref: student?.spokenLangPref || 'English'
+                        first: fullStudent?.first || '',
+                        last: fullStudent?.last || '',
+                        email: fullStudent?.email || '',
+                        writtenLangPref: fullStudent?.writtenLangPref || 'English',
+                        spokenLangPref: fullStudent?.spokenLangPref || 'English'
                     },
                     shadowValues: {
-                        first: student?.first || '',
-                        last: student?.last || '',
-                        email: student?.email || '',
-                        writtenLangPref: student?.writtenLangPref || 'English',
-                        spokenLangPref: student?.spokenLangPref || 'English'
+                        first: fullStudent?.first || '',
+                        last: fullStudent?.last || '',
+                        email: fullStudent?.email || '',
+                        writtenLangPref: fullStudent?.writtenLangPref || 'English',
+                        spokenLangPref: fullStudent?.spokenLangPref || 'English'
                     },
                     // Initialize config with discovered schema
                     config: (() => {
@@ -737,7 +751,7 @@ const Home = () => {
         }
     };
 
-    const handleEdit = (authRecord: AuthRecord) => {
+    const handleEdit = async (authRecord: AuthRecord) => {
         const student = allStudents.find(s => s.id === authRecord.id);
         if (student) {
             // Don't allow editing if student is unsubscribed
@@ -746,28 +760,46 @@ const Home = () => {
                 return;
             }
 
+            // Fetch full student record to get faf field
+            let fullStudent = student;
+            try {
+                const fullRecord = await getTableItemOrNull('students', authRecord.id, pid as string, hash as string);
+                if (fullRecord && !('redirected' in fullRecord)) {
+                    fullStudent = { ...student, ...fullRecord };
+                }
+            } catch (error) {
+                console.error('Error fetching full student record:', error);
+                // Continue with partial student record
+            }
+
             const permittedHosts = Array.isArray(authRecord?.['permitted-hosts'])
                 ? [...authRecord['permitted-hosts']]
                 : [];
 
-            setSelectedStudent(student);
-            setOriginalStudent({ ...student }); // Store a copy of the original state
+            // Initialize faf list from student record
+            const initialFafList = Array.isArray(fullStudent.faf) ? [...fullStudent.faf] : [];
+            setFafList(initialFafList);
+            setFafSearchTerm('');
+            setFafSearchResults([]);
+
+            setSelectedStudent(fullStudent);
+            setOriginalStudent({ ...fullStudent }); // Store a copy of the original state
             setSelectedAuthRecord(authRecord);
             setFormData({
                 studentId: authRecord.id,
                 studentProfile: {
-                    first: student?.first || '',
-                    last: student?.last || '',
-                    email: student?.email || '',
-                    writtenLangPref: student?.writtenLangPref || 'English',
-                    spokenLangPref: student?.spokenLangPref || 'English'
+                    first: fullStudent?.first || '',
+                    last: fullStudent?.last || '',
+                    email: fullStudent?.email || '',
+                    writtenLangPref: fullStudent?.writtenLangPref || 'English',
+                    spokenLangPref: fullStudent?.spokenLangPref || 'English'
                 },
                 shadowValues: {
-                    first: student?.first || '',
-                    last: student?.last || '',
-                    email: student?.email || '',
-                    writtenLangPref: student?.writtenLangPref || 'English',
-                    spokenLangPref: student?.spokenLangPref || 'English'
+                    first: fullStudent?.first || '',
+                    last: fullStudent?.last || '',
+                    email: fullStudent?.email || '',
+                    writtenLangPref: fullStudent?.writtenLangPref || 'English',
+                    spokenLangPref: fullStudent?.spokenLangPref || 'English'
                 },
                 // Initialize config with discovered schema
                 config: (() => {
@@ -899,6 +931,34 @@ const Home = () => {
                 }
             }
 
+            // Save Friends and Family (faf) field
+            const originalFaf = Array.isArray(originalStudent?.faf) ? originalStudent.faf : [];
+            const fafChanged = JSON.stringify(originalFaf.sort()) !== JSON.stringify(fafList.sort());
+            
+            if (fafChanged) {
+                if (fafList.length === 0) {
+                    // Delete the faf field if list is empty (use null to trigger REMOVE operation)
+                    await updateStudentField(formData.studentId, 'faf', null);
+                    
+                    // Update local student data
+                    const studentIndex = allStudents.findIndex(s => s.id === formData.studentId);
+                    if (studentIndex !== -1) {
+                        const updatedStudent = { ...allStudents[studentIndex] };
+                        delete updatedStudent.faf;
+                        allStudents[studentIndex] = updatedStudent;
+                    }
+                } else {
+                    // Update the faf field
+                    await updateStudentField(formData.studentId, 'faf', fafList);
+                    
+                    // Update local student data
+                    const studentIndex = allStudents.findIndex(s => s.id === formData.studentId);
+                    if (studentIndex !== -1) {
+                        allStudents[studentIndex] = { ...allStudents[studentIndex], faf: fafList };
+                    }
+                }
+            }
+
             // Check if auth fields have changed
             const currentAuthRecord = allAuthRecords.find(ar => ar.id === formData.studentId);
             const authRecord: AuthRecord = {
@@ -1014,7 +1074,48 @@ const Home = () => {
                 allStudents = updatedStudents;
             }
         }
+        // Reset friends and family state
+        setFafList([]);
+        setFafSearchTerm('');
+        setFafSearchResults([]);
         setShowEditModal(false);
+    };
+
+    // Friends and Family handlers
+    const handleFafSearch = (searchValue: string) => {
+        setFafSearchTerm(searchValue);
+        if (!searchValue || !searchValue.trim()) {
+            setFafSearchResults([]);
+            return;
+        }
+
+        const searchLower = searchValue.toLowerCase().trim();
+        const filtered = allStudents.filter(student => {
+            // Exclude the current student and already added friends/family
+            if (selectedStudent && student.id === selectedStudent.id) return false;
+            if (fafList.includes(student.id)) return false;
+            
+            const fullName = `${student.first} ${student.last}`.toLowerCase();
+            return fullName.includes(searchLower);
+        });
+        setFafSearchResults(filtered);
+    };
+
+    const handleAddFaf = (studentId: string) => {
+        if (!fafList.includes(studentId)) {
+            setFafList([...fafList, studentId]);
+            setFafSearchTerm('');
+            setFafSearchResults([]);
+        }
+    };
+
+    const handleRemoveFaf = (studentId: string) => {
+        setFafList(fafList.filter(id => id !== studentId));
+    };
+
+    const getStudentNameById = (studentId: string): string => {
+        const student = allStudents.find(s => s.id === studentId);
+        return student ? `${student.first} ${student.last}` : studentId;
     };
 
     // OWYAA functionality
@@ -1119,9 +1220,6 @@ const Home = () => {
         const loadInitialData = async () => {
             try {
                 setLoadingProgress({ current: 0, total: 1, message: 'Starting data load...' });
-
-                // Calculate version
-                calculateVersion();
 
                 // Fetch all data in parallel
                 const [students, authRecordsResult, pools, viewsProfiles] = await Promise.all([
@@ -1310,7 +1408,8 @@ const Home = () => {
                     loading={!loaded}
                     itemCount={itemCount}
                     currentUserName={currentUserName}
-                    version={version}
+                    pid={pid as string}
+                    hash={hash as string}
                     onCheckboxChanged={handleCheckboxChanged}
                     canWriteViews={true}
                 />
@@ -1482,6 +1581,125 @@ const Home = () => {
                             </div>
                         )}
 
+                        {/* Friends and Family Section */}
+                        {selectedStudent && (
+                            <div style={{
+                                border: '1px solid #555',
+                                borderRadius: '8px',
+                                padding: '20px',
+                                marginBottom: '30px',
+                                backgroundColor: '#1a1a1a'
+                            }}>
+                                <h5 style={{ marginBottom: '20px' }}>Friends and Family</h5>
+                                
+                                {/* Current Friends and Family List */}
+                                {fafList.length > 0 && (
+                                    <div style={{ marginBottom: '20px' }}>
+                                        <Form.Label style={{ marginBottom: '10px', display: 'block' }}>
+                                            <strong>Current Friends and Family:</strong>
+                                        </Form.Label>
+                                        <div style={{
+                                            border: '1px solid #555',
+                                            borderRadius: '4px',
+                                            padding: '10px',
+                                            backgroundColor: '#2b2b2b',
+                                            maxHeight: '200px',
+                                            overflowY: 'auto'
+                                        }}>
+                                            {fafList.map((fafId) => (
+                                                <div key={fafId} style={{
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    alignItems: 'center',
+                                                    padding: '8px',
+                                                    marginBottom: '5px',
+                                                    backgroundColor: '#1a1a1a',
+                                                    borderRadius: '4px',
+                                                    border: '1px solid #444'
+                                                }}>
+                                                    <span style={{ color: 'white' }}>
+                                                        {getStudentNameById(fafId)}
+                                                    </span>
+                                                    <Button
+                                                        variant="danger"
+                                                        size="sm"
+                                                        onClick={() => handleRemoveFaf(fafId)}
+                                                        style={{ minWidth: '60px' }}
+                                                    >
+                                                        Remove
+                                                    </Button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Search for Friends and Family */}
+                                <div style={{ marginBottom: '15px' }}>
+                                    <Form.Label style={{ marginBottom: '10px', display: 'block' }}>
+                                        <strong>Add Friends and Family:</strong>
+                                    </Form.Label>
+                                    <Form.Control
+                                        type="text"
+                                        value={fafSearchTerm}
+                                        onChange={(e) => handleFafSearch(e.target.value)}
+                                        placeholder="Search by first or last name..."
+                                        style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                                    />
+                                    
+                                    {/* Search Results Dropdown */}
+                                    {fafSearchResults.length > 0 && (
+                                        <div style={{
+                                            position: 'relative',
+                                            marginTop: '5px'
+                                        }}>
+                                            <div style={{
+                                                position: 'absolute',
+                                                top: 0,
+                                                left: 0,
+                                                right: 0,
+                                                zIndex: 1000,
+                                                backgroundColor: '#2b2b2b',
+                                                border: '1px solid #555',
+                                                borderRadius: '4px',
+                                                maxHeight: '200px',
+                                                overflowY: 'auto',
+                                                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)'
+                                            }}>
+                                                {fafSearchResults.map((student) => (
+                                                    <div
+                                                        key={student.id}
+                                                        onClick={() => handleAddFaf(student.id)}
+                                                        style={{
+                                                            padding: '10px',
+                                                            cursor: 'pointer',
+                                                            borderBottom: '1px solid #444',
+                                                            color: 'white',
+                                                            transition: 'background-color 0.2s'
+                                                        }}
+                                                        onMouseEnter={(e) => {
+                                                            e.currentTarget.style.backgroundColor = '#3b3b3b';
+                                                        }}
+                                                        onMouseLeave={(e) => {
+                                                            e.currentTarget.style.backgroundColor = 'transparent';
+                                                        }}
+                                                    >
+                                                        {student.first} {student.last}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    
+                                    {fafSearchTerm && fafSearchResults.length === 0 && (
+                                        <Form.Text className="text-muted" style={{ display: 'block', marginTop: '5px' }}>
+                                            No matching students found
+                                        </Form.Text>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
                         {/* Permitted Apps Section */}
                         <div style={{
                             border: '1px solid #555',
@@ -1636,57 +1854,63 @@ const Home = () => {
                                                                             maxHeight: '300px',
                                                                             overflowY: 'auto'
                                                                         }}>
-                                                                            {eventAccessList.map(eventCode => {
-                                                                                const eventName = eventNames[eventCode] || eventCode;
-                                                                                const isChecked = Array.isArray(value) ? value.includes(eventCode) : false;
-                                                                                const isAllEvent = eventCode === 'all';
-                                                                                
-                                                                                return (
-                                                                                    <div key={eventCode} style={{ marginBottom: '8px' }}>
-                                                                                        <Form.Check
-                                                                                            type="checkbox"
-                                                                                            label={
-                                                                                                <div style={{ 
-                                                                                                    fontWeight: isAllEvent ? 'bold' : 'normal', 
-                                                                                                    color: isAllEvent ? '#ffc107' : 'white' 
-                                                                                                }}>
-                                                                                                    {eventName}
-                                                                                                </div>
-                                                                                            }
-                                                                                            checked={isChecked}
-                                                                                            onChange={(e) => {
-                                                                                                const currentEvents = Array.isArray(value) ? [...value] : [];
-                                                                                                let newEvents;
-                                                                                                
-                                                                                                if (e.target.checked) {
-                                                                                                    if (isAllEvent) {
-                                                                                                        // If selecting 'all', clear other selections
-                                                                                                        newEvents = ['all'];
-                                                                                                    } else {
-                                                                                                        // If selecting specific event, remove 'all' if it exists
-                                                                                                        newEvents = [...currentEvents.filter(code => code !== 'all'), eventCode];
-                                                                                                    }
-                                                                                                } else {
-                                                                                                    newEvents = currentEvents.filter(code => code !== eventCode);
+                                                                            {eventNamesLoading || (eventAccessList.length > 0 && eventAccessList.filter(code => code !== 'all').some(code => !eventNames[code])) ? (
+                                                                                <div style={{ color: 'white', textAlign: 'center', padding: '20px' }}>
+                                                                                    loading...
+                                                                                </div>
+                                                                            ) : (
+                                                                                eventAccessList.map(eventCode => {
+                                                                                    const eventName = eventNames[eventCode] || eventCode;
+                                                                                    const isChecked = Array.isArray(value) ? value.includes(eventCode) : false;
+                                                                                    const isAllEvent = eventCode === 'all';
+                                                                                    
+                                                                                    return (
+                                                                                        <div key={eventCode} style={{ marginBottom: '8px' }}>
+                                                                                            <Form.Check
+                                                                                                type="checkbox"
+                                                                                                label={
+                                                                                                    <div style={{ 
+                                                                                                        fontWeight: isAllEvent ? 'bold' : 'normal', 
+                                                                                                        color: isAllEvent ? '#ffc107' : 'white' 
+                                                                                                    }}>
+                                                                                                        {eventName}
+                                                                                                    </div>
                                                                                                 }
-                                                                                                
-                                                                                                setFormData(prev => ({
-                                                                                                    ...prev,
-                                                                                                    config: {
-                                                                                                        ...prev.config,
-                                                                                                        [host]: {
-                                                                                                            ...prev.config[host],
-                                                                                                            [key]: newEvents
+                                                                                                checked={isChecked}
+                                                                                                onChange={(e) => {
+                                                                                                    const currentEvents = Array.isArray(value) ? [...value] : [];
+                                                                                                    let newEvents;
+                                                                                                    
+                                                                                                    if (e.target.checked) {
+                                                                                                        if (isAllEvent) {
+                                                                                                            // If selecting 'all', clear other selections
+                                                                                                            newEvents = ['all'];
+                                                                                                        } else {
+                                                                                                            // If selecting specific event, remove 'all' if it exists
+                                                                                                            newEvents = [...currentEvents.filter(code => code !== 'all'), eventCode];
                                                                                                         }
+                                                                                                    } else {
+                                                                                                        newEvents = currentEvents.filter(code => code !== eventCode);
                                                                                                     }
-                                                                                                }));
-                                                                                            }}
-                                                                                            disabled={!isPermitted}
-                                                                                            style={{ marginBottom: '5px' }}
-                                                                                        />
-                                                                                    </div>
-                                                                                );
-                                                                            })}
+                                                                                                    
+                                                                                                    setFormData(prev => ({
+                                                                                                        ...prev,
+                                                                                                        config: {
+                                                                                                            ...prev.config,
+                                                                                                            [host]: {
+                                                                                                                ...prev.config[host],
+                                                                                                                [key]: newEvents
+                                                                                                            }
+                                                                                                        }
+                                                                                                    }));
+                                                                                                }}
+                                                                                                disabled={!isPermitted}
+                                                                                                style={{ marginBottom: '5px' }}
+                                                                                            />
+                                                                                        </div>
+                                                                                    );
+                                                                                })
+                                                                            )}
                                                                         </div>
                                                                                                                                 <Form.Text className="text-muted">
                                                             Select which events this student can access. You can select multiple specific events or choose "All Events" for complete access.

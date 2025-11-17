@@ -8,6 +8,7 @@
 import React, { useState, createContext, useContext, useEffect } from 'react';
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faGlobe, faChevronDown } from "@fortawesome/free-solid-svg-icons";
+import VersionBadge from './VersionBadge';
 import { updateLanguage } from './prompts';
 
 // Language context for managing language state across components
@@ -167,13 +168,21 @@ export const WrittenTranslationSelection = (props: {
  * @param {string} props.title - The title to display.
  * @returns {React.FC} The TopNavBar component.
  */
-export const TopNavBar = (props: { title?: string }) => {
+export const TopNavBar = (props: { title?: string; pid?: string; hash?: string }) => {
     return (
         <div className="sticky top-0 z-50 bg-gray-900 border border-gray-700 rounded-lg p-4 mb-4 flex items-center justify-between shadow-lg max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center">
                 <h1 className="text-xl font-bold text-white">{props.title || 'Dashboard'}</h1>
             </div>
-            <div className="flex items-center">
+            <div className="flex items-center gap-3">
+                {props.pid && props.hash && (
+                    <button
+                        type="button"
+                        className="flex items-center gap-2 px-4 py-2 bg-white/15 border border-white/30 rounded-lg text-white text-sm font-semibold hover:bg-white/25 hover:border-white/40 transition-all duration-200 hover:-translate-y-0.5 shadow-lg"
+                    >
+                        <VersionBadge pid={props.pid} hash={props.hash} />
+                    </button>
+                )}
                 <WrittenTranslationSelection icon={true} />
             </div>
         </div>

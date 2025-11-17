@@ -1806,7 +1806,11 @@ const HomeContent = () => {
                 />
             ) : (
                 <>
-                    <TopNavBar title={promptLookup('title')} />
+                    <TopNavBar
+                        title={promptLookup('title')}
+                        pid={pid as string}
+                        hash={hash as string}
+                    />
                     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                         {mediaDashboard()}
                     </div>
