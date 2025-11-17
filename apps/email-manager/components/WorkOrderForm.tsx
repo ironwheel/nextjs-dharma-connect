@@ -290,7 +290,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
         }
 
         loadOptions()
-    }, [])
+    }, [id, userEventAccess, userHash, userPid])
 
     // Notify parent component when loading state changes
     useEffect(() => {
@@ -377,7 +377,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             setSubEvent('')
             setInPerson(false)
         }
-    }, [eventCode, events])
+    }, [eventCode, events, id, subEvent])
 
     // Load existing work orders when eventCode or subEvent changes
     useEffect(() => {
@@ -414,7 +414,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 handleStageChange(stage)
             }
         }
-    }, [eventCode, subEvent])
+    }, [eventCode, subEvent, stage, selectedStageRecord?.parentStages, handleStageChange])
 
     // Sync selectedStageRecord when stage changes and stages are available
     useEffect(() => {

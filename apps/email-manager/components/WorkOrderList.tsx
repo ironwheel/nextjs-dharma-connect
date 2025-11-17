@@ -92,7 +92,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         if (workOrders.length > 0 && currentWorkOrderIndex >= workOrders.length) {
             setCurrentWorkOrderIndex(0)
         }
-    }, [workOrders, currentWorkOrderIndex])
+    }, [workOrders, currentWorkOrderIndex, setCurrentWorkOrderIndex])
 
     // Update parent's workOrders state when local state changes
     useEffect(() => {
@@ -253,7 +253,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         } finally {
             setLoading(false)
         }
-    }, [userPid, userHash, setWorkOrders, userEventAccess])
+    }, [userPid, userHash, setWorkOrders, userEventAccess, eventNames, loadEventName, loadParticipantName, participantNames])
 
     useEffect(() => {
         loadWorkOrders()
@@ -286,7 +286,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                 }
             }
         }
-    }, [workOrders, editedWorkOrderId, setEditedWorkOrderId, restorationRetryCount]);
+    }, [workOrders, editedWorkOrderId, setEditedWorkOrderId, restorationRetryCount, setCurrentWorkOrderIndex]);
 
     // Load email display permission
     useEffect(() => {
@@ -568,7 +568,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                 })
             }
         }
-    }, [lastMessage])
+    }, [lastMessage, currentWorkOrderIndex, isWorkOrderAccessible, prefetchCampaignExistence, setCurrentWorkOrderIndex, userHash, userPid])
 
     // Helper function to check if campaign data needs to be refreshed
     const checkIfCampaignDataNeedsRefresh = (oldWorkOrder: WorkOrder, newWorkOrder: WorkOrder): boolean => {
@@ -654,7 +654,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
             // Clear the newly created work order after handling it
             // This will be done by the parent component
         }
-    }, [newlyCreatedWorkOrder, onWorkOrderIndexChange]);
+    }, [newlyCreatedWorkOrder, onWorkOrderIndexChange, setCurrentWorkOrderIndex]);
 
     // Helper to prefetch campaign existence for all enabled languages for a work order
     const prefetchCampaignExistence = async (workOrder: WorkOrder) => {
