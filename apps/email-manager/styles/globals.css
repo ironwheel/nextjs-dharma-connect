@@ -90,7 +90,28 @@
     font-weight: 600;
 }
 
-/* Ensure modal close button is visible on dark headers */
+/* Dark modal styling to match other apps */
+.modal-content {
+    background-color: #1a1a1a !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    color: white !important;
+}
+
+.modal-header {
+    background-color: #1a1a1a !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2) !important;
+    color: white !important;
+}
+
+.modal-title {
+    color: white !important;
+}
+
 .modal-header .btn-close {
     filter: invert(1) !important;
+}
+
+.modal-body {
+    background-color: #000000 !important;
+    color: white !important;
 }
