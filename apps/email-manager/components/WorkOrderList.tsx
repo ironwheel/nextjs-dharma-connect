@@ -39,6 +39,7 @@ interface WorkOrder {
     archivedAt?: string
     archivedBy?: string
     sleepUntil?: string
+    revision?: string
 }
 
 interface RecipientEntry {
@@ -75,7 +76,8 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
     const { lastMessage, status, connectionId } = useWebSocket()
     const prevWorkOrdersRef = useRef<WorkOrder[]>([])
     // Add state to cache campaign existence for each work order and language
-    const [campaignExistence, setCampaignExistence] = useState<Record<string, Record<string, { dryrun: boolean; send: boolean; dryrunCount?: number; sendCount?: number }>>>({});
+    // _revision is stored as metadata to detect when revision changes
+    const [campaignExistence, setCampaignExistence] = useState<Record<string, Record<string, { dryrun: boolean; send: boolean; dryrunCount?: number; sendCount?: number }> & { _revision?: string | null }>>({} as Record<string, Record<string, { dryrun: boolean; send: boolean; dryrunCount?: number; sendCount?: number }> & { _revision?: string | null }>);
     const [campaignExistenceLoading, setCampaignExistenceLoading] = useState<Record<string, boolean>>({});
     const [recipientSearch, setRecipientSearch] = useState('');
     const [currentCampaignString, setCurrentCampaignString] = useState<string>('');
@@ -322,7 +324,10 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         setCampaignExistenceLoading(prev => ({ ...prev, [workOrderId]: true }));
         const newExistence: Record<string, { dryrun: boolean; send: boolean; dryrunCount?: number; sendCount?: number }> = {};
         await Promise.all(langs.map(async (lang) => {
-            const campaignString = `${eventCode}_${subEvent}_${stage}_${lang}`;
+            const revision = workOrder.revision;
+            const campaignString = revision 
+                ? `${eventCode}_${subEvent}_${stage}_${revision}_${lang}`
+                : `${eventCode}_${subEvent}_${stage}_${lang}`;
             let dryrun = false;
             let send = false;
             let dryrunCount = undefined;
@@ -345,7 +350,9 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
             }
             newExistence[lang] = { dryrun, send, dryrunCount, sendCount };
         }));
-        setCampaignExistence(prev => ({ ...prev, [workOrderId]: newExistence }));
+        // Store revision in cache for comparison
+        const cacheEntry = { ...newExistence, _revision: workOrder.revision || null } as Record<string, { dryrun: boolean; send: boolean; dryrunCount?: number; sendCount?: number }> & { _revision?: string | null };
+        setCampaignExistence(prev => ({ ...prev, [workOrderId]: cacheEntry }));
         setCampaignExistenceLoading(prev => ({ ...prev, [workOrderId]: false }));
     }, [userPid, userHash]);
 
@@ -498,6 +505,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                     archivedAt: workOrder.archivedAt,
                     archivedBy: workOrder.archivedBy,
                     sleepUntil: workOrder.sleepUntil,
+                    revision: workOrder.revision,
                 }
 
                 setWorkOrdersLocal(prevOrders => {
@@ -610,7 +618,16 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
 
     // Helper function to check if campaign data needs to be refreshed
     const checkIfCampaignDataNeedsRefresh = (oldWorkOrder: WorkOrder, newWorkOrder: WorkOrder): boolean => {
-        if (!oldWorkOrder || !newWorkOrder || !oldWorkOrder.steps || !newWorkOrder.steps) {
+        if (!oldWorkOrder || !newWorkOrder) {
+            return false;
+        }
+
+        // If revision changed, campaign string changes, so we need to refresh
+        if (oldWorkOrder.revision !== newWorkOrder.revision) {
+            return true;
+        }
+
+        if (!oldWorkOrder.steps || !newWorkOrder.steps) {
             return false;
         }
 
@@ -698,8 +715,23 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
     useEffect(() => {
         if (workOrders.length > 0) {
             const workOrder = workOrders[currentWorkOrderIndex];
-            if (workOrder && !campaignExistence[workOrder.id]) {
-                prefetchCampaignExistence(workOrder);
+            if (workOrder) {
+                const cachedData = campaignExistence[workOrder.id];
+                // Check if we need to refresh: no cache, or revision changed
+                const cachedRevision = cachedData?._revision; // Store revision in cache for comparison
+                const currentRevision = workOrder.revision || null;
+                
+                if (!cachedData || cachedRevision !== currentRevision) {
+                    // Clear old cache entry if revision changed
+                    if (cachedData && cachedRevision !== currentRevision) {
+                        setCampaignExistence(prev => {
+                            const updated = { ...prev };
+                            delete updated[workOrder.id];
+                            return updated;
+                        });
+                    }
+                    prefetchCampaignExistence(workOrder);
+                }
             }
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -927,6 +959,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                                 <th style={{ border: 'none' }}>Event</th>
                                 <th style={{ border: 'none' }}>Sub Event</th>
                                 <th style={{ border: 'none' }}>Stage</th>
+                                <th style={{ border: 'none' }}>Rev</th>
                                 <th style={{ border: 'none' }}>Languages</th>
                                 <th style={{ border: 'none' }}>Email Account</th>
                                 <th style={{ border: 'none' }}>Created By</th>
@@ -938,7 +971,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                                 if (!workOrder) {
                                     return (
                                         <tr>
-                                            <td colSpan={8} className="text-center text-muted py-4">
+                                            <td colSpan={9} className="text-center text-muted py-4">
                                                 No work orders found
                                             </td>
                                         </tr>
@@ -995,12 +1028,13 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                                             </td>
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.subEvent}</td>
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.stage}</td>
+                                            <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.revision || ''}</td>
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{Object.keys(workOrder.languages ?? {}).filter(lang => !!workOrder.languages?.[lang]).join(',')}</td>
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.account}</td>
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{participantNames[workOrder.createdBy] || workOrder.createdBy}</td>
                                         </tr>
                                         <tr>
-                                            <td colSpan={8} style={{ padding: 0, background: 'transparent', border: 'none' }}>
+                                            <td colSpan={9} style={{ padding: 0, background: 'transparent', border: 'none' }}>
                                                 {(workOrder.steps || []).map((step, index) => {
                                                     // Helper function to extract string values from DynamoDB format or plain strings
                                                     const extractString = (value: unknown): string => {
@@ -1158,7 +1192,10 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                                                                                             variant="outline-info"
                                                                                             onClick={async () => {
                                                                                                 if (!exists) return;
-                                                                                                const campaignString = `${workOrder.eventCode}_${workOrder.subEvent}_${workOrder.stage}_${lang}`;
+                                                                                                const revision = workOrder.revision;
+                                                                                                const campaignString = revision 
+                                                                                                    ? `${workOrder.eventCode}_${workOrder.subEvent}_${workOrder.stage}_${revision}_${lang}`
+                                                                                                    : `${workOrder.eventCode}_${workOrder.subEvent}_${workOrder.stage}_${lang}`;
                                                                                                 try {
                                                                                                     const result = await getTableItem('dryrun-recipients', campaignString, userPid, userHash);
                                                                                                     const entries = (result && result.entries && Array.isArray(result.entries)) ? [...result.entries] : [];
@@ -1226,7 +1263,10 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                                                                                             variant="outline-primary"
                                                                                             onClick={async () => {
                                                                                                 if (!exists) return;
-                                                                                                const campaignString = `${workOrder.eventCode}_${workOrder.subEvent}_${workOrder.stage}_${lang}`;
+                                                                                                const revision = workOrder.revision;
+                                                                                                const campaignString = revision 
+                                                                                                    ? `${workOrder.eventCode}_${workOrder.subEvent}_${workOrder.stage}_${revision}_${lang}`
+                                                                                                    : `${workOrder.eventCode}_${workOrder.subEvent}_${workOrder.stage}_${lang}`;
                                                                                                 try {
                                                                                                     const result = await getTableItem('send-recipients', campaignString, userPid, userHash);
                                                                                                     const entries = (result && result.entries && Array.isArray(result.entries)) ? [...result.entries] : [];

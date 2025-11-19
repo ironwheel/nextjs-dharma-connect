@@ -52,7 +52,7 @@ def passes_stage_filter(stage_record, eligible):
     
     return True
 
-def build_campaign_string(event_code, sub_event, stage, language):
+def build_campaign_string(event_code, sub_event, stage, language, revision=None):
     """
     Build a standardized campaign string for email tracking.
     
@@ -61,11 +61,15 @@ def build_campaign_string(event_code, sub_event, stage, language):
         sub_event: The sub event name
         stage: The stage name
         language: The language code
+        revision: Optional revision string (e.g., "1", "2", etc.)
         
     Returns:
         str: The campaign string
     """
-    return f"{event_code}_{sub_event}_{stage}_{language}"
+    if revision:
+        return f"{event_code}_{sub_event}_{stage}_{revision}_{language}"
+    else:
+        return f"{event_code}_{sub_event}_{stage}_{language}"
 
 def get_stage_prefix(stage_record, language):
     """
