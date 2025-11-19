@@ -28,6 +28,7 @@ interface WorkOrder {
     steps?: Array<{ name: string; status: string; message: string; isActive: boolean }>;
     createdBy?: string;
     config?: { pool?: string };
+    revision?: string;
 }
 
 interface Event {
@@ -175,6 +176,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
     const [sendInterval, setSendInterval] = useState(process.env.EMAIL_CONTINUOUS_SLEEP_SECS || '600')
     const [salutationByName, setSalutationByName] = useState(true)  // Default to true
     const [regLinkPresent, setRegLinkPresent] = useState(true)  // Default to true
+    const [revisionEnabled, setRevisionEnabled] = useState(false)  // Default to false
+    const [revision, setRevision] = useState('1')  // Default to "1" when enabled
     const [testParticipantOptions, setTestParticipantOptions] = useState<Array<{ id: string, name: string }>>([])
     const [stages, setStages] = useState<Stage[]>([])
     const [selectedStageRecord, setSelectedStageRecord] = useState<Stage | null>(null)
@@ -319,6 +322,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     setSendInterval(String(response.sendInterval || process.env.EMAIL_CONTINUOUS_SLEEP_SECS || '600'))
                     setSalutationByName(response.salutationByName !== false)  // Default to true if not explicitly false
                     setRegLinkPresent(response.regLinkPresent !== false)  // Default to true if not explicitly false
+                    setRevisionEnabled(!!response.revision)  // Enable if revision exists
+                    setRevision(response.revision || '1')  // Set revision or default to "1"
                 }
             }).catch(error => {
                 console.error('Error loading work order:', error)
@@ -346,6 +351,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             setSendInterval(String(response.sendInterval || process.env.EMAIL_CONTINUOUS_SLEEP_SECS || '600'))
             setSalutationByName(response.salutationByName !== false)  // Default to true if not explicitly false
             setRegLinkPresent(response.regLinkPresent !== false)  // Default to true if not explicitly false
+            setRevisionEnabled(!!response.revision)  // Enable if revision exists
+            setRevision(response.revision || '1')  // Set revision or default to "1"
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [optionsLoaded])
@@ -534,11 +541,16 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             // When editing, check if structural fields changed
             const existingWorkOrder = loadedWorkOrderRef.current
             if (existingWorkOrder) {
+                const currentRevision = revisionEnabled ? revision : undefined
+                const existingRevision = existingWorkOrder.revision
+                const revisionChanged = currentRevision !== existingRevision
+                
                 structuralFieldsChanged =
                     existingWorkOrder.eventCode !== eventCode ||
                     existingWorkOrder.subEvent !== subEvent ||
                     existingWorkOrder.stage !== stage ||
-                    JSON.stringify(existingWorkOrder.languages || {}) !== JSON.stringify(languages || {})
+                    JSON.stringify(existingWorkOrder.languages || {}) !== JSON.stringify(languages || {}) ||
+                    revisionChanged
 
                 shouldResetSteps = structuralFieldsChanged
                 existingSteps = existingWorkOrder.steps || []
@@ -550,8 +562,11 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     )
 
                     if (hasProgress) {
+                        const changeType = revisionChanged 
+                            ? 'Changing the revision setting'
+                            : 'Changing the Event Code, Sub Event, or Stage'
                         const confirmed = window.confirm(
-                            'Warning: Changing the Event Code, Sub Event, or Stage will reset all workflow progress. ' +
+                            `Warning: ${changeType} will reset all workflow progress and clear S3 paths. ` +
                             'This action cannot be undone. Do you want to continue?'
                         )
                         if (!confirmed) {
@@ -628,12 +643,23 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
 
             // Determine s3HTMLPaths value:
             // 1. If we have inherited fields from a parent stage, use those
-            // 2. Otherwise, if editing, preserve the existing s3HTMLPaths
-            // 3. Otherwise (new work order with no inheritance), leave undefined
+            // 2. If revision changed, clear s3HTMLPaths
+            // 3. Otherwise, if editing, preserve the existing s3HTMLPaths
+            // 4. Otherwise (new work order with no inheritance), leave undefined
             let s3HTMLPathsValue = inheritedFields.s3HTMLPaths;
-            // Check if inheritedFields.s3HTMLPaths is empty or undefined, and if editing, preserve existing paths
-            if ((!s3HTMLPathsValue || Object.keys(s3HTMLPathsValue).length === 0) && id && loadedWorkOrderRef.current?.s3HTMLPaths) {
-                s3HTMLPathsValue = loadedWorkOrderRef.current.s3HTMLPaths;
+            // Check if revision changed - if so, clear s3HTMLPaths
+            if (id && loadedWorkOrderRef.current) {
+                const currentRevision = revisionEnabled ? revision : undefined
+                const existingRevision = loadedWorkOrderRef.current.revision
+                const revisionChanged = currentRevision !== existingRevision
+                
+                if (revisionChanged) {
+                    // Clear s3HTMLPaths when revision changes
+                    s3HTMLPathsValue = {};
+                } else if ((!s3HTMLPathsValue || Object.keys(s3HTMLPathsValue).length === 0) && loadedWorkOrderRef.current?.s3HTMLPaths) {
+                    // Preserve existing paths if revision didn't change and no inheritance
+                    s3HTMLPathsValue = loadedWorkOrderRef.current.s3HTMLPaths;
+                }
             }
 
             const workOrder: WorkOrder = {
@@ -653,6 +679,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 sendInterval,
                 salutationByName,
                 regLinkPresent,
+                revision: revisionEnabled ? revision : undefined,
                 config: {
                     pool: pool
                 },
@@ -1001,7 +1028,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                                     className="bg-dark text-light border-secondary"
                                     required
                                 />
-                                <Form.Text className="text-muted">
+                                <Form.Text className="text-light" style={{ opacity: 0.8 }}>
                                     Required for this stage
                                 </Form.Text>
                                 <Form.Text className="text-info small">
@@ -1022,7 +1049,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                         onChange={e => setRegLinkPresent(e.target.checked)}
                         className="bg-dark text-light border-secondary"
                     />
-                    <Form.Text className="text-muted">
+                    <Form.Text className="text-light" style={{ opacity: 0.8 }}>
                         When enabled, the Prepare step will check for registration links with proper parameters
                     </Form.Text>
                 </Form.Group>
@@ -1045,7 +1072,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                         </option>
                     ))}
                 </Form.Select>
-                <Form.Text className="text-muted">
+                <Form.Text className="text-light" style={{ opacity: 0.8 }}>
                     Select one or more testers to receive test emails (hold Ctrl/Cmd to select multiple)
                 </Form.Text>
             </Form.Group>
@@ -1059,7 +1086,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     onChange={e => setSalutationByName(e.target.checked)}
                     className="bg-dark text-light border-secondary"
                 />
-                <Form.Text className="text-muted">
+                <Form.Text className="text-light" style={{ opacity: 0.8 }}>
                     When enabled, the Prepare step will check for the ||name|| field in HTML content
                 </Form.Text>
             </Form.Group>
@@ -1073,7 +1100,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     onChange={e => setSendContinuously(e.target.checked)}
                     className="bg-dark text-light border-secondary"
                 />
-                <Form.Text className="text-muted">
+                <Form.Text className="text-light" style={{ opacity: 0.8 }}>
                     When enabled, emails will be sent continuously until the specified date
                 </Form.Text>
             </Form.Group>
@@ -1088,7 +1115,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                         className="bg-dark text-light border-secondary"
                         required={sendContinuously}
                     />
-                    <Form.Text className="text-muted">
+                    <Form.Text className="text-light" style={{ opacity: 0.8 }}>
                         Continuous sending will stop on this date and time
                     </Form.Text>
                 </Form.Group>
@@ -1106,8 +1133,45 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                         <option value="3600">1 hour</option>
                         <option value="600">10 minutes</option>
                     </Form.Select>
-                    <Form.Text className="text-muted">
+                    <Form.Text className="text-light" style={{ opacity: 0.8 }}>
                         Time to wait between sending passes
+                    </Form.Text>
+                </Form.Group>
+            )}
+
+            <Form.Group className="mb-3">
+                <Form.Check
+                    type="checkbox"
+                    id="revisionEnabled"
+                    label="Enable Revision"
+                    checked={revisionEnabled}
+                    onChange={e => {
+                        setRevisionEnabled(e.target.checked)
+                        if (e.target.checked && !revision) {
+                            setRevision('1')
+                        }
+                    }}
+                    className="bg-dark text-light border-secondary"
+                />
+                <Form.Text className="text-light" style={{ opacity: 0.8 }}>
+                    When enabled, the revision will be included in the campaign string for tracking purposes. It does not affect S3/Mailchimp file names.
+                </Form.Text>
+            </Form.Group>
+
+            {revisionEnabled && (
+                <Form.Group className="mb-3">
+                    <Form.Label>Revision</Form.Label>
+                    <Form.Select
+                        value={revision}
+                        onChange={e => setRevision(e.target.value)}
+                        className="bg-dark text-light border-secondary"
+                    >
+                        {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
+                            <option key={num} value={String(num)}>{num}</option>
+                        ))}
+                    </Form.Select>
+                    <Form.Text className="text-light" style={{ opacity: 0.8 }}>
+                        Select a revision number from 1 to 10. This will be included in the campaign string.
                     </Form.Text>
                 </Form.Group>
             )}

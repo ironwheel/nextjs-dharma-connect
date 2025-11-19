@@ -159,6 +159,7 @@ class WorkOrder:
         self.s3HTMLPaths = {}  # Add s3HTMLPaths field for storing S3 paths
         self.regLinkPresent = True  # Add regLinkPresent field (default True)
         self.salutationByName = True  # Add salutationByName field for Prepare step
+        self.revision = None  # Add revision field for campaign string (optional)
 
     def dict(self) -> Dict:
         """Convert to regular dictionary format"""
@@ -191,7 +192,8 @@ class WorkOrder:
             'sendInterval': self.sendInterval,
             's3HTMLPaths': self.s3HTMLPaths,
             'regLinkPresent': self.regLinkPresent,
-            'salutationByName': self.salutationByName
+            'salutationByName': self.salutationByName,
+            'revision': self.revision
         }
 
     def to_dict(self) -> Dict:
@@ -225,7 +227,8 @@ class WorkOrder:
             'sendInterval': {'N': str(self.sendInterval)},
             's3HTMLPaths': {'M': {k: {'S': v} for k, v in self.s3HTMLPaths.items()}} if self.s3HTMLPaths else {'NULL': True},
             'regLinkPresent': {'BOOL': self.regLinkPresent},
-            'salutationByName': {'BOOL': self.salutationByName}
+            'salutationByName': {'BOOL': self.salutationByName},
+            'revision': {'S': self.revision} if self.revision else {'NULL': True}
         }
 
     def __str__(self) -> str:
@@ -326,6 +329,7 @@ class WorkOrder:
                 work_order.sendInterval = int(data.get('sendInterval', {}).get('N', os.getenv('EMAIL_CONTINUOUS_SLEEP_SECS', '600')))
                 work_order.regLinkPresent = data.get('regLinkPresent', {}).get('BOOL', True)
                 work_order.salutationByName = data.get('salutationByName', {}).get('BOOL', True)
+                work_order.revision = data.get('revision', {}).get('S') if isinstance(data.get('revision'), dict) and 'S' in data.get('revision', {}) else data.get('revision')
                     
                 return work_order
             else:
@@ -371,6 +375,7 @@ class WorkOrder:
                 work_order.s3HTMLPaths = data.get('s3HTMLPaths', {})
                 work_order.regLinkPresent = data.get('regLinkPresent', True)
                 work_order.salutationByName = data.get('salutationByName', True)
+                work_order.revision = data.get('revision')
                 return work_order
         except Exception as e:
             print(f"Error creating WorkOrder: {e}")

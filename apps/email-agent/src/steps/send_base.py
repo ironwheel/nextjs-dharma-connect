@@ -117,7 +117,7 @@ class SendBaseStep:
                 await self._update_progress(work_order, f"Processing {lang} language...", step.name)
                 
                 # Get campaign string for this language
-                campaign_string = build_campaign_string(work_order.eventCode, work_order.subEvent, work_order.stage, lang)
+                campaign_string = build_campaign_string(work_order.eventCode, work_order.subEvent, work_order.stage, lang, work_order.revision)
                 await self._update_progress(work_order, f"Campaign string for {lang}: {campaign_string}", step.name)
                 
                 # For dry runs, delete existing recipient records before beginning
