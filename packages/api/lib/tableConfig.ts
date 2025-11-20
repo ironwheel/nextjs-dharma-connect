@@ -33,7 +33,7 @@ export const tables: TableConfig[] = [
   { resource: 'views', envVar: 'DYNAMODB_TABLE_VIEWS', pk: 'name', sk: '', ops: ['get', 'list', 'count', 'put', 'delete'] },
   { resource: 'views-profiles', envVar: 'DYNAMODB_TABLE_VIEWS_PROFILES', pk: 'profile', sk: '', ops: ['get', 'list'] },
   { resource: 'app.actions', envVar: 'DYNAMODB_TABLE_APP_ACTIONS', pk: 'host', sk: '', ops: ['get'] },
-  { resource: 'eligibility-cache', envVar: 'DYNAMODB_TABLE_ELIGIBILITY_CACHE', pk: 'aid', sk: '', ops: ['get', 'put', 'list'] },
+  { resource: 'eligibility-cache', envVar: 'DYNAMODB_TABLE_ELIGIBILITY_CACHE', pk: 'aid', sk: '', ops: ['get', 'put', 'list', 'delete'] },
   { resource: 'mantra-count', envVar: 'DYNAMODB_TABLE_MANTRA_COUNT', pk: 'id', sk: '', ops: ['get', 'put', 'list', 'update'] },
   { resource: 'mantra-config', envVar: 'DYNAMODB_TABLE_MANTRA_CONFIG', pk: 'id', sk: '', ops: ['get', 'put', 'list', 'update'] },
   { resource: 'sd-prompts-cache', envVar: 'DYNAMODB_TABLE_PROMPTS_CACHE', pk: 'eventCode', sk: 'promptKey', ops: ['get', 'list', 'query'] },

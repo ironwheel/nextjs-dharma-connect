@@ -19,6 +19,7 @@ import {
     useWebSocket,
     getTableCount,
     checkEligibility,
+    deleteTableItem,
     Pool
 } from 'sharedFrontend';
 
@@ -235,15 +236,15 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
     const handleEventRowClick = (sub) => {
         const eligible = getEligibility(sub.event, sub.subEventKey);
         if (!eligible) return;
-        
+
         if (!regDomain) {
             toast.error('Registration domain not loaded yet');
             return;
         }
-        
+
         setCopying(true);
         const url = `${regDomain}/?pid=${student.id}&aid=${sub.event.aid}`;
-        
+
         // Try synchronous clipboard write (required for Safari)
         navigator.clipboard.writeText(url)
             .then(() => {
@@ -340,9 +341,9 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
                     <br />
                 </div>
                 {fallbackUrl && (
-                    <div style={{ 
-                        marginBottom: 16, 
-                        padding: 12, 
+                    <div style={{
+                        marginBottom: 16,
+                        padding: 12,
                         backgroundColor: '#fef3c7',
                         border: '1px solid #f59e0b',
                         borderRadius: 6,
@@ -351,14 +352,14 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
                         <div style={{ fontWeight: 'bold', marginBottom: 8 }}>
                             📋 Registration Link (Copy manually):
                         </div>
-                        <input 
-                            type="text" 
-                            value={fallbackUrl} 
-                            readOnly 
+                        <input
+                            type="text"
+                            value={fallbackUrl}
+                            readOnly
                             onClick={(e) => e.currentTarget.select()}
-                            style={{ 
-                                width: '100%', 
-                                padding: 8, 
+                            style={{
+                                width: '100%',
+                                padding: 8,
                                 border: '1px solid #d97706',
                                 borderRadius: 4,
                                 backgroundColor: '#fffbeb',
@@ -465,6 +466,7 @@ const Home = () => {
     const [currentUserName, setCurrentUserName] = useState<string>("Unknown");
     const [emailDisplayPermission, setEmailDisplayPermission] = useState<boolean>(false);
     const [userEventAccess, setUserEventAccess] = useState<string[]>([]);
+    const [canRefreshCache, setCanRefreshCache] = useState<boolean>(false);
     // Add new state for currentEligibleStudents
     const [currentEligibleStudents, setCurrentEligibleStudents] = useState<Student[]>([]);
     // Add state for eligibility caching system
@@ -609,8 +611,16 @@ const Home = () => {
                 onIncrementalUpdate(existingEligibleStudents);
             }
 
-            // First, check if we have an eligibility cache record for this event
-            const cacheRecord = await getTableItemOrNull('eligibility-cache', eventAid, pid as string, hash as string);
+            // Check if eligibility cache is disabled for this event
+            const cacheDisabled = currentEvent.config?.eligibilityCacheDisabled === true;
+
+            // First, check if we have an eligibility cache record for this event (if not disabled)
+            let cacheRecord: any = null;
+            if (!cacheDisabled) {
+                cacheRecord = await getTableItemOrNull('eligibility-cache', eventAid, pid as string, hash as string);
+            } else {
+                console.log(`Eligibility cache disabled for event ${eventAid}`);
+            }
 
             if (cacheRecord && !('redirected' in cacheRecord) && cacheRecord.studentIdList) {
                 // STEP 2: Filter cache to exclude students already loaded globally
@@ -771,8 +781,11 @@ const Home = () => {
                 }
 
                 // Create cache record for future use (only include originally eligible students)
-                const eligibleStudentIds = eligibleStudents.map(s => s.id);
-                await createEligibilityCacheRecord(eventAid, eligibleStudentIds);
+                // Only if cache is not disabled
+                if (!cacheDisabled) {
+                    const eligibleStudentIds = eligibleStudents.map(s => s.id);
+                    await createEligibilityCacheRecord(eventAid, eligibleStudentIds);
+                }
 
                 // Trigger incremental update with final result
                 if (onIncrementalUpdate) {
@@ -1007,9 +1020,40 @@ const Home = () => {
             toast.error('No current event selected');
             return false;
         }
-        const eventFieldName = `programs.${evShadow.aid}.${fieldName}`;
+
+        // Find the student to check existing structure
+        const student = allStudents.find(s => s.id === studentId);
+        if (!student) {
+            console.error('Student not found for update:', studentId);
+            return false;
+        }
+
+        let updatePath = '';
+        let updateValue = fieldValue;
+
+        // Determine the correct update path and value based on existing structure
+        if (!student.programs) {
+            // programs does not exist, create it
+            updatePath = 'programs';
+            updateValue = { [evShadow.aid]: { [fieldName]: fieldValue } };
+            // Optimistically update local state
+            student.programs = updateValue;
+        } else if (!student.programs[evShadow.aid]) {
+            // programs exists but event entry does not, create event entry
+            updatePath = `programs.${evShadow.aid}`;
+            updateValue = { [fieldName]: fieldValue };
+            // Optimistically update local state
+            student.programs[evShadow.aid] = updateValue;
+        } else {
+            // both exist, update the specific field
+            updatePath = `programs.${evShadow.aid}.${fieldName}`;
+            updateValue = fieldValue;
+            // Optimistically update local state
+            student.programs[evShadow.aid][fieldName] = fieldValue;
+        }
+
         try {
-            await updateTableItem('students', studentId, eventFieldName, fieldValue, pid as string, hash as string);
+            await updateTableItem('students', studentId, updatePath, updateValue, pid as string, hash as string);
             toast.success('Field updated successfully');
             return true;
         } catch (error) {
@@ -2370,6 +2414,9 @@ const Home = () => {
                 // Fetch student history permission
                 const historyPermission = await authGetConfigValue(pid as string, hash as string, 'studentHistory');
                 setCanViewStudentHistory(historyPermission === true);
+                // Fetch cache refresh permission
+                const refreshPermission = await authGetConfigValue(pid as string, hash as string, 'cacheRefreshPermission');
+                setCanRefreshCache(refreshPermission === true);
 
                 // Fetch user's event access list
                 try {
@@ -2539,6 +2586,62 @@ const Home = () => {
 
 
 
+    // Handle refresh cache
+    const handleRefreshCache = async () => {
+        if (!evShadow || !evShadow.aid) return;
+
+        const confirmRefresh = window.confirm(`Are you sure you want to refresh the eligibility cache for ${evShadow.name}? This will delete the existing cache and rebuild it.`);
+        if (!confirmRefresh) return;
+
+        try {
+            setLoadingEligibilityCache(true);
+            setLoadingProgress(prev => ({
+                ...prev,
+                current: 0,
+                total: 0,
+                message: `Deleting eligibility cache for ${evShadow.aid}...`
+            }));
+
+            // Delete the cache item
+            await deleteTableItem('eligibility-cache', evShadow.aid, pid as string, hash as string);
+            console.log(`Eligibility cache deleted for ${evShadow.aid}`);
+
+            // Clear local state
+            accumulatedEligibleStudentsRef.current = [];
+            setAllStudentsLoadedForCurrentEvent(false);
+            setCurrentEligibleStudents([]);
+
+            // Rebuild cache
+            // Create new abort controller for this load
+            if (currentLoadingAbortControllerRef.current) {
+                currentLoadingAbortControllerRef.current.abort();
+            }
+            currentLoadingAbortControllerRef.current = new AbortController();
+
+            loadStudentsForEvent(
+                evShadow.aid,
+                allEvents,
+                allPools,
+                (eligibleStudents) => updateTableDataIncrementally(eligibleStudents, undefined, evShadow, allPools),
+                currentLoadingAbortControllerRef.current
+            ).then(eligibleStudents => {
+                setCurrentEligibleStudents(eligibleStudents);
+                fetchCurrentUser(eligibleStudents);
+                toast.success('Eligibility cache refreshed successfully');
+            }).catch(error => {
+                if (error.name !== 'AbortError') {
+                    console.error('Error rebuilding cache:', error);
+                    toast.error('Failed to rebuild cache');
+                }
+            });
+
+        } catch (error) {
+            console.error('Error refreshing cache:', error);
+            toast.error('Failed to refresh cache');
+            setLoadingEligibilityCache(false);
+        }
+    };
+
     // 3. Update WebSocket message handling to process studentUpdate messages and update in-memory table, eligibility, and view
     useEffect(() => {
         if (lastMessage) {
@@ -2700,6 +2803,8 @@ const Home = () => {
                     canWriteViews={canWriteViews}
                     canExportCSV={canExportCSV}
                     canViewStudentHistory={canViewStudentHistory}
+                    canRefreshCache={canRefreshCache && evShadow?.config?.eligibilityCacheDisabled !== true}
+                    onRefreshCache={handleRefreshCache}
                     currentUserName={currentUserName}
                     pid={pid as string}
                     hash={hash as string}
