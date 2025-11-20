@@ -876,7 +876,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
     const sessionCreatedAt = Date.now();
     const sessionTTL = Math.floor((sessionCreatedAt + SESSION_DURATION_MS) / 1000);
     const sessionDurationSeconds = Math.floor(SESSION_DURATION_MS / 1000);
-    
+
     console.log(`SESSION CREATION [pid=${pid}]:`);
     console.log(`  - Creating new session after email verification`);
     console.log(`  - Created at: ${new Date(sessionCreatedAt).toISOString()} (${sessionCreatedAt})`);
@@ -1177,22 +1177,22 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     tableCfg = tableGetConfig('sessions');
     if (!token) {
         console.log(`SECURITY CHECK [pid=${pid}]: NO TOKEN PROVIDED - treating as new login attempt`);
-        
+
         // Look for any existing session for this user/device
         const existingSession = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
-        
+
         if (existingSession) {
             // Delete the existing session even if it's not expired
             // This forces the user through verification flow for new login attempts
             console.log(`SECURITY CHECK [pid=${pid}]: Deleting existing session - no token provided requires new verification`);
             console.log(`  - Session was created: ${new Date(existingSession.createdAt || 0).toISOString()}`);
             console.log(`  - Session TTL: ${existingSession.ttl} (expires: ${new Date((existingSession.ttl || 0) * 1000).toISOString()})`);
-            
+
             await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
         } else {
             console.log(`SECURITY CHECK [pid=${pid}]: No existing session found - proceeding to verification flow`);
         }
-        
+
         // Force user into verification flow - do not allow session-based refresh
         console.log(`SECURITY CHECK [pid=${pid}]: Forcing verification flow for no-token request`);
         const verificationAccessToken = createToken(pid, deviceFingerprint, verificationActionList);
@@ -1205,11 +1205,11 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     // If we reach here, a token WAS provided but verification failed (expired/invalid)
     // This is a legitimate token refresh scenario - check for existing session
     console.log(`TOKEN REFRESH CHECK [pid=${pid}]: Token was provided but invalid/expired - checking for valid session to refresh`);
-    
+
     // Check for existing session which is only created after email verification
     // Sessions records use a primary key of pid-deviceFingerprint
     const session = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
-    
+
     // If session found, generate fresh access token if the session isn't expired
     if (session) {
         const currentTimeSeconds = Math.floor(Date.now() / 1000);
@@ -1217,7 +1217,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
         const sessionCreatedAt = session.createdAt || 0;
         const sessionAgeSeconds = currentTimeSeconds - Math.floor(sessionCreatedAt / 1000);
         const timeUntilExpirySeconds = sessionTTL - currentTimeSeconds;
-        
+
         console.log(`SESSION CHECK [pid=${pid}]:`);
         console.log(`  - Session found: YES`);
         console.log(`  - Session created: ${new Date(sessionCreatedAt).toISOString()} (${sessionCreatedAt})`);
@@ -1227,7 +1227,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
         console.log(`  - Time until expiry: ${timeUntilExpirySeconds} seconds (${(timeUntilExpirySeconds / 3600).toFixed(2)} hours)`);
         console.log(`  - Expected SESSION_DURATION: ${SESSION_DURATION_SECONDS || 'unknown'} seconds (${SESSION_DURATION_SECONDS ? (parseInt(SESSION_DURATION_SECONDS) / 3600).toFixed(2) : 'unknown'} hours)`);
         console.log(`  - Is expired: ${sessionTTL <= currentTimeSeconds}`);
-        
+
         if (sessionTTL <= currentTimeSeconds) {
             // Session is expired, delete it and fall through to the verification process
             console.log(`SESSION EXPIRED [pid=${pid}]: Deleting session and requiring re-verification`);
@@ -1319,8 +1319,8 @@ export async function getConfigValue(pid: string, host: string, key: string): Pr
         }
     }
 
-    // If still not found, throw unknown config key error
-    throw new Error('AUTH_UNKNOWN_CONFIG_KEY');
+    // If still not found, return false instead of throwing error
+    return false;
 }
 
 /**
