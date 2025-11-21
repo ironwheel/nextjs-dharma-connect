@@ -66,6 +66,7 @@ export default function Home() {
     const [editedWorkOrderId, setEditedWorkOrderId] = useState<string | null>(null)
     const [unarchivingId, setUnarchivingId] = useState<string | null>(null)
     const [userEventAccess, setUserEventAccess] = useState<string[]>([])
+    const [permissionsLoaded, setPermissionsLoaded] = useState(false)
     const initialWorkOrdersLoaded = useRef(false)
 
 
@@ -148,7 +149,10 @@ export default function Home() {
     // Fetch write permission and event access
     React.useEffect(() => {
         const fetchPermissions = async () => {
-            if (!pid || !hash) return;
+            if (!pid || !hash) {
+                setPermissionsLoaded(true);
+                return;
+            }
 
             try {
                 const [permissionResponse, eventAccessResponse] = await Promise.all([
@@ -182,6 +186,8 @@ export default function Home() {
                 }
                 setWritePermission(false);
                 setUserEventAccess([]);
+            } finally {
+                setPermissionsLoaded(true);
             }
         };
 
@@ -198,17 +204,17 @@ export default function Home() {
         const restoreLastUsedWorkOrder = async () => {
             // Only restore once when work orders are first loaded
             if (workOrders.length === 0 || initialWorkOrdersLoaded.current) return;
-            
+
             // Mark that we've loaded initial work orders
             initialWorkOrdersLoaded.current = true;
-            
+
             try {
                 const userConfig = await fetchCurrentUserLastUsedConfig();
-                
+
                 if (userConfig?.workOrderId) {
                     // Find the work order index by ID
                     const workOrderIndex = workOrders.findIndex(wo => wo.id === userConfig.workOrderId);
-                    
+
                     if (workOrderIndex !== -1) {
                         setCurrentWorkOrderIndex(workOrderIndex);
                     } else {
@@ -230,7 +236,7 @@ export default function Home() {
     React.useEffect(() => {
         const handleKeyDown = async (event: KeyboardEvent) => {
             if (workOrders.length === 0) return;
-            
+
             switch (event.key) {
                 case 'Home':
                     event.preventDefault();
@@ -308,7 +314,7 @@ export default function Home() {
         // If a new work order was created, store it for the list
         if (createdWorkOrder && createdWorkOrder.id) {
             setNewlyCreatedWorkOrder(createdWorkOrder)
-            
+
             // Persist the newly created work order
             try {
                 await updateUserEmailManagerLastUsedConfig({
@@ -320,7 +326,7 @@ export default function Home() {
         } else if (editingWorkOrderId) {
             // Store the edited work order ID for restoration after refresh
             setEditedWorkOrderId(editingWorkOrderId);
-            
+
             // Use a longer delay to ensure the editedWorkOrderId state is set before refresh
             setTimeout(() => {
                 setRefreshCounter(prev => prev + 1);
@@ -347,7 +353,7 @@ export default function Home() {
         if (currentWorkOrderIndex < workOrders.length - 1) {
             const newIndex = currentWorkOrderIndex + 1;
             setCurrentWorkOrderIndex(newIndex);
-            
+
             // Persist the new work order selection
             const newWorkOrder = workOrders[newIndex];
             if (newWorkOrder && newWorkOrder.id) {
@@ -366,7 +372,7 @@ export default function Home() {
         if (currentWorkOrderIndex > 0) {
             const newIndex = currentWorkOrderIndex - 1;
             setCurrentWorkOrderIndex(newIndex);
-            
+
             // Persist the new work order selection
             const newWorkOrder = workOrders[newIndex];
             if (newWorkOrder && newWorkOrder.id) {
@@ -614,6 +620,7 @@ export default function Home() {
                 onWorkOrderIndexChange={updateUserEmailManagerLastUsedConfig}
                 editedWorkOrderId={editedWorkOrderId}
                 setEditedWorkOrderId={setEditedWorkOrderId}
+                permissionsLoaded={permissionsLoaded}
             />
 
             <Modal show={showForm} onHide={handleFormClose} size="lg">

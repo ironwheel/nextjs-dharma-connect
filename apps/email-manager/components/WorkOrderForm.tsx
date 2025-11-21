@@ -87,23 +87,23 @@ async function getParentWorkOrder(
     // Get all work orders with matching eventCode
     const items = await getAllTableItemsFiltered('work-orders', 'eventCode', eventCode, pid, hash);
     if (!Array.isArray(items) || items.length === 0) return null;
-    
+
     // Check for multiple parent stages existing (error condition)
-    const existingParentStages = parentStages.filter(parentStage => 
+    const existingParentStages = parentStages.filter(parentStage =>
         items.some(item => item.subEvent === subEvent && item.stage === parentStage)
     );
-    
+
     if (existingParentStages.length > 1) {
         throw new Error(`Multiple parent stages found: ${existingParentStages.join(', ')}. Only one parent stage should exist.`);
     }
-    
+
     // Find the first available parent stage in order of preference
     for (const parentStage of parentStages) {
         const filtered = items.filter(item =>
             item.subEvent === subEvent &&
             item.stage === parentStage
         );
-        
+
         if (filtered.length > 0) {
             // Sort by createdAt descending (most recent first)
             filtered.sort((a, b) => {
@@ -114,7 +114,7 @@ async function getParentWorkOrder(
             return { workOrder: filtered[0], parentStage };
         }
     }
-    
+
     return null;
 }
 
@@ -190,7 +190,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
     const loadedWorkOrderRef = useRef<WorkOrder | null>(null)
     const lastValidationRef = useRef<{ eventCode: string, subEvent: string, stage: string } | null>(null)
     const attemptedStageRef = useRef<string>('')
-    
+
     // Event search state
     const [eventSearchText, setEventSearchText] = useState('')
     const [eventDropdownOpen, setEventDropdownOpen] = useState(false)
@@ -203,19 +203,19 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 setEventDropdownOpen(false)
             }
         }
-        
+
         document.addEventListener('mousedown', handleClickOutside)
         return () => {
             document.removeEventListener('mousedown', handleClickOutside)
         }
     }, [])
-    
+
     // Filter events based on search text
     const filteredEvents = events.filter(ev => {
         if (!eventSearchText) return true
         const searchLower = eventSearchText.toLowerCase()
-        return ev.aid.toLowerCase().includes(searchLower) || 
-               ev.name.toLowerCase().includes(searchLower)
+        return ev.aid.toLowerCase().includes(searchLower) ||
+            ev.name.toLowerCase().includes(searchLower)
     })
 
     // Fetch events and config on mount
@@ -361,7 +361,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
     useEffect(() => {
         const selectedEvent = events.find(ev => ev.aid === eventCode)
         if (selectedEvent) {
-            const subEvNames = selectedEvent.subEvents ? Object.keys(selectedEvent.subEvents) : []
+            const subEvNames = selectedEvent.subEvents ? Object.keys(selectedEvent.subEvents).sort() : []
             setSubEvents(subEvNames)
 
             // Check if this event is in-person
@@ -384,7 +384,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             setSubEvent('')
             setInPerson(false)
         }
-    }, [eventCode, events, id, subEvent])
+    }, [eventCode, events, id])
 
     // Load existing work orders when eventCode or subEvent changes
     useEffect(() => {
@@ -453,10 +453,10 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 setLanguages(parentResult.workOrder.languages || {})
                 setSubjects(parentResult.workOrder.subjects || {})
                 setInheritedFromStage(parentResult.parentStage)
-                
+
                 // Auto-set regLinkPresent based on stage's qaStepCheckRegLink property
                 setRegLinkPresent(Boolean(stageRecord.qaStepCheckRegLink))
-                
+
                 // Update last validation ref
                 lastValidationRef.current = { eventCode, subEvent, stage: newStage }
             } catch (error) {
@@ -477,7 +477,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             setSelectedStageRecord(stageRecord || null)
             setInheritedFields({})
             setInheritedFromStage(null)
-            
+
             // Auto-set regLinkPresent based on stage's qaStepCheckRegLink property
             if (stageRecord) {
                 setRegLinkPresent(Boolean(stageRecord.qaStepCheckRegLink))
@@ -508,7 +508,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
         if (stage && stages.length > 0) {
             const stageRecord = stages.find(s => s.stage === stage)
             setSelectedStageRecord(stageRecord || null)
-            
+
             // Auto-set regLinkPresent based on stage's qaStepCheckRegLink property
             if (stageRecord) {
                 setRegLinkPresent(Boolean(stageRecord.qaStepCheckRegLink))
@@ -544,7 +544,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 const currentRevision = revisionEnabled ? revision : undefined
                 const existingRevision = existingWorkOrder.revision
                 const revisionChanged = currentRevision !== existingRevision
-                
+
                 structuralFieldsChanged =
                     existingWorkOrder.eventCode !== eventCode ||
                     existingWorkOrder.subEvent !== subEvent ||
@@ -562,7 +562,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     )
 
                     if (hasProgress) {
-                        const changeType = revisionChanged 
+                        const changeType = revisionChanged
                             ? 'Changing the revision setting'
                             : 'Changing the Event Code, Sub Event, or Stage'
                         const confirmed = window.confirm(
@@ -597,8 +597,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 {
                     name: 'Prepare',
                     status: inheritedFields.s3HTMLPaths && Object.keys(inheritedFields.s3HTMLPaths).length > 0 ? 'complete' : 'ready',
-                    message: inheritedFields.s3HTMLPaths && Object.keys(inheritedFields.s3HTMLPaths).length > 0 
-                        ? `Skipped - HTML files inherited from parent stage: ${inheritedFromStage}` 
+                    message: inheritedFields.s3HTMLPaths && Object.keys(inheritedFields.s3HTMLPaths).length > 0
+                        ? `Skipped - HTML files inherited from parent stage: ${inheritedFromStage}`
                         : '',
                     isActive: false
                 },
@@ -652,7 +652,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 const currentRevision = revisionEnabled ? revision : undefined
                 const existingRevision = loadedWorkOrderRef.current.revision
                 const revisionChanged = currentRevision !== existingRevision
-                
+
                 if (revisionChanged) {
                     // Clear s3HTMLPaths when revision changes
                     s3HTMLPathsValue = {};
@@ -762,7 +762,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                             {eventSearchText || 'Select event'}
                         </div>
                     ) : (
-                        <div 
+                        <div
                             className="form-control bg-dark text-light border-secondary"
                             style={{ cursor: 'pointer' }}
                             onClick={() => {
@@ -777,7 +777,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                         </div>
                     )}
                     {eventDropdownOpen && (
-                        <div 
+                        <div
                             style={{
                                 position: 'absolute',
                                 top: '100%',
@@ -807,7 +807,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                                 onChange={e => setEventSearchText(e.target.value)}
                                 autoFocus
                                 className="bg-dark text-light border-0 event-search-input"
-                                style={{ 
+                                style={{
                                     borderRadius: '0.25rem 0.25rem 0 0',
                                     borderBottom: '1px solid #6c757d'
                                 }}
@@ -844,7 +844,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                                     </div>
                                 ))
                             ) : (
-                                <div 
+                                <div
                                     style={{
                                         padding: '0.75rem',
                                         color: '#6c757d',
@@ -1008,36 +1008,36 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             </Form.Group>
 
             {selectedStageRecord?.qaStepCheckZoomLink && (
-                    <Form.Group className="mb-3">
-                        {inPerson ? (
-                            <>
-                                <Form.Label>Event Type</Form.Label>
-                                <div className="form-control bg-dark text-light border-secondary" style={{ padding: '0.375rem 0.75rem', backgroundColor: '#212529', color: '#fff' }}>
-                                    <Badge bg="success" className="me-2">In-Person</Badge>
-                                    This is an in-person event - no Zoom ID required
-                                </div>
-                            </>
-                        ) : (
-                            <>
-                                <Form.Label>Zoom Meeting Link</Form.Label>
-                                <Form.Control
-                                    type="url"
-                                    value={zoomLink}
-                                    onChange={e => setZoomLink(e.target.value)}
-                                    placeholder="https://us02web.zoom.us/j/1234567890?pwd=..."
-                                    className="bg-dark text-light border-secondary"
-                                    required
-                                />
-                                <Form.Text className="text-light" style={{ opacity: 0.8 }}>
-                                    Required for this stage
-                                </Form.Text>
-                                <Form.Text className="text-info small">
-                                    💡 Please copy the entire Zoom link directly from Zoom to avoid errors
-                                </Form.Text>
-                            </>
-                        )}
-                    </Form.Group>
-                )}
+                <Form.Group className="mb-3">
+                    {inPerson ? (
+                        <>
+                            <Form.Label>Event Type</Form.Label>
+                            <div className="form-control bg-dark text-light border-secondary" style={{ padding: '0.375rem 0.75rem', backgroundColor: '#212529', color: '#fff' }}>
+                                <Badge bg="success" className="me-2">In-Person</Badge>
+                                This is an in-person event - no Zoom ID required
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <Form.Label>Zoom Meeting Link</Form.Label>
+                            <Form.Control
+                                type="url"
+                                value={zoomLink}
+                                onChange={e => setZoomLink(e.target.value)}
+                                placeholder="https://us02web.zoom.us/j/1234567890?pwd=..."
+                                className="bg-dark text-light border-secondary"
+                                required
+                            />
+                            <Form.Text className="text-light" style={{ opacity: 0.8 }}>
+                                Required for this stage
+                            </Form.Text>
+                            <Form.Text className="text-info small">
+                                💡 Please copy the entire Zoom link directly from Zoom to avoid errors
+                            </Form.Text>
+                        </>
+                    )}
+                </Form.Group>
+            )}
 
             {selectedStageRecord?.qaStepCheckRegLink && (
                 <Form.Group className="mb-3">
