@@ -62,9 +62,10 @@ interface WorkOrderListProps {
     editedWorkOrderId?: string | null
     setEditedWorkOrderId?: (id: string | null) => void
     userEventAccess: string[]
+    permissionsLoaded: boolean
 }
 
-export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, userHash, newlyCreatedWorkOrder, writePermission, currentWorkOrderIndex, setCurrentWorkOrderIndex, setWorkOrders, onWorkOrderIndexChange, editedWorkOrderId, setEditedWorkOrderId, userEventAccess }: WorkOrderListProps) {
+export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, userHash, newlyCreatedWorkOrder, writePermission, currentWorkOrderIndex, setCurrentWorkOrderIndex, setWorkOrders, onWorkOrderIndexChange, editedWorkOrderId, setEditedWorkOrderId, userEventAccess, permissionsLoaded }: WorkOrderListProps) {
     const [workOrders, setWorkOrdersLocal] = useState<WorkOrder[]>([])
     const [loading, setLoading] = useState(true)
     const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
@@ -199,6 +200,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
     }, [userEventAccess])
 
     const loadWorkOrders = useCallback(async () => {
+        if (!permissionsLoaded) return;
         setLoading(true)
         try {
             const result = await getAllTableItems('work-orders', userPid, userHash)
@@ -255,11 +257,13 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         } finally {
             setLoading(false)
         }
-    }, [userPid, userHash, userEventAccess, eventNames, loadEventName, loadParticipantName, participantNames])
+    }, [userPid, userHash, userEventAccess, eventNames, loadEventName, loadParticipantName, participantNames, permissionsLoaded])
 
     useEffect(() => {
-        loadWorkOrders()
-    }, [refreshTrigger, loadWorkOrders])
+        if (permissionsLoaded) {
+            loadWorkOrders()
+        }
+    }, [refreshTrigger, loadWorkOrders, permissionsLoaded])
 
     // Handle edited work order restoration after refresh
     useEffect(() => {
@@ -272,7 +276,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
             } else {
                 // Increment retry count
                 setRestorationRetryCount(prev => prev + 1);
-                
+
                 // Clear after max retries or timeout
                 if (restorationRetryCount >= 5) {
                     setEditedWorkOrderId(null);
@@ -283,7 +287,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                         setEditedWorkOrderId(null);
                         setRestorationRetryCount(0);
                     }, 5000); // 5 second timeout
-                    
+
                     return () => clearTimeout(timeoutId);
                 }
             }
@@ -325,7 +329,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         const newExistence: Record<string, { dryrun: boolean; send: boolean; dryrunCount?: number; sendCount?: number }> = {};
         await Promise.all(langs.map(async (lang) => {
             const revision = workOrder.revision;
-            const campaignString = revision 
+            const campaignString = revision
                 ? `${eventCode}_${subEvent}_${stage}_${revision}_${lang}`
                 : `${eventCode}_${subEvent}_${stage}_${lang}`;
             let dryrun = false;
@@ -386,12 +390,12 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
 
                         // Check if user still has access to this work order
                         const hasAccess = isWorkOrderAccessible(updatedWorkOrder);
-                        
+
                         if (!hasAccess) {
                             // User no longer has access, remove this work order
                             console.log(`[ACCESS-DENIED] Removing work order ${updatedWorkOrder.id} (${updatedWorkOrder.eventCode}) - user no longer has access`);
                             const filteredOrders = prevOrders.filter(wo => wo.id !== updatedWorkOrder.id);
-                            
+
                             // If the removed work order was the current one, adjust the index
                             if (index === currentWorkOrderIndex) {
                                 // Move to the next available work order, or the last one if we're at the end
@@ -403,7 +407,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                                 // If we removed a work order before the current one, adjust the index
                                 setCurrentWorkOrderIndex(currentWorkOrderIndex - 1);
                             }
-                            
+
                             return filteredOrders;
                         }
 
@@ -530,12 +534,12 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
 
                     // Check if user still has access to this work order
                     const hasAccess = isWorkOrderAccessible(updatedWorkOrder);
-                    
+
                     if (!hasAccess) {
                         // User no longer has access, remove this work order
                         console.log(`[ACCESS-DENIED] Removing work order ${updatedWorkOrder.id} (${updatedWorkOrder.eventCode}) - user no longer has access`);
                         const filteredOrders = prevOrders.filter(wo => wo.id !== updatedWorkOrder.id);
-                        
+
                         // If the removed work order was the current one, adjust the index
                         if (index === currentWorkOrderIndex) {
                             // Move to the next available work order, or the last one if we're at the end
@@ -547,7 +551,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                             // If we removed a work order before the current one, adjust the index
                             setCurrentWorkOrderIndex(currentWorkOrderIndex - 1);
                         }
-                        
+
                         return filteredOrders;
                     }
 
@@ -720,7 +724,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                 // Check if we need to refresh: no cache, or revision changed
                 const cachedRevision = cachedData?._revision; // Store revision in cache for comparison
                 const currentRevision = workOrder.revision || null;
-                
+
                 if (!cachedData || cachedRevision !== currentRevision) {
                     // Clear old cache entry if revision changed
                     if (cachedData && cachedRevision !== currentRevision) {
@@ -1193,7 +1197,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                                                                                             onClick={async () => {
                                                                                                 if (!exists) return;
                                                                                                 const revision = workOrder.revision;
-                                                                                                const campaignString = revision 
+                                                                                                const campaignString = revision
                                                                                                     ? `${workOrder.eventCode}_${workOrder.subEvent}_${workOrder.stage}_${revision}_${lang}`
                                                                                                     : `${workOrder.eventCode}_${workOrder.subEvent}_${workOrder.stage}_${lang}`;
                                                                                                 try {
@@ -1264,7 +1268,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                                                                                             onClick={async () => {
                                                                                                 if (!exists) return;
                                                                                                 const revision = workOrder.revision;
-                                                                                                const campaignString = revision 
+                                                                                                const campaignString = revision
                                                                                                     ? `${workOrder.eventCode}_${workOrder.subEvent}_${workOrder.stage}_${revision}_${lang}`
                                                                                                     : `${workOrder.eventCode}_${workOrder.subEvent}_${workOrder.stage}_${lang}`;
                                                                                                 try {
