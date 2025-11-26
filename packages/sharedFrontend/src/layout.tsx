@@ -117,15 +117,16 @@ export const WrittenTranslationSelection = (props: {
     };
 
     const languages = [
-        { key: "German", label: "Deutsch" },
+        { key: "Chinese", label: "中文" },
         { key: "Czech", label: "čeština" },
-        { key: "English", label: "English" },
-        { key: "Spanish", label: "Español" },
-        { key: "French", label: "Français" },
-        { key: "Italian", label: "Italiano" },
         { key: "Dutch", label: "Nederlands" },
+        { key: "English", label: "English" },
+        { key: "French", label: "Français" },
+        { key: "German", label: "Deutsch" },
+        { key: "Italian", label: "Italiano" },
         { key: "Portuguese", label: "Português" },
-        { key: "Russian", label: "русский" }
+        { key: "Russian", label: "русский" },
+        { key: "Spanish", label: "Español" }
     ];
 
     return (
