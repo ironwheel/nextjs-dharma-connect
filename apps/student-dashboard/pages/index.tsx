@@ -851,7 +851,7 @@ const HomeContent = () => {
                 pageLink = el.subEvent.embeddedEmails[state][language];
             } else {
                 if (language != 'English') {
-                    if (el.subEvent.embeddedEmails[state]['English'] !== 'undefined') {
+                    if (typeof el.subEvent.embeddedEmails[state]['English'] !== 'undefined') {
                         pageLink = el.subEvent.embeddedEmails[state]['English'];
                         setEnglishOnlyNote(promptLookup('emailLanguageNotAvailable'));
                     }
@@ -1199,7 +1199,7 @@ const HomeContent = () => {
                     embeddedLink = v[language];
                 } else {
                     if (language != 'English') {
-                        if (v['English'] !== 'undefined') {
+                        if (typeof v['English'] !== 'undefined') {
                             embeddedLink = v['English'];
                             englishOnlyNote = promptLookup('videoLanguageNotAvailable');
                         }
@@ -1242,7 +1242,7 @@ const HomeContent = () => {
                     embeddedLink = v[language];
                 } else {
                     if (language != 'English') {
-                        if (v['English'] !== 'undefined') {
+                        if (typeof v['English'] !== 'undefined') {
                             embeddedLink = v['English'];
                             englishOnlyNote = promptLookup('videoLanguageNotAvailable');
                         }
