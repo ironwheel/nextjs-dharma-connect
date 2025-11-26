@@ -844,4 +844,63 @@ export async function authGetViews(
 
         throw new Error(error.message || 'Failed to get views');
     }
+}
+
+/**
+ * @async
+ * @function getVimeoShowcaseVideos
+ * @description Extract video IDs from a Vimeo showcase.
+ * @param {string} showcaseId - The Vimeo showcase ID.
+ * @param {boolean} perLanguage - If true, treats showcase as per-language (one showcase per language).
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<Record<string, string> | Array<{index: number, language: string, videoId: string}> | RedirectedResponse>} 
+ *   For per-language: array of videos with indices. For multi-language: object mapping language to video ID.
+ */
+export async function getVimeoShowcaseVideos(
+    showcaseId: string,
+    perLanguage: boolean,
+    pid: string,
+    hash: string
+): Promise<Record<string, string> | Array<{index: number, language: string, videoId: string}> | RedirectedResponse> {
+    try {
+        const response = await api.get(`${API_BASE_URL}/vimeo/videoids?showcaseId=${encodeURIComponent(showcaseId)}&perLanguage=${perLanguage}`, pid, hash);
+
+        if (response && response.redirected) {
+            return { redirected: true };
+        }
+
+        return response;
+    } catch (error: any) {
+        console.error(`[API] getVimeoShowcaseVideos failed for showcase ${showcaseId}:`, error);
+        throw new Error(error.message || 'Failed to extract showcase videos');
+    }
+}
+
+/**
+ * @async
+ * @function enableVimeoVideoPlayback
+ * @description Enable a Vimeo video for playback on the allowed domain.
+ * @param {string} videoId - The Vimeo video ID.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<{ success: boolean } | RedirectedResponse>} A promise that resolves to success status.
+ */
+export async function enableVimeoVideoPlayback(
+    videoId: string,
+    pid: string,
+    hash: string
+): Promise<{ success: boolean } | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/vimeo/enable`, pid, hash, { videoId });
+
+        if (response && response.redirected) {
+            return { redirected: true };
+        }
+
+        return response;
+    } catch (error: any) {
+        console.error(`[API] enableVimeoVideoPlayback failed for video ${videoId}:`, error);
+        throw new Error(error.message || 'Failed to enable video playback');
+    }
 } 

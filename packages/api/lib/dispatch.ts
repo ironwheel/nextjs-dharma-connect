@@ -13,6 +13,7 @@ import { verificationEmailSend, verificationEmailCallback, verificationCheck, cr
 import { serialize } from 'cookie';
 import { v4 as uuidv4 } from 'uuid';
 import { sendWorkOrderMessage } from './sqsClient';
+import { extractShowcaseToVideoList, enableVideoPlayback } from './vimeoClient';
 
 /**
  * @async
@@ -467,6 +468,76 @@ async function dispatchSQS(
 
 /**
  * @async
+ * @function dispatchVimeo
+ * @description Dispatches Vimeo-related API requests.
+ * @param {string} resource - The resource name ('videoids' for GET, 'enable' for POST).
+ * @param {NextApiRequest} req - The Next.js API request object.
+ * @param {NextApiResponse} res - The Next.js API response object.
+ * @returns {Promise<void>}
+ */
+async function dispatchVimeo(
+  resource: string,
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  // Extract parameters from request headers
+  const pid = req.headers['x-user-id'] as string;
+  const hash = req.headers['x-verification-hash'] as string;
+  const host = req.headers['x-host'] as string;
+  const deviceFingerprint = req.headers['x-device-fingerprint'] as string;
+
+  // Validate required parameters
+  if (!pid || !hash || !host || !deviceFingerprint) {
+    return res.status(400).json({ error: 'Missing required authentication parameters' });
+  }
+
+  try {
+    // GET: Extract video IDs from showcase
+    if (req.method === 'GET') {
+      const showcaseId = req.query.showcaseId as string;
+      const perLanguage = req.query.perLanguage === 'true';
+
+      if (!showcaseId) {
+        return res.status(400).json({ error: 'Missing required parameter: showcaseId' });
+      }
+
+      try {
+        const videoList = await extractShowcaseToVideoList(showcaseId, perLanguage);
+        return res.status(200).json(videoList);
+      } catch (error: any) {
+        console.error(`[VIMEO] Error extracting showcase ${showcaseId}:`, error);
+        return res.status(500).json({ error: error.message || 'Failed to extract showcase videos' });
+      }
+    }
+
+    // POST: Enable video playback
+    if (req.method === 'POST') {
+      const { videoId } = req.body;
+
+      if (!videoId) {
+        return res.status(400).json({ error: 'Missing required parameter: videoId' });
+      }
+
+      try {
+        await enableVideoPlayback(videoId);
+        return res.status(200).json({ success: true });
+      } catch (error: any) {
+        console.error(`[VIMEO] Error enabling video ${videoId}:`, error);
+        return res.status(500).json({ error: error.message || 'Failed to enable video playback' });
+      }
+    }
+
+    // Method Not Allowed
+    res.setHeader('Allow', 'GET, POST');
+    return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
+  } catch (error: any) {
+    console.error(`Vimeo operation failed:`, error);
+    return res.status(500).json({ error: error.message || 'Vimeo operation failed' });
+  }
+}
+
+/**
+ * @async
  * @function dispatch
  * @description Dispatches API requests to the appropriate handlers.
  * @param {string[]} slug - The slug from the API request.
@@ -504,6 +575,11 @@ export async function dispatch(
       const [sqsAction] = rest;
       console.log("DISPATCH: subsystem:", subsystem, "action:", sqsAction);
       return await dispatchSQS(sqsAction, undefined, req, res);
+    case 'vimeo':
+      // Vimeo URLs: /api/vimeo/videoids (GET) or /api/vimeo/enable (POST)
+      const [vimeoResource] = rest;
+      console.log("DISPATCH: subsystem:", subsystem, "resource:", vimeoResource, "method:", req.method);
+      return await dispatchVimeo(vimeoResource || 'videoids', req, res);
     default:
       return res.status(404).json({ error: `Unknown subsystem: ${subsystem}` });
   }

@@ -11,7 +11,9 @@ import {
     getTableItemOrNull,
     deleteTableItem,
     putTableItem,
-    VersionBadge
+    VersionBadge,
+    getVimeoShowcaseVideos,
+    enableVimeoVideoPlayback
 } from 'sharedFrontend';
 
 // Types
@@ -28,6 +30,7 @@ interface SubEvent {
     date?: string;
     embeddedEmails?: any;
     embeddedVideoList?: any[];
+    embeddedShowcaseList?: string[];
     eventComplete?: boolean;
     eventOnDeck?: boolean;
     mediaNotify?: boolean;
@@ -433,8 +436,11 @@ const Home = () => {
         eventComplete: false,
         eventOnDeck: false,
         mediaNotify: false,
-        regLinkAvailable: false
+        regLinkAvailable: false,
+        embeddedShowcaseList: ['']
     });
+    const [perLanguageShowcases, setPerLanguageShowcases] = useState<boolean>(false);
+    const [processingShowcaseIndex, setProcessingShowcaseIndex] = useState<number | null>(null);
 
     // Prompt editing state
     const [promptsEditAid, setPromptsEditAid] = useState<string>('');
@@ -1275,19 +1281,39 @@ const Home = () => {
             date: '',
             eventComplete: false,
             eventOnDeck: false,
-            regLinkAvailable: false
+            regLinkAvailable: false,
+            embeddedShowcaseList: ['']
         });
+        setPerLanguageShowcases(false);
+        setProcessingShowcaseIndex(null);
         setShowSubEventModal(true);
     };
 
     const handleEditSubEvent = (key: string, subEvent: SubEvent) => {
         setIsNewSubEvent(false);
         setSelectedSubEventKey(key);
-        setSubEventFormData({ ...subEvent });
+        setSubEventFormData({ 
+            ...subEvent,
+            embeddedShowcaseList: subEvent.embeddedShowcaseList && subEvent.embeddedShowcaseList.length > 0 
+                ? subEvent.embeddedShowcaseList 
+                : ['']
+        });
+        setPerLanguageShowcases(false);
+        setProcessingShowcaseIndex(null);
         setShowSubEventModal(true);
     };
 
     const handleSaveSubEvent = () => {
+        // Clean up empty showcase entries
+        const cleanedData = { ...subEventFormData };
+        if (cleanedData.embeddedShowcaseList) {
+            cleanedData.embeddedShowcaseList = cleanedData.embeddedShowcaseList.filter(id => id && id.trim() !== '');
+            // Remove embeddedShowcaseList if it's empty
+            if (cleanedData.embeddedShowcaseList.length === 0) {
+                delete cleanedData.embeddedShowcaseList;
+            }
+        }
+
         if (isNewSubEvent) {
             const key = prompt('Enter subevent key (e.g., "weekend1", "retreat"):');
             if (!key) return;
@@ -1296,7 +1322,7 @@ const Home = () => {
                 ...prev,
                 subEvents: {
                     ...prev.subEvents,
-                    [key]: subEventFormData
+                    [key]: cleanedData
                 }
             }));
         } else {
@@ -1304,7 +1330,7 @@ const Home = () => {
                 ...prev,
                 subEvents: {
                     ...prev.subEvents,
-                    [selectedSubEventKey]: subEventFormData
+                    [selectedSubEventKey]: cleanedData
                 }
             }));
         }
@@ -1321,6 +1347,123 @@ const Home = () => {
                 subEvents: newSubEvents
             }));
             toast.success('SubEvent deleted (remember to save the event)');
+        }
+    };
+
+    // Showcase handlers
+    const handleAddShowcase = () => {
+        setSubEventFormData(prev => ({
+            ...prev,
+            embeddedShowcaseList: [...(prev.embeddedShowcaseList || ['']), '']
+        }));
+    };
+
+    const handleUpdateShowcase = (index: number, value: string) => {
+        setSubEventFormData(prev => {
+            const newList = [...(prev.embeddedShowcaseList || [''])];
+            newList[index] = value;
+            return {
+                ...prev,
+                embeddedShowcaseList: newList
+            };
+        });
+    };
+
+    const handleDeleteShowcase = (index: number) => {
+        setSubEventFormData(prev => {
+            const newList = [...(prev.embeddedShowcaseList || [''])];
+            newList.splice(index, 1);
+            if (newList.length === 0) {
+                newList.push('');
+            }
+            return {
+                ...prev,
+                embeddedShowcaseList: newList
+            };
+        });
+    };
+
+    const handleProcessShowcase = async (index: number) => {
+        const showcaseId = subEventFormData.embeddedShowcaseList?.[index];
+        if (!showcaseId || !showcaseId.trim()) {
+            toast.error('Please enter a showcase ID');
+            return;
+        }
+
+        setProcessingShowcaseIndex(index);
+        try {
+            // Extract video IDs from showcase
+            toast.info(`Processing showcase ${showcaseId}...`);
+            const videoList = await getVimeoShowcaseVideos(
+                showcaseId.trim(),
+                perLanguageShowcases,
+                pid as string,
+                hash as string
+            );
+
+            if (videoList && 'redirected' in videoList) {
+                toast.error('Authentication required');
+                return;
+            }
+
+            // Ensure embeddedVideoList exists and has enough entries
+            let embeddedVideoList = subEventFormData.embeddedVideoList || [];
+            if (!Array.isArray(embeddedVideoList)) {
+                embeddedVideoList = [];
+            }
+
+            let videoIds: string[] = [];
+
+            if (perLanguageShowcases && Array.isArray(videoList)) {
+                // Per-language mode: videos are array of {index, language, videoId}
+                // Place each video at embeddedVideoList[video.index][language] = videoId
+                for (const video of videoList as Array<{ index: number; language: string; videoId: string }>) {
+                    // Ensure the target index exists
+                    while (embeddedVideoList.length <= video.index) {
+                        embeddedVideoList.push({});
+                    }
+                    // Ensure the object at this index exists
+                    if (!embeddedVideoList[video.index]) {
+                        embeddedVideoList[video.index] = {};
+                    }
+                    // Place the video
+                    embeddedVideoList[video.index][video.language] = video.videoId;
+                    videoIds.push(video.videoId);
+                }
+            } else {
+                // Multi-language mode: videoList is { language: videoId, ... }
+                // Place all videos at embeddedVideoList[index]
+                while (embeddedVideoList.length <= index) {
+                    embeddedVideoList.push({});
+                }
+                embeddedVideoList[index] = videoList as Record<string, string>;
+                videoIds = Object.values(videoList as Record<string, string>);
+            }
+
+            // Enable each video for playback
+            toast.info(`Enabling ${videoIds.length} video(s) for playback...`);
+            
+            for (const videoId of videoIds) {
+                try {
+                    await enableVimeoVideoPlayback(videoId, pid as string, hash as string);
+                } catch (error: any) {
+                    console.error(`Failed to enable video ${videoId}:`, error);
+                    toast.warning(`Failed to enable video ${videoId}: ${error.message}`);
+                }
+            }
+
+            // Update the form data
+            setSubEventFormData(prev => ({
+                ...prev,
+                embeddedVideoList
+            }));
+
+            toast.success(`Successfully processed showcase ${showcaseId} and enabled ${videoIds.length} video(s)`);
+        } catch (error: any) {
+            console.error('Error processing showcase:', error);
+            toast.error(`Failed to process showcase: ${error.message}`);
+        } finally {
+            setProcessingShowcaseIndex(null);
         }
     };
 
@@ -2622,6 +2765,89 @@ const Home = () => {
                                 </Form.Group>
                             </Col>
                         </Row>
+
+                        {/* Vimeo Showcase Management */}
+                        <div className="card" style={{ marginTop: '1.5rem', marginBottom: '1.5rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                <h5 style={{ color: '#ffc107', margin: 0 }}>Vimeo Showcases</h5>
+                                <Button variant="outline-warning" size="sm" onClick={handleAddShowcase}>
+                                    + Add Showcase
+                                </Button>
+                            </div>
+                            <Form.Check
+                                type="checkbox"
+                                label={<span style={{ color: 'white' }}>Per-Language Showcases (one showcase per language)</span>}
+                                checked={perLanguageShowcases}
+                                onChange={(e) => setPerLanguageShowcases(e.target.checked)}
+                                style={{ marginBottom: '1rem' }}
+                            />
+                            <Form.Text className="text-muted" style={{ fontSize: '0.85rem', display: 'block', marginBottom: '1rem' }}>
+                                {perLanguageShowcases 
+                                    ? 'Each showcase contains all videos for one language. Videos will be indexed by position in showcase.'
+                                    : 'Each showcase contains multiple languages for one day of teaching. Videos will be grouped by language.'}
+                            </Form.Text>
+                            {subEventFormData.embeddedShowcaseList && subEventFormData.embeddedShowcaseList.length > 0 ? (
+                                subEventFormData.embeddedShowcaseList.map((showcaseId, index) => (
+                                    <div key={index} style={{ 
+                                        display: 'flex', 
+                                        gap: '0.5rem', 
+                                        alignItems: 'center', 
+                                        marginBottom: '0.5rem',
+                                        padding: '0.5rem',
+                                        backgroundColor: '#2b2b2b',
+                                        borderRadius: '4px'
+                                    }}>
+                                        <Form.Control
+                                            type="text"
+                                            value={showcaseId}
+                                            onChange={(e) => handleUpdateShowcase(index, e.target.value)}
+                                            placeholder="Enter Vimeo showcase ID"
+                                            style={{ flex: 1 }}
+                                        />
+                                        <Button
+                                            variant="primary"
+                                            size="sm"
+                                            onClick={() => handleProcessShowcase(index)}
+                                            disabled={processingShowcaseIndex === index || !showcaseId.trim()}
+                                        >
+                                            {processingShowcaseIndex === index ? (
+                                                <>
+                                                    <Spinner animation="border" size="sm" className="me-2" />
+                                                    Processing...
+                                                </>
+                                            ) : (
+                                                'Process'
+                                            )}
+                                        </Button>
+                                        <Button
+                                            variant="outline-danger"
+                                            size="sm"
+                                            onClick={() => handleDeleteShowcase(index)}
+                                            disabled={subEventFormData.embeddedShowcaseList!.length === 1}
+                                        >
+                                            ×
+                                        </Button>
+                                    </div>
+                                ))
+                            ) : (
+                                <div style={{ color: '#aaa', textAlign: 'center', padding: '1rem' }}>
+                                    No showcases defined. Click "+ Add Showcase" to add one.
+                                </div>
+                            )}
+                            {subEventFormData.embeddedVideoList && subEventFormData.embeddedVideoList.length > 0 && (
+                                <div style={{ marginTop: '1rem', padding: '0.75rem', backgroundColor: '#1a1a1a', borderRadius: '4px' }}>
+                                    <div style={{ fontSize: '0.9rem', color: '#aaa', marginBottom: '0.5rem' }}>
+                                        Processed Videos ({subEventFormData.embeddedVideoList.length} entries):
+                                    </div>
+                                    {subEventFormData.embeddedVideoList.map((videoEntry, index) => (
+                                        <div key={index} style={{ fontSize: '0.85rem', color: '#888', marginBottom: '0.25rem' }}>
+                                            Entry {index}: {Object.keys(videoEntry).length} language(s)
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
                         <Row>
                             <Col md={3}>
                                 <Form.Check
