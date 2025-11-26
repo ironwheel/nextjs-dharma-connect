@@ -68,13 +68,16 @@ let allViewsProfiles: ViewsProfile[] = [];
 
 // Language options for the dropdown
 const LANGUAGE_OPTIONS = [
-    'English',
-    'Spanish',
-    'French',
-    'Portuguese',
+    'Chinese',
     'Czech',
+    'Dutch',
+    'English',
+    'French',
     'German',
-    'Italian'
+    'Italian',
+    'Portuguese',
+    'Russian',
+    'Spanish'
 ];
 
 const Home = () => {

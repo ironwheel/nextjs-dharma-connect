@@ -5,13 +5,16 @@ Shared functions for email agent steps
 from ..eligible import check_eligibility
 
 LANG_CODE_TO_NAME = {
-    "EN": "English",
-    "FR": "French", 
-    "SP": "Spanish",
-    "DE": "German",
-    "IT": "Italian",
+    "CN": "Chinese",
     "CZ": "Czech",
-    "PT": "Portuguese"
+    "DE": "German",
+    "EN": "English",
+    "FR": "French",
+    "IT": "Italian",
+    "NL": "Dutch",
+    "PT": "Portuguese",
+    "RU": "Russian",
+    "SP": "Spanish"
 }
 
 LANG_NAME_TO_CODE = {v: k for k, v in LANG_CODE_TO_NAME.items()}
