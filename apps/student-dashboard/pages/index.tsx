@@ -125,28 +125,49 @@ const HomeContent = () => {
             promptsAccumuator = tier1Response.data;
         } else {
             console.error('Failed to reload tier 1 prompts:', tier1Response.error);
+            // Initialize accumulator as empty object if load failed
+            if (!promptsAccumuator) {
+                promptsAccumuator = {};
+            }
         }
 
         // Always load English as fallback if language is not English
         if (language !== 'English') {
             const englishTier1Response = await fetchTier1Prompts('English');
-            if (!englishTier1Response.error) {
+            if (!englishTier1Response.error && englishTier1Response.data) {
                 // Deep merge English prompts into accumulator
                 for (const [eventCode, promptNames] of Object.entries(englishTier1Response.data)) {
                     if (!promptsAccumuator[eventCode]) {
                         promptsAccumuator[eventCode] = {};
                     }
                     for (const [promptName, languages] of Object.entries(promptNames)) {
-                        if (!promptsAccumuator[eventCode][promptName]) {
-                            promptsAccumuator[eventCode][promptName] = {};
+                        if (languages && typeof languages === 'object') {
+                            if (!promptsAccumuator[eventCode][promptName]) {
+                                promptsAccumuator[eventCode][promptName] = {};
+                            }
+                            // Merge English prompts, but don't overwrite existing language prompts
+                            // This ensures English is available even if the selected language prompts don't exist
+                            promptsAccumuator[eventCode][promptName] = {
+                                ...promptsAccumuator[eventCode][promptName],
+                                ...languages
+                            };
                         }
-                        // Merge English prompts, but don't overwrite existing language prompts
-                        promptsAccumuator[eventCode][promptName] = {
-                            ...promptsAccumuator[eventCode][promptName],
-                            ...languages
-                        };
                     }
                 }
+                // Debug: Log if videoLanguageNotAvailable was loaded
+                if (promptsAccumuator['dashboard']?.['videoLanguageNotAvailable']?.['English']) {
+                    console.log('English videoLanguageNotAvailable prompt loaded successfully');
+                } else {
+                    console.warn('English videoLanguageNotAvailable prompt NOT found in loaded prompts');
+                    // Debug: Show what dashboard prompts were actually loaded
+                    if (promptsAccumuator['dashboard']) {
+                        console.log('Available dashboard prompts:', Object.keys(promptsAccumuator['dashboard']));
+                    } else {
+                        console.warn('No dashboard prompts loaded at all');
+                    }
+                }
+            } else {
+                console.warn('Failed to load English fallback tier 1 prompts:', englishTier1Response.error || 'No data returned');
             }
         }
 
@@ -193,29 +214,46 @@ const HomeContent = () => {
                     }
 
                     // Always load English tier 2 prompts as fallback if language is not English
+                    let englishTier2Response: any = null;
                     if (language !== 'English') {
-                        const englishTier2Response = await fetchTier2Prompts(eventCodesString, 'English');
-                        if (!englishTier2Response.error) {
+                        englishTier2Response = await fetchTier2Prompts(eventCodesString, 'English');
+                        if (!englishTier2Response.error && englishTier2Response.data) {
                             // Deep merge English tier 2 prompts, but don't overwrite existing language prompts
                             for (const [eventCode, promptNames] of Object.entries(englishTier2Response.data)) {
                                 if (!combinedPrompts[eventCode]) {
                                     combinedPrompts[eventCode] = {};
                                 }
-                                for (const [promptName, languages] of Object.entries(promptNames)) {
-                                    if (!combinedPrompts[eventCode][promptName]) {
-                                        combinedPrompts[eventCode][promptName] = {};
+                                if (promptNames && typeof promptNames === 'object') {
+                                    for (const [promptName, languages] of Object.entries(promptNames as Record<string, any>)) {
+                                        if (languages && typeof languages === 'object') {
+                                            if (!combinedPrompts[eventCode][promptName]) {
+                                                combinedPrompts[eventCode][promptName] = {};
+                                            }
+                                            // Merge English prompts, but don't overwrite existing language prompts
+                                            combinedPrompts[eventCode][promptName] = {
+                                                ...combinedPrompts[eventCode][promptName],
+                                                ...languages
+                                            };
+                                        }
                                     }
-                                    // Merge English prompts, but don't overwrite existing language prompts
-                                    combinedPrompts[eventCode][promptName] = {
-                                        ...combinedPrompts[eventCode][promptName],
-                                        ...languages
-                                    };
                                 }
                             }
                         }
                     }
 
                     setPrompts(combinedPrompts);
+                    // Debug: Verify English videoLanguageNotAvailable is still present after tier 2 merge
+                    if (combinedPrompts['dashboard']?.['videoLanguageNotAvailable']?.['English']) {
+                        console.log('English videoLanguageNotAvailable prompt preserved after tier 2 merge');
+                    } else {
+                        console.warn('English videoLanguageNotAvailable prompt MISSING after tier 2 merge');
+                        // Debug: Check if English tier 2 had it
+                        if (englishTier2Response && !englishTier2Response.error && englishTier2Response.data && englishTier2Response.data['dashboard']?.['videoLanguageNotAvailable']?.['English']) {
+                            console.log('English tier 2 HAS videoLanguageNotAvailable, but it was lost in merge');
+                        } else {
+                            console.warn('English tier 2 also does NOT have videoLanguageNotAvailable');
+                        }
+                    }
                     setTier2PromptsLoaded(true);
                 } else {
                     console.warn('Failed to reload tier 2 prompts:', tier2Response.error);
@@ -452,16 +490,21 @@ const HomeContent = () => {
                                 promptsAccumuator[eventCode] = {};
                             }
                             for (const [promptName, languages] of Object.entries(promptNames)) {
-                                if (!promptsAccumuator[eventCode][promptName]) {
-                                    promptsAccumuator[eventCode][promptName] = {};
+                                if (languages && typeof languages === 'object') {
+                                    if (!promptsAccumuator[eventCode][promptName]) {
+                                        promptsAccumuator[eventCode][promptName] = {};
+                                    }
+                                    // Merge English prompts, but don't overwrite existing language prompts
+                                    // This ensures English is available even if the selected language prompts don't exist
+                                    promptsAccumuator[eventCode][promptName] = {
+                                        ...promptsAccumuator[eventCode][promptName],
+                                        ...languages
+                                    };
                                 }
-                                // Merge English prompts, but don't overwrite existing language prompts
-                                promptsAccumuator[eventCode][promptName] = {
-                                    ...promptsAccumuator[eventCode][promptName],
-                                    ...languages
-                                };
                             }
                         }
+                    } else {
+                        console.warn('Failed to load English fallback tier 1 prompts:', englishTier1Response.error);
                     }
                 }
 
@@ -1295,7 +1338,21 @@ const HomeContent = () => {
                     if (language != 'English') {
                         if (typeof v['English'] !== 'undefined') {
                             embeddedLink = v['English'];
-                            englishOnlyNote = promptLookup('videoLanguageNotAvailable');
+                            const videoLangNote = promptLookup('videoLanguageNotAvailable');
+                            // Fallback to generic message if videoLanguageNotAvailable doesn't exist
+                            if (videoLangNote.includes('-unknown')) {
+                                // Use a generic message for videos instead of email-specific message
+                                const emailLangNote = promptLookup('emailLanguageNotAvailable');
+                                if (emailLangNote.includes('-unknown')) {
+                                    // If even emailLanguageNotAvailable doesn't exist, use a hardcoded generic message
+                                    englishOnlyNote = 'This video is unavailable in your language. Displaying English instead.';
+                                } else {
+                                    // Replace "email" with "video" in the message
+                                    englishOnlyNote = emailLangNote.replace(/email/gi, 'video');
+                                }
+                            } else {
+                                englishOnlyNote = videoLangNote;
+                            }
                         }
                     }
                 }
@@ -1338,7 +1395,21 @@ const HomeContent = () => {
                     if (language != 'English') {
                         if (typeof v['English'] !== 'undefined') {
                             embeddedLink = v['English'];
-                            englishOnlyNote = promptLookup('videoLanguageNotAvailable');
+                            const videoLangNote = promptLookup('videoLanguageNotAvailable');
+                            // Fallback to generic message if videoLanguageNotAvailable doesn't exist
+                            if (videoLangNote.includes('-unknown')) {
+                                // Use a generic message for videos instead of email-specific message
+                                const emailLangNote = promptLookup('emailLanguageNotAvailable');
+                                if (emailLangNote.includes('-unknown')) {
+                                    // If even emailLanguageNotAvailable doesn't exist, use a hardcoded generic message
+                                    englishOnlyNote = 'This video is unavailable in your language. Displaying English instead.';
+                                } else {
+                                    // Replace "email" with "video" in the message
+                                    englishOnlyNote = emailLangNote.replace(/email/gi, 'video');
+                                }
+                            } else {
+                                englishOnlyNote = videoLangNote;
+                            }
                         }
                     }
                 }
