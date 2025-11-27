@@ -123,13 +123,37 @@ const HomeContent = () => {
         const tier1Response = await fetchTier1Prompts(language);
         if (!tier1Response.error) {
             promptsAccumuator = tier1Response.data;
-            setPrompts(tier1Response.data);
-            setTier1Loaded(true);
-            await loadTier2PromptsForLanguage(language, promptsAccumuator);
-            setLoaded(true);
         } else {
             console.error('Failed to reload tier 1 prompts:', tier1Response.error);
         }
+
+        // Always load English as fallback if language is not English
+        if (language !== 'English') {
+            const englishTier1Response = await fetchTier1Prompts('English');
+            if (!englishTier1Response.error) {
+                // Deep merge English prompts into accumulator
+                for (const [eventCode, promptNames] of Object.entries(englishTier1Response.data)) {
+                    if (!promptsAccumuator[eventCode]) {
+                        promptsAccumuator[eventCode] = {};
+                    }
+                    for (const [promptName, languages] of Object.entries(promptNames)) {
+                        if (!promptsAccumuator[eventCode][promptName]) {
+                            promptsAccumuator[eventCode][promptName] = {};
+                        }
+                        // Merge English prompts, but don't overwrite existing language prompts
+                        promptsAccumuator[eventCode][promptName] = {
+                            ...promptsAccumuator[eventCode][promptName],
+                            ...languages
+                        };
+                    }
+                }
+            }
+        }
+
+        setPrompts(promptsAccumuator);
+        setTier1Loaded(true);
+        await loadTier2PromptsForLanguage(language, promptsAccumuator);
+        setLoaded(true);
     }
 
     async function loadTier2PromptsForLanguage(language: string, promptsAccumuator: Record<string, Record<string, Record<string, string>>>) {
@@ -165,6 +189,29 @@ const HomeContent = () => {
                                 ...combinedPrompts[eventCode][promptName],
                                 ...languages
                             };
+                        }
+                    }
+
+                    // Always load English tier 2 prompts as fallback if language is not English
+                    if (language !== 'English') {
+                        const englishTier2Response = await fetchTier2Prompts(eventCodesString, 'English');
+                        if (!englishTier2Response.error) {
+                            // Deep merge English tier 2 prompts, but don't overwrite existing language prompts
+                            for (const [eventCode, promptNames] of Object.entries(englishTier2Response.data)) {
+                                if (!combinedPrompts[eventCode]) {
+                                    combinedPrompts[eventCode] = {};
+                                }
+                                for (const [promptName, languages] of Object.entries(promptNames)) {
+                                    if (!combinedPrompts[eventCode][promptName]) {
+                                        combinedPrompts[eventCode][promptName] = {};
+                                    }
+                                    // Merge English prompts, but don't overwrite existing language prompts
+                                    combinedPrompts[eventCode][promptName] = {
+                                        ...combinedPrompts[eventCode][promptName],
+                                        ...languages
+                                    };
+                                }
+                            }
                         }
                     }
 
@@ -394,7 +441,31 @@ const HomeContent = () => {
                 }
 
                 promptsAccumuator = tier1Response.data;
-                setPrompts(tier1Response.data);
+
+                // Always load English as fallback if language is not English
+                if (currentLanguage !== 'English') {
+                    const englishTier1Response = await fetchTier1Prompts('English');
+                    if (!englishTier1Response.error) {
+                        // Deep merge English prompts into accumulator
+                        for (const [eventCode, promptNames] of Object.entries(englishTier1Response.data)) {
+                            if (!promptsAccumuator[eventCode]) {
+                                promptsAccumuator[eventCode] = {};
+                            }
+                            for (const [promptName, languages] of Object.entries(promptNames)) {
+                                if (!promptsAccumuator[eventCode][promptName]) {
+                                    promptsAccumuator[eventCode][promptName] = {};
+                                }
+                                // Merge English prompts, but don't overwrite existing language prompts
+                                promptsAccumuator[eventCode][promptName] = {
+                                    ...promptsAccumuator[eventCode][promptName],
+                                    ...languages
+                                };
+                            }
+                        }
+                    }
+                }
+
+                setPrompts(promptsAccumuator);
                 setTier1Loaded(true);
 
                 // Set language preference
@@ -457,6 +528,29 @@ const HomeContent = () => {
                                             ...combinedPrompts[eventCode][promptName],
                                             ...languages
                                         };
+                                    }
+                                }
+
+                                // Always load English tier 2 prompts as fallback if language is not English
+                                if (currentLanguage !== 'English') {
+                                    const englishTier2Response = await fetchTier2Prompts(eventCodesString, 'English');
+                                    if (!englishTier2Response.error) {
+                                        // Deep merge English tier 2 prompts, but don't overwrite existing language prompts
+                                        for (const [eventCode, promptNames] of Object.entries(englishTier2Response.data)) {
+                                            if (!combinedPrompts[eventCode]) {
+                                                combinedPrompts[eventCode] = {};
+                                            }
+                                            for (const [promptName, languages] of Object.entries(promptNames)) {
+                                                if (!combinedPrompts[eventCode][promptName]) {
+                                                    combinedPrompts[eventCode][promptName] = {};
+                                                }
+                                                // Merge English prompts, but don't overwrite existing language prompts
+                                                combinedPrompts[eventCode][promptName] = {
+                                                    ...combinedPrompts[eventCode][promptName],
+                                                    ...languages
+                                                };
+                                            }
+                                        }
                                     }
                                 }
 
