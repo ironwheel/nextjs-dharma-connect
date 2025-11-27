@@ -136,6 +136,14 @@ export const promptLookup = (prompt: string): string => {
         return prompts[event.aid][prompt][language];
     }
 
+    // Fallback to English if language is not English
+    if (language !== "English" && prompts?.[event.aid]?.[prompt]?.["English"]) {
+        if (dbgPrompt()) {
+            dbgout("PROMPT FOUND (English fallback):", event.aid, prompt, "English");
+        }
+        return prompts[event.aid][prompt]["English"];
+    }
+
     // unknown
     if (dbgPrompt()) {
         dbgout("PROMPT UNKNOWN:", prompt, language);
@@ -180,6 +188,14 @@ export const promptLookupAIDSpecific = (aid: string, aidAlias: string | undefine
         return prompts[aid][prompt][language];
     }
 
+    // Fallback to English if language is not English
+    if (language !== "English" && prompts?.[aid]?.[prompt]?.["English"]) {
+        if (dbgPrompt()) {
+            dbgout("PROMPT AID FOUND (English fallback):", aid, prompt, "English");
+        }
+        return prompts[aid][prompt]["English"];
+    }
+
     // unknown
     if (dbgPrompt()) {
         dbgout("PROMPT UNKNOWN:", prompt, language);
@@ -216,6 +232,18 @@ export const promptLookupHTML = (prompt: string): { __html: string } => {
         return { __html: text };
     }
 
+    // Fallback to English if language is not English
+    if (language !== "English" && prompts?.[event.aid]?.[prompt]?.["English"]) {
+        let text = prompts[event.aid][prompt]["English"];
+        text = text.replace("||title||", promptLookup("title"));
+        text = text.replace("||deadline||", promptLookup("deadline"));
+        text = text.replace(/\|\|email\|\|/g, student.email || '');
+        if (dbgPrompt()) {
+            dbgout("PROMPTHTML FOUND (English fallback):", event.aid, prompt, "English");
+        }
+        return { __html: text };
+    }
+
     // unknown
     if (dbgPrompt()) {
         dbgout("PROMPTHTML UNKNOWN:", prompt, language);
@@ -248,6 +276,18 @@ export const promptLookupHTMLAIDSpecific = (laid: string, prompt: string): { __h
         text = text.replace(/\|\|email\|\|/g, student.email || '');
         if (dbgPrompt()) {
             dbgout("PROMPTHTML AID FOUND:", laid, prompt, language);
+        }
+        return { __html: text };
+    }
+
+    // Fallback to English if language is not English
+    if (language !== "English" && prompts?.[laid]?.[prompt]?.["English"]) {
+        let text = prompts[laid][prompt]["English"];
+        text = text.replace("||title||", promptLookup("title"));
+        text = text.replace("||deadline||", promptLookup("deadline"));
+        text = text.replace(/\|\|email\|\|/g, student.email || '');
+        if (dbgPrompt()) {
+            dbgout("PROMPTHTML AID FOUND (English fallback):", laid, prompt, "English");
         }
         return { __html: text };
     }
@@ -292,6 +332,23 @@ export const promptLookupDescription = (prompt: string): { __html: string } | nu
         return { __html: processedText };
     }
 
+    // Fallback to English if language is not English
+    if (language !== "English" && prompts?.['descriptions']?.[prompt]?.["English"]) {
+        const text = prompts['descriptions'][prompt]["English"];
+        // the system may have created empty prompts to translate
+        if (text.length === 0) {
+            return null;
+        }
+        let processedText = text;
+        processedText = processedText.replace("||title||", promptLookup("title"));
+        processedText = processedText.replace("||deadline||", promptLookup("deadline"));
+        processedText = processedText.replace(/\|\|email\|\|/g, student.email || '');
+        if (dbgPrompt()) {
+            dbgout("PROMPTDESCRIPTION FOUND (English fallback):", 'descriptions', prompt, "English");
+        }
+        return { __html: processedText };
+    }
+
     return null;
 };
 
@@ -313,6 +370,21 @@ export const promptLookupHTMLWithArgs = (prompt: string, arg1?: string, arg2?: s
     // New format: eventCode.promptName.language.text
     if (prompts?.[event.aid]?.[prompt]?.[language]) {
         let text = prompts[event.aid][prompt][language];
+        if (typeof arg1 !== 'undefined') {
+            text = text.replace("||arg1||", arg1);
+        }
+        if (typeof arg2 !== 'undefined') {
+            text = text.replace("||arg2||", arg2);
+        }
+        if (typeof arg3 !== 'undefined') {
+            text = text.replace("||arg3||", arg3);
+        }
+        return { __html: text };
+    }
+
+    // Fallback to English if language is not English
+    if (language !== "English" && prompts?.[event.aid]?.[prompt]?.["English"]) {
+        let text = prompts[event.aid][prompt]["English"];
         if (typeof arg1 !== 'undefined') {
             text = text.replace("||arg1||", arg1);
         }
@@ -347,6 +419,21 @@ export const promptLookupHTMLWithArgsAIDSpecific = (laid: string, prompt: string
     // New format: eventCode.promptName.language.text
     if (prompts?.[laid]?.[prompt]?.[language]) {
         let text = prompts[laid][prompt][language];
+        if (typeof arg1 !== 'undefined') {
+            text = text.replace("||arg1||", arg1);
+        }
+        if (typeof arg2 !== 'undefined') {
+            text = text.replace("||arg2||", arg2);
+        }
+        if (typeof arg3 !== 'undefined') {
+            text = text.replace("||arg3||", arg3);
+        }
+        return { __html: text };
+    }
+
+    // Fallback to English if language is not English
+    if (language !== "English" && prompts?.[laid]?.[prompt]?.["English"]) {
+        let text = prompts[laid][prompt]["English"];
         if (typeof arg1 !== 'undefined') {
             text = text.replace("||arg1||", arg1);
         }
@@ -430,6 +517,15 @@ export const promptLookupCache = (eventCode: string, promptName: string): string
 
     if (text) {
         return text;
+    }
+
+    // Fallback to English if language is not English
+    if (currentLanguage !== "English") {
+        const englishPromptKey = `1#English#${promptName}`;
+        const englishText = promptCache[eventCode][englishPromptKey];
+        if (englishText) {
+            return englishText;
+        }
     }
 
     return `${eventCode}-${promptName}-${currentLanguage}-unknown`;
