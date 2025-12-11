@@ -386,6 +386,16 @@ class PrepareStep:
         href_pattern = r'<a[^>]+href=["\']([^"\']+)["\']'
         matches = re.findall(href_pattern, html, re.IGNORECASE)
         
+        # Use browser-like headers to avoid being blocked by sites that filter automated requests
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+        }
+        
         broken_links = []
         checked_links = []
         
@@ -396,11 +406,12 @@ class PrepareStep:
                 try:
                     # Try HEAD request first for efficiency (don't download full content)
                     # Set a reasonable timeout to avoid hanging
-                    response = requests.head(href, timeout=10, allow_redirects=True)
+                    # Use browser-like headers to avoid being blocked
+                    response = requests.head(href, headers=headers, timeout=10, allow_redirects=True)
                     
                     # If HEAD returns 405 (Method Not Allowed), try GET instead
                     if response.status_code == 405:
-                        response = requests.get(href, timeout=10, allow_redirects=True, stream=True)
+                        response = requests.get(href, headers=headers, timeout=10, allow_redirects=True, stream=True)
                         # Close the connection immediately since we don't need the content
                         response.close()
                     
