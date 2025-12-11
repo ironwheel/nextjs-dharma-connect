@@ -376,6 +376,77 @@ class PrepareStep:
             if not reg_links:
                 raise ValueError("QA Failure: no registration links found")
 
+        # Check all http/https links in the email
+        self._check_external_links(html)
+
+    def _check_external_links(self, html: str):
+        """Check all external links (http/https) in the HTML to ensure they're accessible."""
+        # Find all <a href="..."> tags using regex
+        # This pattern matches href attributes with single or double quotes
+        href_pattern = r'<a[^>]+href=["\']([^"\']+)["\']'
+        matches = re.findall(href_pattern, html, re.IGNORECASE)
+        
+        broken_links = []
+        checked_links = []
+        
+        for href in matches:
+            # Only check links that start with http:// or https://
+            if href.startswith('http://') or href.startswith('https://'):
+                checked_links.append(href)
+                try:
+                    # Try HEAD request first for efficiency (don't download full content)
+                    # Set a reasonable timeout to avoid hanging
+                    response = requests.head(href, timeout=10, allow_redirects=True)
+                    
+                    # If HEAD returns 405 (Method Not Allowed), try GET instead
+                    if response.status_code == 405:
+                        response = requests.get(href, timeout=10, allow_redirects=True, stream=True)
+                        # Close the connection immediately since we don't need the content
+                        response.close()
+                    
+                    # Check if status code is success (2xx) or redirect (3xx)
+                    if not (200 <= response.status_code < 400):
+                        broken_links.append({
+                            'url': href,
+                            'status': response.status_code,
+                            'reason': f'HTTP {response.status_code}'
+                        })
+                except requests.exceptions.Timeout:
+                    broken_links.append({
+                        'url': href,
+                        'status': None,
+                        'reason': 'Request timeout'
+                    })
+                except requests.exceptions.ConnectionError:
+                    broken_links.append({
+                        'url': href,
+                        'status': None,
+                        'reason': 'Connection error'
+                    })
+                except requests.exceptions.RequestException as e:
+                    broken_links.append({
+                        'url': href,
+                        'status': None,
+                        'reason': f'Request failed: {str(e)}'
+                    })
+                except Exception as e:
+                    broken_links.append({
+                        'url': href,
+                        'status': None,
+                        'reason': f'Unexpected error: {str(e)}'
+                    })
+        
+        if broken_links:
+            error_details = []
+            for link in broken_links:
+                error_details.append(f"  - {link['url']}: {link['reason']}")
+            
+            error_message = "QA Failure: Found broken external links:\n" + "\n".join(error_details)
+            raise ValueError(error_message)
+        
+        if checked_links:
+            self.log('debug', f"[DEBUG] QA Check - Verified {len(checked_links)} external link(s)")
+
     def _upload_to_s3(self, key: str, html: str):
         """Upload HTML content to S3."""
         # Use boto3 client directly with region from config
