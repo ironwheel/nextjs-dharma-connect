@@ -50,6 +50,7 @@ interface Event {
     config: any;
     hide?: boolean;
     selectedSubEvent?: string;
+    list?: boolean;
 }
 
 
@@ -466,7 +467,9 @@ const Home = () => {
     const [currentUserName, setCurrentUserName] = useState<string>("Unknown");
     const [emailDisplayPermission, setEmailDisplayPermission] = useState<boolean>(false);
     const [userEventAccess, setUserEventAccess] = useState<string[]>([]);
+    const [userListAccess, setUserListAccess] = useState<boolean>(false);
     const [canRefreshCache, setCanRefreshCache] = useState<boolean>(false);
+    const [eventListSearchTerm, setEventListSearchTerm] = useState<string>('');
     // Add new state for currentEligibleStudents
     const [currentEligibleStudents, setCurrentEligibleStudents] = useState<Student[]>([]);
     // Add state for eligibility caching system
@@ -1290,7 +1293,7 @@ const Home = () => {
         }
     };
 
-    // Helper function to get all sub-events from all events
+    // Helper function to get all sub-events from all events (excluding lists)
     const getAllSubEvents = (events: Event[]): SubEventItem[] => {
         const subEvents: SubEventItem[] = [];
 
@@ -1301,6 +1304,7 @@ const Home = () => {
 
         events.forEach(event => {
             if (event.hide) return; // Skip hidden events
+            if (event.list === true) return; // Skip lists (they're handled separately)
 
             // Filter events based on user's event access list
             if (userEventAccess.length > 0 && !userEventAccess.includes('all')) {
@@ -1344,6 +1348,42 @@ const Home = () => {
         return subEvents;
     };
 
+    // Helper function to get all lists
+    const getAllLists = (events: Event[]): SubEventItem[] => {
+        const lists: SubEventItem[] = [];
+
+        // Defensive coding: ensure events is an array
+        if (!Array.isArray(events)) {
+            return lists;
+        }
+
+        events.forEach(event => {
+            if (event.hide) return; // Skip hidden events
+            if (event.list !== true) return; // Only include lists
+
+            // Filter lists based on user's event access list
+            if (userEventAccess.length > 0 && !userEventAccess.includes('all')) {
+                // If user has specific event access (not 'all'), check if this list is allowed
+                if (!userEventAccess.includes(event.aid)) {
+                    return; // Skip this list if not in user's access list
+                }
+            }
+
+            // Lists use the top-level name field, no subevents needed
+            const listName = event.name || event.aid;
+            lists.push({
+                event,
+                subEventKey: '',
+                subEventData: {},
+                date: '',
+                displayText: `📋 ${listName}`,
+                eventKey: `${event.aid}`
+            });
+        });
+
+        return lists;
+    };
+
     // Helper function to sort sub-events by date (newest first)
     const sortSubEventsByDate = (subEvents: SubEventItem[]): SubEventItem[] => {
         return [...subEvents].sort((a, b) => {
@@ -1383,8 +1423,10 @@ const Home = () => {
             // Set the current event and sub-event
             const updatedEvent = { ...selectedEvent };
 
-            // Store the selected sub-event in the event object for reference
-            if (subEventKey) {
+            // For lists, don't set subEvent. For events, set it if provided
+            if (updatedEvent.list === true) {
+                updatedEvent.selectedSubEvent = '';
+            } else if (subEventKey) {
                 updatedEvent.selectedSubEvent = subEventKey;
             }
 
@@ -1400,12 +1442,21 @@ const Home = () => {
             // Reset the "all students loaded" state for the new event
             setAllStudentsLoadedForCurrentEvent(false);
 
-            // Load students for the new event using the caching system (now in background)
+            // For lists, automatically set view to "Eligible"
+            if (updatedEvent.list === true) {
+                setView('Eligible');
+            }
+
+            // Load students for the new event/list using the caching system (now in background)
             loadStudentsForEvent(
                 updatedEvent.aid,
                 allEvents,
                 allPools,
-                (eligibleStudents) => updateTableDataIncrementally(eligibleStudents, undefined, updatedEvent, allPools),
+                (eligibleStudents) => {
+                    // For lists, use "Eligible" view; for events, use current view or undefined
+                    const viewToUse = updatedEvent.list === true ? 'Eligible' : undefined;
+                    return updateTableDataIncrementally(eligibleStudents, viewToUse, updatedEvent, allPools);
+                },
                 currentLoadingAbortControllerRef.current
             ).then(eligibleStudents => {
                 setCurrentEligibleStudents(eligibleStudents);
@@ -1416,7 +1467,8 @@ const Home = () => {
                 // Update user's eventDashboardLastUsedConfig with the new selection
                 return updateUserEventDashboardLastUsedConfig({
                     event: eventAid,
-                    subEvent: subEventKey || undefined
+                    subEvent: updatedEvent.list === true ? undefined : (subEventKey || undefined),
+                    view: updatedEvent.list === true ? 'Eligible' : undefined
                 });
             }).catch(error => {
                 if (error.name === 'AbortError') {
@@ -1426,27 +1478,53 @@ const Home = () => {
                 }
             });
             setEventDropdownOpen(false);
+            setEventListSearchTerm(''); // Clear search when selection is made
         };
 
         // Get all sub-events and sort them (filtered by user's event access)
         const allSubEvents = getAllSubEvents(allEvents);
         const sortedSubEvents = sortSubEventsByDate(allSubEvents);
 
-        // Find the current sub-event for the title
-        let currentSubEvent: SubEventItem | null = null;
+        // Get all lists if user has listAccess
+        const allLists = userListAccess ? getAllLists(allEvents) : [];
+        const sortedLists = [...allLists].sort((a, b) => 
+            a.displayText.localeCompare(b.displayText) // Alphabetical for lists
+        );
+
+        // Combine events and lists
+        const allItems = [...sortedSubEvents, ...sortedLists];
+
+        // Filter items based on search term
+        const filteredItems = eventListSearchTerm.trim() === '' 
+            ? allItems 
+            : allItems.filter(item => {
+                const searchLower = eventListSearchTerm.toLowerCase();
+                return item.displayText.toLowerCase().includes(searchLower) ||
+                       item.event.aid.toLowerCase().includes(searchLower) ||
+                       (item.event.name && item.event.name.toLowerCase().includes(searchLower));
+            });
+
+        // Find the current item for the title
+        let currentItem: SubEventItem | null = null;
         if (evShadow) {
-            const selectedKey = evShadow.selectedSubEvent;
-            currentSubEvent = allSubEvents.find(se =>
-                se.event.aid === evShadow!.aid &&
-                (selectedKey ? se.subEventKey === selectedKey : true)
-            ) || null;
+            if (evShadow.list === true) {
+                // For lists, find by aid only
+                currentItem = allLists.find(item => item.event.aid === evShadow!.aid) || null;
+            } else {
+                // For events, find by aid and subEventKey
+                const selectedKey = evShadow.selectedSubEvent;
+                currentItem = allSubEvents.find(se =>
+                    se.event.aid === evShadow!.aid &&
+                    (selectedKey ? se.subEventKey === selectedKey : true)
+                ) || null;
+            }
         }
 
-        const title = currentSubEvent ? currentSubEvent.displayText : "Select Event";
+        const title = currentItem ? currentItem.displayText : "Select Event/List";
 
         // Calculate the maximum width needed for the dropdown button
         const calculateMaxWidth = () => {
-            if (sortedSubEvents.length === 0) return 'auto';
+            if (allItems.length === 0) return 'auto';
 
             // Create a temporary element to measure text width
             const tempElement = document.createElement('span');
@@ -1461,8 +1539,8 @@ const Home = () => {
             let maxWidth = 0;
 
             // Measure each dropdown item
-            sortedSubEvents.forEach(subEvent => {
-                tempElement.textContent = subEvent.displayText;
+            allItems.forEach(item => {
+                tempElement.textContent = item.displayText;
                 const width = tempElement.offsetWidth;
                 maxWidth = Math.max(maxWidth, width);
             });
@@ -1471,10 +1549,17 @@ const Home = () => {
             document.body.removeChild(tempElement);
 
             // Add padding for the dropdown arrow and some buffer
-            return `${maxWidth + 60}px`;
+            return `${Math.max(maxWidth + 60, 200)}px`; // Minimum 200px for search input
         };
 
         const dropdownWidth = calculateMaxWidth();
+
+        // Clear search when dropdown closes
+        useEffect(() => {
+            if (!eventDropdownOpen) {
+                setEventListSearchTerm('');
+            }
+        }, [eventDropdownOpen]);
 
         useEffect(() => {
             const handleClickOutside = (event: MouseEvent) => {
@@ -1555,20 +1640,123 @@ const Home = () => {
                         borderRadius: '8px',
                         boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
                         zIndex: 1000,
-                        maxHeight: '300px',
-                        overflowY: 'auto',
+                        maxHeight: '400px',
+                        display: 'flex',
+                        flexDirection: 'column',
                         marginTop: '0.25rem'
                     }}>
-                        {sortedSubEvents.map((subEvent, index) => (
-                            <button
-                                key={subEvent.eventKey}
-                                className="dropdown-item"
-                                style={{ color: 'white' }}
-                                onClick={() => handleEventSelection(subEvent.eventKey)}
-                            >
-                                {subEvent.displayText}
-                            </button>
-                        ))}
+                        {/* Search Input - Sticky at top */}
+                        <div style={{
+                            padding: '8px',
+                            borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+                            position: 'sticky',
+                            top: 0,
+                            background: '#000000',
+                            zIndex: 1
+                        }}>
+                            <div style={{ position: 'relative' }}>
+                                <input
+                                    type="text"
+                                    value={eventListSearchTerm}
+                                    onChange={(e) => setEventListSearchTerm(e.target.value)}
+                                    placeholder="🔍 Search events/lists..."
+                                    autoFocus
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{
+                                        width: '100%',
+                                        padding: '8px 32px 8px 12px',
+                                        backgroundColor: '#1a1a1a',
+                                        color: 'white',
+                                        border: '1px solid rgba(255, 255, 255, 0.2)',
+                                        borderRadius: '6px',
+                                        fontSize: '0.9rem',
+                                        outline: 'none'
+                                    }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Escape') {
+                                            setEventDropdownOpen(false);
+                                        } else if (e.key === 'Enter' && filteredItems.length > 0) {
+                                            handleEventSelection(filteredItems[0].eventKey);
+                                        }
+                                    }}
+                                />
+                                {eventListSearchTerm && (
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setEventListSearchTerm('');
+                                        }}
+                                        style={{
+                                            position: 'absolute',
+                                            right: '8px',
+                                            top: '50%',
+                                            transform: 'translateY(-50%)',
+                                            background: 'transparent',
+                                            border: 'none',
+                                            color: '#aaa',
+                                            cursor: 'pointer',
+                                            fontSize: '18px',
+                                            padding: '0 4px',
+                                            lineHeight: '1'
+                                        }}
+                                    >
+                                        ×
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Filtered Results - Scrollable */}
+                        <div style={{
+                            maxHeight: '300px',
+                            overflowY: 'auto',
+                            overflowX: 'hidden'
+                        }}>
+                            {filteredItems.length === 0 ? (
+                                <div style={{
+                                    padding: '16px',
+                                    color: '#aaa',
+                                    textAlign: 'center',
+                                    fontSize: '0.9rem'
+                                }}>
+                                    No results found
+                                </div>
+                            ) : (
+                                filteredItems.map((item, index) => {
+                                    // Add visual divider between events and lists if both are present
+                                    const showDivider = userListAccess && 
+                                        index > 0 && 
+                                        sortedSubEvents.length > 0 && 
+                                        sortedLists.length > 0 &&
+                                        item.event.list === true && 
+                                        filteredItems[index - 1].event.list !== true;
+
+                                    return (
+                                        <React.Fragment key={item.eventKey}>
+                                            {showDivider && (
+                                                <div style={{
+                                                    padding: '4px 12px',
+                                                    fontSize: '0.75rem',
+                                                    color: '#666',
+                                                    borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+                                                    borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+                                                    backgroundColor: '#111'
+                                                }}>
+                                                    Lists
+                                                </div>
+                                            )}
+                                            <button
+                                                className="dropdown-item"
+                                                style={{ color: 'white' }}
+                                                onClick={() => handleEventSelection(item.eventKey)}
+                                            >
+                                                {item.displayText}
+                                            </button>
+                                        </React.Fragment>
+                                    );
+                                })
+                            )}
+                        </div>
                     </div>
                 )}
             </div>
@@ -2438,6 +2626,26 @@ const Home = () => {
                     setUserEventAccess([]); // Default to no events on error or missing config
                 }
 
+                // Fetch list access permission
+                try {
+                    const listAccessResult = await authGetConfigValue(pid as string, hash as string, 'listAccess');
+                    if (listAccessResult === true) {
+                        setUserListAccess(true);
+                        console.log('User has list access');
+                    } else {
+                        setUserListAccess(false);
+                        console.log('User does not have list access');
+                    }
+                } catch (error) {
+                    // Handle AUTH_UNKNOWN_CONFIG_KEY and other errors gracefully
+                    if (error.message && error.message.includes('AUTH_UNKNOWN_CONFIG_KEY')) {
+                        console.log('List access not configured for user, defaulting to false');
+                    } else {
+                        console.error('Error fetching list access:', error);
+                    }
+                    setUserListAccess(false); // Default to no list access on error or missing config
+                }
+
                 // Fetch demo mode config
                 const demoModeConfig = await fetchConfig('demoMode');
                 if (demoModeConfig) {
@@ -2490,18 +2698,26 @@ const Home = () => {
                 let currentEventToUse: Event | null = null;
                 let initialView = 'Joined';
 
-                if (userConfig?.event && userConfig?.subEvent && Array.isArray(filteredEvents)) {
-                    // Use user's last used event and subevent
-                    console.log('Looking for user preference - Event:', userConfig.event, 'SubEvent:', userConfig.subEvent);
-                    console.log('Available events:', filteredEvents.map(e => ({ aid: e.aid, subEvents: Object.keys(e.subEvents || {}) })));
-
-                    const foundEvent = filteredEvents.find(e => e.aid === userConfig.event && e.subEvents && e.subEvents[userConfig.subEvent]) || null;
-                    if (foundEvent && userConfig.subEvent) {
-                        foundEvent.selectedSubEvent = userConfig.subEvent;
-                        currentEventToUse = foundEvent;
-                        console.log('Using user preference - Event:', userConfig.event, 'SubEvent:', userConfig.subEvent);
+                if (userConfig?.event && Array.isArray(filteredEvents)) {
+                    const foundEvent = filteredEvents.find(e => e.aid === userConfig.event) || null;
+                    
+                    if (foundEvent) {
+                        // Check if it's a list
+                        if (foundEvent.list === true) {
+                            // For lists, no subEvent needed
+                            foundEvent.selectedSubEvent = '';
+                            currentEventToUse = foundEvent;
+                            console.log('Using user preference - List:', userConfig.event);
+                        } else if (userConfig?.subEvent && foundEvent.subEvents && foundEvent.subEvents[userConfig.subEvent]) {
+                            // For events, check subEvent
+                            foundEvent.selectedSubEvent = userConfig.subEvent;
+                            currentEventToUse = foundEvent;
+                            console.log('Using user preference - Event:', userConfig.event, 'SubEvent:', userConfig.subEvent);
+                        } else {
+                            console.log('User preference event/subEvent not found in available events');
+                        }
                     } else {
-                        console.log('User preference event/subEvent not found in available events');
+                        console.log('User preference event not found in available events');
                     }
                 }
 
@@ -2513,11 +2729,16 @@ const Home = () => {
                     }
                 }
 
-                // Set initial view based on user preferences or default to 'Joined'
-                if (userConfig?.view && filteredViews.includes(userConfig.view)) {
+                // Set initial view based on user preferences or default
+                // For lists, always use 'Eligible' view
+                if (currentEventToUse?.list === true) {
+                    initialView = 'Eligible';
+                    console.log('Using Eligible view for list');
+                } else if (userConfig?.view && filteredViews.includes(userConfig.view)) {
                     initialView = userConfig.view;
                     console.log('Using user preference - View:', userConfig.view);
                 } else {
+                    initialView = 'Joined';
                     console.log('Using default view - Joined');
                 }
                 setView(initialView);
@@ -2767,9 +2988,11 @@ const Home = () => {
                             <div className="navbar-item event-selector">
                                 <EventSelection />
                             </div>
-                            <div className="navbar-item view-selector">
-                                <ViewSelection />
-                            </div>
+                            {evShadow && evShadow.list !== true && (
+                                <div className="navbar-item view-selector">
+                                    <ViewSelection />
+                                </div>
+                            )}
                         </div>
                         <div className="navbar-right">
                             <div className="search-container">
