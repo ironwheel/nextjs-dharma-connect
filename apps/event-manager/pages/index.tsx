@@ -23,6 +23,7 @@ interface Event {
     config?: any;
     embeddedEmails?: any;
     subEvents?: { [key: string]: SubEvent };
+    list?: boolean;
     [key: string]: any;
 }
 
@@ -898,6 +899,29 @@ const Home = () => {
         setShowViewsModal(true);
     };
 
+    const handleDuplicateView = (view: View) => {
+        // Deep copy the view
+        const duplicatedView = JSON.parse(JSON.stringify(view));
+        
+        // Generate a unique name
+        let newName = `${duplicatedView.name}-copy`;
+        let counter = 1;
+        
+        // Check if name already exists, increment counter until we find a unique name
+        while (allViews.some(v => v.name === newName)) {
+            newName = `${duplicatedView.name}-copy-${counter}`;
+            counter++;
+        }
+        
+        duplicatedView.name = newName;
+        
+        setIsNewView(true);
+        setSelectedView(null);
+        setViewFormData(duplicatedView);
+        setShowViewsModal(true);
+        toast.info(`Creating duplicate of "${view.name}". Please review and modify the name and other fields before saving.`);
+    };
+
     const handleEditPrompts = (promptGroup: PromptGroup) => {
         setIsDuplicatingPrompts(false);
         setSelectedPromptGroup(promptGroup);
@@ -1572,6 +1596,31 @@ const Home = () => {
         }));
     };
 
+    const handleMoveColumnDefUp = (index: number) => {
+        if (index === 0) return; // Can't move first item up
+        setViewFormData(prev => {
+            const newColumnDefs = [...(prev.columnDefs || [])];
+            [newColumnDefs[index - 1], newColumnDefs[index]] = [newColumnDefs[index], newColumnDefs[index - 1]];
+            return {
+                ...prev,
+                columnDefs: newColumnDefs
+            };
+        });
+    };
+
+    const handleMoveColumnDefDown = (index: number) => {
+        setViewFormData(prev => {
+            const columnDefs = prev.columnDefs || [];
+            if (index >= columnDefs.length - 1) return prev; // Can't move last item down
+            const newColumnDefs = [...columnDefs];
+            [newColumnDefs[index], newColumnDefs[index + 1]] = [newColumnDefs[index + 1], newColumnDefs[index]];
+            return {
+                ...prev,
+                columnDefs: newColumnDefs
+            };
+        });
+    };
+
     const handleAddViewCondition = () => {
         setViewFormData(prev => ({
             ...prev,
@@ -1582,10 +1631,55 @@ const Home = () => {
     const handleUpdateViewCondition = (index: number, field: string, value: any) => {
         setViewFormData(prev => {
             const newViewConditions = [...(prev.viewConditions || [])];
-            newViewConditions[index] = {
-                ...newViewConditions[index],
-                [field]: value
-            };
+            const currentCondition = { ...newViewConditions[index] };
+            
+            // If changing the condition type (name field), reset to appropriate structure
+            if (field === 'name') {
+                const newCondition: any = { name: value };
+                
+                // Preserve boolValue if it exists and is valid for the new type
+                const boolValueTypes = ['currentAIDBool', 'currentAIDMapBool', 'baseBool', 'practiceBool', 'offering', 'deposit', 'spokenLanguage', 'writtenLanguage'];
+                if (boolValueTypes.includes(value) && typeof currentCondition.boolValue !== 'undefined') {
+                    newCondition.boolValue = currentCondition.boolValue;
+                } else if (boolValueTypes.includes(value)) {
+                    newCondition.boolValue = true; // Default to true
+                }
+                
+                // Preserve relevant fields based on new type
+                if (['currentAIDBool', 'baseBool', 'practiceBool'].includes(value)) {
+                    // These need boolName - preserve if switching from similar type
+                    if (['currentAIDBool', 'baseBool', 'practiceBool'].includes(currentCondition.name)) {
+                        newCondition.boolName = currentCondition.boolName || '';
+                    }
+                } else if (value === 'currentAIDMapBool') {
+                    // This needs map and boolName - preserve if switching from same type
+                    if (currentCondition.name === 'currentAIDMapBool') {
+                        newCondition.map = currentCondition.map || '';
+                        newCondition.boolName = currentCondition.boolName || '';
+                    }
+                } else if (value === 'poolMember') {
+                    // This needs pool - preserve if switching from same type
+                    if (currentCondition.name === 'poolMember') {
+                        newCondition.pool = currentCondition.pool || '';
+                    }
+                } else if (['spokenLanguage', 'writtenLanguage'].includes(value)) {
+                    // These need stringValue - preserve if switching between language types
+                    if (['spokenLanguage', 'writtenLanguage'].includes(currentCondition.name)) {
+                        newCondition.stringValue = currentCondition.stringValue || '';
+                    } else {
+                        newCondition.stringValue = '';
+                    }
+                }
+                
+                newViewConditions[index] = newCondition;
+            } else {
+                // Normal field update
+                newViewConditions[index] = {
+                    ...currentCondition,
+                    [field]: value
+                };
+            }
+            
             return {
                 ...prev,
                 viewConditions: newViewConditions
@@ -1914,12 +2008,26 @@ const Home = () => {
                             Views ({filteredViews.length})
                         </h4>
                         {filteredViews.map(view => (
-                            <div key={view.name} className="pool-item" onClick={() => handleEditView(view)}>
-                                <h5 style={{ color: '#ffc107', marginBottom: '0.5rem' }}>
-                                    {view.name}
-                                </h5>
-                                <div style={{ fontSize: '0.9rem', color: '#aaa' }}>
-                                    {view.columnDefs?.length || 0} columns • {view.viewConditions?.length || 0} conditions
+                            <div key={view.name} className="pool-item">
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                                    <div style={{ flex: 1 }} onClick={() => handleEditView(view)}>
+                                        <h5 style={{ color: '#ffc107', marginBottom: '0.5rem' }}>
+                                            {view.name}
+                                        </h5>
+                                        <div style={{ fontSize: '0.9rem', color: '#aaa' }}>
+                                            {view.columnDefs?.length || 0} columns • {view.viewConditions?.length || 0} conditions
+                                        </div>
+                                    </div>
+                                    <Button
+                                        variant="outline-warning"
+                                        size="sm"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDuplicateView(view);
+                                        }}
+                                    >
+                                        📋 Duplicate
+                                    </Button>
                                 </div>
                             </div>
                         ))}
@@ -1981,14 +2089,37 @@ const Home = () => {
                                 </Col>
                                 <Col md={6}>
                                     <Form.Group className="mb-3">
-                                        <Form.Label>Event Name (Description)*</Form.Label>
+                                        <Form.Label>{eventFormData.list ? 'List Name*' : 'Event Name (Description)*'}</Form.Label>
                                         <Form.Control
                                             type="text"
                                             value={eventFormData.name}
                                             onChange={(e) => setEventFormData({ ...eventFormData, name: e.target.value })}
-                                            placeholder="e.g., Vermont In-Person Retreats 2025"
+                                            placeholder={eventFormData.list ? "e.g., Mailing List" : "e.g., Vermont In-Person Retreats 2025"}
                                             style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
                                         />
+                                    </Form.Group>
+                                </Col>
+                            </Row>
+                            <Row>
+                                <Col md={12}>
+                                    <Form.Group className="mb-3">
+                                        <Form.Check
+                                            type="checkbox"
+                                            label={<span style={{ color: 'white' }}>This is a List (not an Event)</span>}
+                                            checked={eventFormData.list || false}
+                                            onChange={(e) => {
+                                                const isList = e.target.checked;
+                                                setEventFormData({
+                                                    ...eventFormData,
+                                                    list: isList,
+                                                    // Clear subEvents when converting to list
+                                                    subEvents: isList ? {} : eventFormData.subEvents
+                                                });
+                                            }}
+                                        />
+                                        <Form.Text className="text-muted" style={{ fontSize: '0.75rem', display: 'block', marginTop: '0.25rem' }}>
+                                            Lists are used for eligibility pools only and don't have subevents or event-specific configuration.
+                                        </Form.Text>
                                     </Form.Group>
                                 </Col>
                             </Row>
@@ -2012,67 +2143,71 @@ const Home = () => {
                                         </Form.Select>
                                     </Form.Group>
                                 </Col>
-                                <Col md={6}>
-                                    <Form.Group className="mb-3">
-                                        <Form.Label>Script Name</Form.Label>
-                                        <Form.Select
-                                            value={eventFormData.config?.scriptName || ''}
-                                            onChange={(e) => setEventFormData({
-                                                ...eventFormData,
-                                                config: { ...eventFormData.config, scriptName: e.target.value }
-                                            })}
-                                        >
-                                            <option value="">Select a script...</option>
-                                            {allScripts.map(script => (
-                                                <option key={script.name} value={script.name}>
-                                                    {script.name}
-                                                </option>
-                                            ))}
-                                        </Form.Select>
-                                    </Form.Group>
-                                </Col>
+                                {!eventFormData.list && (
+                                    <Col md={6}>
+                                        <Form.Group className="mb-3">
+                                            <Form.Label>Script Name</Form.Label>
+                                            <Form.Select
+                                                value={eventFormData.config?.scriptName || ''}
+                                                onChange={(e) => setEventFormData({
+                                                    ...eventFormData,
+                                                    config: { ...eventFormData.config, scriptName: e.target.value }
+                                                })}
+                                            >
+                                                <option value="">Select a script...</option>
+                                                {allScripts.map(script => (
+                                                    <option key={script.name} value={script.name}>
+                                                        {script.name}
+                                                    </option>
+                                                ))}
+                                            </Form.Select>
+                                        </Form.Group>
+                                    </Col>
+                                )}
                             </Row>
-                            <Row>
-                                <Col md={4}>
-                                    <Form.Group className="mb-3">
-                                        <Form.Check
-                                            type="checkbox"
-                                            label={<span style={{ color: 'white' }}>Need Acceptance</span>}
-                                            checked={eventFormData.config?.needAcceptance || false}
-                                            onChange={(e) => setEventFormData({
-                                                ...eventFormData,
-                                                config: { ...eventFormData.config, needAcceptance: e.target.checked }
-                                            })}
-                                        />
-                                    </Form.Group>
-                                </Col>
-                                <Col md={4}>
-                                    <Form.Group className="mb-3">
-                                        <Form.Check
-                                            type="checkbox"
-                                            label={<span style={{ color: 'white' }}>Offering KM Fee</span>}
-                                            checked={eventFormData.config?.offeringKMFee !== undefined ? eventFormData.config.offeringKMFee : true}
-                                            onChange={(e) => setEventFormData({
-                                                ...eventFormData,
-                                                config: { ...eventFormData.config, offeringKMFee: e.target.checked }
-                                            })}
-                                        />
-                                    </Form.Group>
-                                </Col>
-                                <Col md={4}>
-                                    <Form.Group className="mb-3">
-                                        <Form.Check
-                                            type="checkbox"
-                                            label={<span style={{ color: 'white' }}>Offering CAD Par</span>}
-                                            checked={eventFormData.config?.offeringCADPar || false}
-                                            onChange={(e) => setEventFormData({
-                                                ...eventFormData,
-                                                config: { ...eventFormData.config, offeringCADPar: e.target.checked }
-                                            })}
-                                        />
-                                    </Form.Group>
-                                </Col>
-                            </Row>
+                            {!eventFormData.list && (
+                                <Row>
+                                    <Col md={4}>
+                                        <Form.Group className="mb-3">
+                                            <Form.Check
+                                                type="checkbox"
+                                                label={<span style={{ color: 'white' }}>Need Acceptance</span>}
+                                                checked={eventFormData.config?.needAcceptance || false}
+                                                onChange={(e) => setEventFormData({
+                                                    ...eventFormData,
+                                                    config: { ...eventFormData.config, needAcceptance: e.target.checked }
+                                                })}
+                                            />
+                                        </Form.Group>
+                                    </Col>
+                                    <Col md={4}>
+                                        <Form.Group className="mb-3">
+                                            <Form.Check
+                                                type="checkbox"
+                                                label={<span style={{ color: 'white' }}>Offering KM Fee</span>}
+                                                checked={eventFormData.config?.offeringKMFee !== undefined ? eventFormData.config.offeringKMFee : true}
+                                                onChange={(e) => setEventFormData({
+                                                    ...eventFormData,
+                                                    config: { ...eventFormData.config, offeringKMFee: e.target.checked }
+                                                })}
+                                            />
+                                        </Form.Group>
+                                    </Col>
+                                    <Col md={4}>
+                                        <Form.Group className="mb-3">
+                                            <Form.Check
+                                                type="checkbox"
+                                                label={<span style={{ color: 'white' }}>Offering CAD Par</span>}
+                                                checked={eventFormData.config?.offeringCADPar || false}
+                                                onChange={(e) => setEventFormData({
+                                                    ...eventFormData,
+                                                    config: { ...eventFormData.config, offeringCADPar: e.target.checked }
+                                                })}
+                                            />
+                                        </Form.Group>
+                                    </Col>
+                                </Row>
+                            )}
                             
                             {/* Dashboard Views Section */}
                             <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid #555' }}>
@@ -2227,52 +2362,54 @@ const Home = () => {
                             </Accordion.Item>
                         </Accordion>
 
-                        {/* SubEvents Section */}
-                        <div className="card">
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                                <h5 style={{ color: '#ffc107', margin: 0 }}>SubEvents</h5>
-                                <Button variant="outline-warning" size="sm" onClick={handleAddSubEvent}>
-                                    + Add SubEvent
-                                </Button>
-                            </div>
-                            {eventFormData.subEvents && Object.keys(eventFormData.subEvents).length > 0 ? (
-                                Object.entries(eventFormData.subEvents).map(([key, subEvent]) => (
-                                    <div key={key} className="subevent-item">
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                            <div style={{ flex: 1 }}>
-                                                <strong style={{ color: '#ffc107' }}>{key}</strong>
-                                                <div style={{ fontSize: '0.9rem', color: '#aaa', marginTop: '0.25rem' }}>
-                                                    {subEvent.date && `Date: ${subEvent.date}`}
-                                                    {subEvent.eventComplete && ' • Complete'}
-                                                    {subEvent.eventOnDeck && ' • On Deck'}
+                        {/* SubEvents Section - Only show for non-list events */}
+                        {!eventFormData.list && (
+                            <div className="card">
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                    <h5 style={{ color: '#ffc107', margin: 0 }}>SubEvents</h5>
+                                    <Button variant="outline-warning" size="sm" onClick={handleAddSubEvent}>
+                                        + Add SubEvent
+                                    </Button>
+                                </div>
+                                {eventFormData.subEvents && Object.keys(eventFormData.subEvents).length > 0 ? (
+                                    Object.entries(eventFormData.subEvents).map(([key, subEvent]) => (
+                                        <div key={key} className="subevent-item">
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                <div style={{ flex: 1 }}>
+                                                    <strong style={{ color: '#ffc107' }}>{key}</strong>
+                                                    <div style={{ fontSize: '0.9rem', color: '#aaa', marginTop: '0.25rem' }}>
+                                                        {subEvent.date && `Date: ${subEvent.date}`}
+                                                        {subEvent.eventComplete && ' • Complete'}
+                                                        {subEvent.eventOnDeck && ' • On Deck'}
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <Button
+                                                        variant="outline-warning"
+                                                        size="sm"
+                                                        className="me-2"
+                                                        onClick={() => handleEditSubEvent(key, subEvent)}
+                                                    >
+                                                        Edit
+                                                    </Button>
+                                                    <Button
+                                                        variant="outline-danger"
+                                                        size="sm"
+                                                        onClick={() => handleDeleteSubEvent(key)}
+                                                    >
+                                                        Delete
+                                                    </Button>
                                                 </div>
                                             </div>
-                                            <div>
-                                                <Button
-                                                    variant="outline-warning"
-                                                    size="sm"
-                                                    className="me-2"
-                                                    onClick={() => handleEditSubEvent(key, subEvent)}
-                                                >
-                                                    Edit
-                                                </Button>
-                                                <Button
-                                                    variant="outline-danger"
-                                                    size="sm"
-                                                    onClick={() => handleDeleteSubEvent(key)}
-                                                >
-                                                    Delete
-                                                </Button>
-                                            </div>
                                         </div>
+                                    ))
+                                ) : (
+                                    <div style={{ color: '#aaa', textAlign: 'center', padding: '1rem' }}>
+                                        No subevents defined
                                     </div>
-                                ))
-                            ) : (
-                                <div style={{ color: '#aaa', textAlign: 'center', padding: '1rem' }}>
-                                    No subevents defined
-                                </div>
-                            )}
-                        </div>
+                                )}
+                            </div>
+                        )}
 
                         {/* Read-only fields note */}
                         <div style={{ fontSize: '0.9rem', color: '#aaa', marginTop: '1rem' }}>
@@ -3462,7 +3599,25 @@ const Home = () => {
                                                         </Form.Text>
                                                     </Form.Group>
                                                 </Col>
-                                                <Col md={6} className="d-flex justify-content-end align-items-end">
+                                                <Col md={6} className="d-flex justify-content-end align-items-end gap-2">
+                                                    <Button
+                                                        variant="outline-secondary"
+                                                        size="sm"
+                                                        onClick={() => handleMoveColumnDefUp(index)}
+                                                        disabled={index === 0}
+                                                        title="Move up"
+                                                    >
+                                                        ↑
+                                                    </Button>
+                                                    <Button
+                                                        variant="outline-secondary"
+                                                        size="sm"
+                                                        onClick={() => handleMoveColumnDefDown(index)}
+                                                        disabled={index >= (viewFormData.columnDefs?.length || 0) - 1}
+                                                        title="Move down"
+                                                    >
+                                                        ↓
+                                                    </Button>
                                                     <Button
                                                         variant="outline-danger"
                                                         size="sm"
@@ -3503,11 +3658,16 @@ const Home = () => {
                                                         <option value="currentAIDBool">currentAIDBool</option>
                                                         <option value="currentAIDMapBool">currentAIDMapBool</option>
                                                         <option value="baseBool">baseBool</option>
+                                                        <option value="practiceBool">practiceBool</option>
                                                         <option value="poolMember">poolMember</option>
+                                                        <option value="offering">offering</option>
+                                                        <option value="deposit">deposit</option>
+                                                        <option value="spokenLanguage">spokenLanguage</option>
+                                                        <option value="writtenLanguage">writtenLanguage</option>
                                                     </Form.Select>
                                                 </Form.Group>
                                             </Col>
-                                            {(condition.name === 'currentAIDBool' || condition.name === 'baseBool') && (
+                                            {(condition.name === 'currentAIDBool' || condition.name === 'baseBool' || condition.name === 'practiceBool') && (
                                                 <>
                                                     <Col md={4}>
                                                         <Form.Group className="mb-2">
@@ -3590,6 +3750,57 @@ const Home = () => {
                                                         </datalist>
                                                     </Form.Group>
                                                 </Col>
+                                            )}
+                                            {(condition.name === 'offering' || condition.name === 'deposit') && (
+                                                <Col md={8}>
+                                                    <Form.Group className="mb-2">
+                                                        <Form.Label>Bool Value*</Form.Label>
+                                                        <Form.Select
+                                                            value={condition.boolValue === true ? 'true' : condition.boolValue === false ? 'false' : ''}
+                                                            onChange={(e) => handleUpdateViewCondition(index, 'boolValue', e.target.value === 'true')}
+                                                        >
+                                                            <option value="true">true</option>
+                                                            <option value="false">false</option>
+                                                        </Form.Select>
+                                                        <Form.Text className="text-muted" style={{ fontSize: '0.75rem' }}>
+                                                            {condition.name === 'offering' 
+                                                                ? 'Filter by whether student has made an offering'
+                                                                : 'Filter by whether student has made a deposit'}
+                                                        </Form.Text>
+                                                    </Form.Group>
+                                                </Col>
+                                            )}
+                                            {(condition.name === 'spokenLanguage' || condition.name === 'writtenLanguage') && (
+                                                <>
+                                                    <Col md={4}>
+                                                        <Form.Group className="mb-2">
+                                                            <Form.Label>Language*</Form.Label>
+                                                            <Form.Control
+                                                                type="text"
+                                                                value={condition.stringValue || ''}
+                                                                onChange={(e) => handleUpdateViewCondition(index, 'stringValue', e.target.value)}
+                                                                placeholder={condition.name === 'spokenLanguage' ? 'e.g., English, Spanish' : 'e.g., English, Spanish'}
+                                                            />
+                                                        </Form.Group>
+                                                    </Col>
+                                                    <Col md={4}>
+                                                        <Form.Group className="mb-2">
+                                                            <Form.Label>Bool Value*</Form.Label>
+                                                            <Form.Select
+                                                                value={condition.boolValue === true ? 'true' : condition.boolValue === false ? 'false' : ''}
+                                                                onChange={(e) => handleUpdateViewCondition(index, 'boolValue', e.target.value === 'true')}
+                                                            >
+                                                                <option value="true">true (match)</option>
+                                                                <option value="false">false (exclude)</option>
+                                                            </Form.Select>
+                                                            <Form.Text className="text-muted" style={{ fontSize: '0.75rem' }}>
+                                                                {condition.name === 'spokenLanguage'
+                                                                    ? 'true: show only this language, false: exclude this language'
+                                                                    : 'true: show only this language, false: exclude this language'}
+                                                            </Form.Text>
+                                                        </Form.Group>
+                                                    </Col>
+                                                </>
                                             )}
                                         </Row>
                                         <div className="d-flex justify-content-end mt-2">
