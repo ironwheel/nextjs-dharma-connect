@@ -3470,6 +3470,20 @@ const Home = () => {
                                                             <option value="installmentsDue" />
                                                             <option value="installmentsLF" />
                                                             <option value="spokenLanguage" />
+                                                            <option value="poolMember-xyz" />
+                                                            <option value="currentAIDBool-xyz" />
+                                                            <option value="specifiedAIDBool-xyz" />
+                                                            <option value="currentAIDMapBool-xyz" />
+                                                            <option value="specifiedAIDMapBool-xyz" />
+                                                            <option value="currentAIDString-xyz" />
+                                                            <option value="specifiedAIDString-xyz" />
+                                                            <option value="currentAIDNumber-xyz" />
+                                                            <option value="specifiedAIDNumber-xyz" />
+                                                            <option value="baseBool-xyz" />
+                                                            <option value="baseString-xyz" />
+                                                            <option value="practiceBool-xyz" />
+                                                            <option value="currentAIDMapList-xyz" />
+                                                            <option value="offeringCount-xyz" />
                                                         </datalist>
                                                     </Form.Group>
                                                 </Col>
@@ -3510,19 +3524,21 @@ const Home = () => {
                                                             </Col>
                                                         </Row>
                                                     )}
-                                                    {(colName.includes('currentAIDBool') || colName.includes('baseBool') || colName.includes('currentAIDMapBool')) && (
+                                                    {(colName.includes('currentAIDBool') || colName.includes('baseBool') || colName.includes('practiceBool') || colName.includes('currentAIDMapBool') || colName.includes('specifiedAIDBool') || colName.includes('specifiedAIDMapBool')) && (
                                                         <Row>
-                                                            <Col md={colName.includes('currentAIDMapBool') ? 6 : 12}>
-                                                                <Form.Group className="mb-2">
-                                                                    <Form.Label>Bool Name*</Form.Label>
-                                                                    <Form.Control
-                                                                        type="text"
-                                                                        value={colDef.boolName || ''}
-                                                                        onChange={(e) => handleUpdateColumnDef(index, 'boolName', e.target.value)}
-                                                                        placeholder="e.g., join, accepted"
-                                                                    />
-                                                                </Form.Group>
-                                                            </Col>
+                                                            {(colName.includes('specifiedAIDBool') || colName.includes('specifiedAIDMapBool')) && (
+                                                                <Col md={colName.includes('specifiedAIDMapBool') ? 4 : 6}>
+                                                                    <Form.Group className="mb-2">
+                                                                        <Form.Label>AID*</Form.Label>
+                                                                        <Form.Control
+                                                                            type="text"
+                                                                            value={colDef.aid || ''}
+                                                                            onChange={(e) => handleUpdateColumnDef(index, 'aid', e.target.value)}
+                                                                            placeholder="Event code"
+                                                                        />
+                                                                    </Form.Group>
+                                                                </Col>
+                                                            )}
                                                             {colName.includes('currentAIDMapBool') && (
                                                                 <Col md={6}>
                                                                     <Form.Group className="mb-2">
@@ -3536,11 +3552,48 @@ const Home = () => {
                                                                     </Form.Group>
                                                                 </Col>
                                                             )}
+                                                            {colName.includes('specifiedAIDMapBool') && (
+                                                                <Col md={4}>
+                                                                    <Form.Group className="mb-2">
+                                                                        <Form.Label>Map Name*</Form.Label>
+                                                                        <Form.Control
+                                                                            type="text"
+                                                                            value={colDef.map || ''}
+                                                                            onChange={(e) => handleUpdateColumnDef(index, 'map', e.target.value)}
+                                                                            placeholder="e.g., whichRetreats"
+                                                                        />
+                                                                    </Form.Group>
+                                                                </Col>
+                                                            )}
+                                                            <Col md={colName.includes('currentAIDMapBool') || colName.includes('specifiedAIDMapBool') ? (colName.includes('specifiedAIDMapBool') ? 4 : 6) : (colName.includes('specifiedAIDBool') ? 6 : 12)}>
+                                                                <Form.Group className="mb-2">
+                                                                    <Form.Label>Bool Name*</Form.Label>
+                                                                    <Form.Control
+                                                                        type="text"
+                                                                        value={colDef.boolName || ''}
+                                                                        onChange={(e) => handleUpdateColumnDef(index, 'boolName', e.target.value)}
+                                                                        placeholder="e.g., join, accepted"
+                                                                    />
+                                                                </Form.Group>
+                                                            </Col>
                                                         </Row>
                                                     )}
-                                                    {(colName.includes('currentAIDString') || colName.includes('baseString')) && (
+                                                    {(colName.includes('currentAIDString') || colName.includes('baseString') || colName.includes('specifiedAIDString')) && (
                                                         <Row>
-                                                            <Col md={6}>
+                                                            {colName.includes('specifiedAIDString') && (
+                                                                <Col md={6}>
+                                                                    <Form.Group className="mb-2">
+                                                                        <Form.Label>AID*</Form.Label>
+                                                                        <Form.Control
+                                                                            type="text"
+                                                                            value={colDef.aid || ''}
+                                                                            onChange={(e) => handleUpdateColumnDef(index, 'aid', e.target.value)}
+                                                                            placeholder="Event code"
+                                                                        />
+                                                                    </Form.Group>
+                                                                </Col>
+                                                            )}
+                                                            <Col md={colName.includes('specifiedAIDString') ? 6 : 12}>
                                                                 <Form.Group className="mb-2">
                                                                     <Form.Label>String Name*</Form.Label>
                                                                     <Form.Control
@@ -3548,6 +3601,34 @@ const Home = () => {
                                                                         value={colDef.stringName || ''}
                                                                         onChange={(e) => handleUpdateColumnDef(index, 'stringName', e.target.value)}
                                                                         placeholder="e.g., submitTime"
+                                                                    />
+                                                                </Form.Group>
+                                                            </Col>
+                                                        </Row>
+                                                    )}
+                                                    {(colName.includes('currentAIDNumber') || colName.includes('specifiedAIDNumber')) && (
+                                                        <Row>
+                                                            {colName.includes('specifiedAIDNumber') && (
+                                                                <Col md={6}>
+                                                                    <Form.Group className="mb-2">
+                                                                        <Form.Label>AID*</Form.Label>
+                                                                        <Form.Control
+                                                                            type="text"
+                                                                            value={colDef.aid || ''}
+                                                                            onChange={(e) => handleUpdateColumnDef(index, 'aid', e.target.value)}
+                                                                            placeholder="Event code"
+                                                                        />
+                                                                    </Form.Group>
+                                                                </Col>
+                                                            )}
+                                                            <Col md={colName.includes('specifiedAIDNumber') ? 6 : 12}>
+                                                                <Form.Group className="mb-2">
+                                                                    <Form.Label>Number Name*</Form.Label>
+                                                                    <Form.Control
+                                                                        type="text"
+                                                                        value={colDef.numberName || ''}
+                                                                        onChange={(e) => handleUpdateColumnDef(index, 'numberName', e.target.value)}
+                                                                        placeholder="e.g., count, total"
                                                                     />
                                                                 </Form.Group>
                                                             </Col>
