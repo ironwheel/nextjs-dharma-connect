@@ -1,33 +1,33 @@
 {
-    "name": "email-manager",
-    "version": "0.1.0",
-    "private": true,
-    "scripts": {
-        "dev": "next dev",
-        "build": "next build",
-        "build:check": "pnpm install && next build",
-        "start": "next start",
-        "lint": "next lint"
-    },
-    "dependencies": {
-        "@aws-sdk/util-dynamodb": "^3.830.0",
-        "bootstrap": "^5.3.3",
-        "next": "15.3.3",
-        "react": "^18.3.1",
-        "react-bootstrap": "^2.10.9",
-        "react-dom": "^18.3.1",
-        "react-toastify": "^10.0.4",
-        "sharedFrontend": "workspace:*"
-    },
-    "devDependencies": {
-        "@types/node": "^20.0.0",
-        "@types/react": "^18.3.0",
-        "@types/react-dom": "^18.3.0",
-        "autoprefixer": "^10.4.21",
-        "eslint": "9.23.0",
-        "eslint-config-next": "15.2.4",
-        "postcss": "^8.5.6",
-        "tailwindcss": "^3.4.17",
-        "typescript": "^5.0.0"
-    }
+  "name": "email-manager",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "build:check": "pnpm install && next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@aws-sdk/util-dynamodb": "^3.830.0",
+    "bootstrap": "^5.3.3",
+    "next": "15.3.8",
+    "react": "^18.3.1",
+    "react-bootstrap": "^2.10.9",
+    "react-dom": "^18.3.1",
+    "react-toastify": "^10.0.4",
+    "sharedFrontend": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.21",
+    "eslint": "9.23.0",
+    "eslint-config-next": "15.2.4",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.0.0"
+  }
 }
