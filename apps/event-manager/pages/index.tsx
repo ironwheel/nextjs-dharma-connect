@@ -2127,40 +2127,46 @@ const Home = () => {
                                 <Col md={6}>
                                     <Form.Group className="mb-3">
                                         <Form.Label>Eligibility Pool</Form.Label>
-                                        <Form.Select
+                                        <Form.Control
+                                            type="text"
+                                            list="event-pool-list"
                                             value={eventFormData.config?.pool || ''}
                                             onChange={(e) => setEventFormData({
                                                 ...eventFormData,
                                                 config: { ...eventFormData.config, pool: e.target.value }
                                             })}
-                                        >
-                                            <option value="">Select a pool...</option>
+                                            placeholder="Search or select a pool..."
+                                            style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                                        />
+                                        <datalist id="event-pool-list">
                                             {allPools.map(pool => (
                                                 <option key={pool.name} value={pool.name}>
-                                                    {pool.name} {pool.description && `- ${pool.description}`}
+                                                    {pool.description ? `${pool.name} - ${pool.description}` : pool.name}
                                                 </option>
                                             ))}
-                                        </Form.Select>
+                                        </datalist>
                                     </Form.Group>
                                 </Col>
                                 {!eventFormData.list && (
                                     <Col md={6}>
                                         <Form.Group className="mb-3">
                                             <Form.Label>Script Name</Form.Label>
-                                            <Form.Select
+                                            <Form.Control
+                                                type="text"
+                                                list="event-script-list"
                                                 value={eventFormData.config?.scriptName || ''}
                                                 onChange={(e) => setEventFormData({
                                                     ...eventFormData,
                                                     config: { ...eventFormData.config, scriptName: e.target.value }
                                                 })}
-                                            >
-                                                <option value="">Select a script...</option>
+                                                placeholder="Search or select a script..."
+                                                style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                                            />
+                                            <datalist id="event-script-list">
                                                 {allScripts.map(script => (
-                                                    <option key={script.name} value={script.name}>
-                                                        {script.name}
-                                                    </option>
+                                                    <option key={script.name} value={script.name} />
                                                 ))}
-                                            </Form.Select>
+                                            </datalist>
                                         </Form.Group>
                                     </Col>
                                 )}
