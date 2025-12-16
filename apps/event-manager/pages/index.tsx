@@ -590,7 +590,13 @@ const Home = () => {
         const dates = Object.values(event.subEvents)
             .map(subEvent => subEvent.date)
             .filter(date => date)
-            .map(date => new Date(date as string));
+            .map(date => {
+                // Parse date string as local date to avoid timezone issues
+                // Date format is expected to be "YYYY-MM-DD"
+                const dateStr = date as string;
+                const [year, month, day] = dateStr.split('-').map(Number);
+                return new Date(year, month - 1, day);
+            });
         
         if (dates.length === 0) return null;
         
