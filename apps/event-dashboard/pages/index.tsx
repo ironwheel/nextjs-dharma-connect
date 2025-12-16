@@ -2272,6 +2272,56 @@ const Home = () => {
                         }
                     }
                     rowValues[field] = offeringDate;
+                } else if (field === 'installmentsTotal' || field === 'installmentsReceived' || field === 'installmentsDue' || field === 'installmentsRefunded') {
+                    // Return "N/A" if offering presentation is not installments
+                    if (currentEvent.config?.offeringPresentation !== 'installments') {
+                        rowValues[field] = 'N/A';
+                    } else {
+                        const aid = typeof currentEvent.aid === 'string' ? currentEvent.aid : undefined;
+                        const selectedSubEvent = typeof currentEvent.selectedSubEvent === 'string' ? currentEvent.selectedSubEvent : undefined;
+                        const person = aid ? student.programs?.[aid] : undefined;
+                        let installmentTotal = 0;
+                        let installmentReceived = 0;
+                        let installmentRefunded = 0;
+                        
+                        if (person) {
+                            // Calculate total from whichRetreats and whichRetreatsConfig
+                            let limitCount = 100;
+                            let count = 0;
+                            if (person.limitFee) limitCount = 2;
+                            if (person.whichRetreats && currentEvent.config?.whichRetreatsConfig) {
+                                for (const [retreat, value] of Object.entries(person.whichRetreats)) {
+                                    if (value && currentEvent.config.whichRetreatsConfig[retreat]) {
+                                        installmentTotal += currentEvent.config.whichRetreatsConfig[retreat].offeringTotal;
+                                        count += 1;
+                                        if (count >= limitCount) break;
+                                    }
+                                }
+                            }
+                            
+                            // Calculate received and refunded from installments
+                            if (selectedSubEvent && person.offeringHistory?.[selectedSubEvent]?.installments) {
+                                const installments = person.offeringHistory[selectedSubEvent].installments;
+                                for (const [installmentName, installmentEntry] of Object.entries<any>(installments)) {
+                                    if (installmentName === 'refunded') {
+                                        installmentRefunded += installmentEntry.offeringAmount || 0;
+                                    } else {
+                                        installmentReceived += installmentEntry.offeringAmount || 0;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (field === 'installmentsTotal') {
+                            rowValues[field] = installmentTotal;
+                        } else if (field === 'installmentsReceived') {
+                            rowValues[field] = installmentReceived;
+                        } else if (field === 'installmentsDue') {
+                            rowValues[field] = installmentTotal - installmentReceived;
+                        } else if (field === 'installmentsRefunded') {
+                            rowValues[field] = installmentRefunded;
+                        }
+                    }
                 } else if (field === 'spokenLanguage') {
                     rowValues[field] = student.spokenLangPref ?? student.writtenLangPref ?? '';
                 } else if (field === 'writtenLanguage') {
