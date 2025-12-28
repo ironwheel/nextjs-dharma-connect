@@ -350,6 +350,92 @@ const PoolNamesAutocomplete = ({ value, onChange, placeholder, label, id }: {
     );
 };
 
+// Autocomplete component for subevent keys
+const SubeventAutocomplete = ({ value, onChange, placeholder, label, id, eventAid }: {
+    value: string;
+    onChange: (value: string) => void;
+    placeholder?: string;
+    label?: string;
+    id: string;
+    eventAid?: string;
+}) => {
+    const [inputValue, setInputValue] = useState(value || '');
+    const [isValid, setIsValid] = useState(true);
+    const uniqueId = `subevent-${id}`;
+
+    // Get subevent keys from the selected event
+    const getSubeventKeys = (): string[] => {
+        if (!eventAid) return [];
+        const event = allEvents.find(e => e.aid === eventAid);
+        if (!event || !event.subEvents) return [];
+        return Object.keys(event.subEvents).sort();
+    };
+
+    const subeventKeys = getSubeventKeys();
+    // Include "any" as a special option
+    const validOptions = ['any', ...subeventKeys];
+
+    // Sync with external value changes
+    React.useEffect(() => {
+        setInputValue(value || '');
+    }, [value]);
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newValue = e.target.value;
+        setInputValue(newValue);
+        onChange(newValue);
+        
+        // Validate if value is in the list (only if not empty)
+        if (newValue.trim()) {
+            setIsValid(validOptions.includes(newValue));
+        } else {
+            setIsValid(true);
+        }
+    };
+
+    const handleBlur = () => {
+        // On blur, validate and show error if invalid
+        if (inputValue.trim() && !validOptions.includes(inputValue)) {
+            setIsValid(false);
+        }
+    };
+
+    const isDisabled = !eventAid || eventAid.trim() === '';
+
+    return (
+        <>
+            {label && <Form.Label>{label}</Form.Label>}
+            <Form.Control
+                type="text"
+                list={uniqueId}
+                value={inputValue}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                placeholder={isDisabled ? "Select an event first" : placeholder}
+                disabled={isDisabled}
+                isInvalid={!isValid && inputValue.trim() !== ''}
+            />
+            {!isDisabled && (
+                <datalist id={uniqueId}>
+                    {validOptions.map(key => (
+                        <option key={key} value={key} />
+                    ))}
+                </datalist>
+            )}
+            {!isValid && inputValue.trim() !== '' && (
+                <Form.Control.Feedback type="invalid" style={{ display: 'block' }}>
+                    Please select a valid subevent key from the list or use "any"
+                </Form.Control.Feedback>
+            )}
+            {isDisabled && (
+                <Form.Text className="text-muted" style={{ fontSize: '0.75rem' }}>
+                    Please select an event (aid) first to enable subevent selection
+                </Form.Text>
+            )}
+        </>
+    );
+};
+
 const Home = () => {
     const router = useRouter();
     const { pid, hash } = router.query;
@@ -376,6 +462,8 @@ const Home = () => {
     const [showScriptModal, setShowScriptModal] = useState(false);
     const [showOfferingModal, setShowOfferingModal] = useState(false);
     const [showPromptsModal, setShowPromptsModal] = useState(false);
+    const [showCreatePromptsModal, setShowCreatePromptsModal] = useState(false);
+    const [showSavingPromptsModal, setShowSavingPromptsModal] = useState(false);
     const [showSubEventModal, setShowSubEventModal] = useState(false);
     const [showViewsModal, setShowViewsModal] = useState(false);
     const [showDeleteEventConfirm, setShowDeleteEventConfirm] = useState(false);
@@ -448,9 +536,13 @@ const Home = () => {
     const [promptsEditData, setPromptsEditData] = useState<Prompt[]>([]);
     const [promptsFindText, setPromptsFindText] = useState<string>('');
     const [promptsReplaceText, setPromptsReplaceText] = useState<string>('');
+    // Create prompts state
+    const [createPromptsAid, setCreatePromptsAid] = useState<string>('');
+    const [createPromptsTemplate, setCreatePromptsTemplate] = useState<string>('basicSupplication');
     const [viewsProfileKeys, setViewsProfileKeys] = useState<string[]>([]);
 
     const initialLoadStarted = useRef(false);
+    const jsonTextareaRef = useRef<HTMLTextAreaElement>(null);
 
     // Fetch data functions
     const fetchEvents = async () => {
@@ -1034,6 +1126,9 @@ const Home = () => {
                 }
             }
 
+            // Show progress modal
+            setShowSavingPromptsModal(true);
+
             // Save all prompts
             for (const prompt of promptsEditData) {
                 // Extract promptName from original prompt field
@@ -1058,10 +1153,107 @@ const Home = () => {
             groupPromptsByAid();
             filterPromptGroups(searchTerm);
             
+            // Close progress modal and edit modal
+            setShowSavingPromptsModal(false);
             setShowPromptsModal(false);
         } catch (error) {
             console.error('Error saving prompts:', error);
             toast.error('Failed to save prompts');
+            setShowSavingPromptsModal(false);
+        }
+    };
+
+    const handleCreatePrompts = async () => {
+        try {
+            if (!createPromptsAid) {
+                toast.error('Event code (aid) is required');
+                return;
+            }
+
+            if (!createPromptsTemplate) {
+                toast.error('Template type is required');
+                return;
+            }
+
+            // Check if prompts already exist for this aid
+            const existingGroup = promptGroups.find(g => g.aid === createPromptsAid);
+            if (existingGroup && existingGroup.prompts.length > 0) {
+                toast.error(`Prompts for event "${createPromptsAid}" already exist. Please use a different event code.`);
+                return;
+            }
+
+            // Define prompt templates
+            const promptTemplates: { [key: string]: string[] } = {
+                basicSupplication: ['receiptTitle', 'supplicationBody', 'supplicationTitle', 'title', 'event']
+            };
+
+            // Define languages
+            const languages = ['Chinese', 'Czech', 'English', 'French', 'German', 'Italian', 'Portuguese', 'Spanish'];
+
+            // Get prompt names for the selected template
+            const promptNames = promptTemplates[createPromptsTemplate] || [];
+            if (promptNames.length === 0) {
+                toast.error(`Template "${createPromptsTemplate}" not found`);
+                return;
+            }
+
+            // Define pre-seeded text for supplicationTitle by language
+            const supplicationTitleTexts: { [key: string]: string } = {
+                'Chinese': '祈求传授教义（作者：xxxxxx）',
+                'Czech': 'Prosba (Napsána xxxxx)',
+                'English': 'Supplication for Teachings (written by xxxxx)',
+                'French': 'Supplique (Écrite par xxxxx)',
+                'German': 'Bittgesuch (Verfasst von xxxxx)',
+                'Italian': 'Supplica (Scritto da xxxxx)',
+                'Portuguese': 'Súplica (Escrito por xxxxx)',
+                'Spanish': 'Súplica (Escrita por xxxxx)'
+            };
+
+            // Create prompts for each combination of prompt name and language
+            const promptsToCreate: Prompt[] = [];
+            for (const promptName of promptNames) {
+                for (const language of languages) {
+                    // Pre-seed text for supplicationTitle, otherwise use empty string
+                    const text = promptName === 'supplicationTitle' 
+                        ? (supplicationTitleTexts[language] || '')
+                        : '';
+                    
+                    promptsToCreate.push({
+                        prompt: `${createPromptsAid}-${promptName}`,
+                        language: language,
+                        aid: createPromptsAid,
+                        text: text
+                    });
+                }
+            }
+
+            // Save all prompts
+            for (const prompt of promptsToCreate) {
+                await putTableItem('prompts', prompt.prompt, prompt, pid as string, hash as string);
+            }
+
+            toast.success(`Created ${promptsToCreate.length} prompts for ${createPromptsAid} successfully`);
+            
+            // Refresh prompts
+            const prompts = await fetchPrompts();
+            allPrompts = Array.isArray(prompts) ? prompts : [];
+            groupPromptsByAid();
+            filterPromptGroups(searchTerm);
+            
+            // Reset form and close create modal
+            const createdAid = createPromptsAid;
+            setCreatePromptsAid('');
+            setCreatePromptsTemplate('basicSupplication');
+            setShowCreatePromptsModal(false);
+            
+            // Find the newly created prompt group and open edit modal
+            const newGroup = promptGroups.find(g => g.aid === createdAid);
+            if (newGroup) {
+                handleEditPrompts(newGroup);
+            }
+        } catch (error) {
+            console.error('Error creating prompts:', error);
+            toast.error('Failed to create prompts');
         }
     };
 
@@ -1700,6 +1892,45 @@ const Home = () => {
         }));
     };
 
+    // Ensure JSON textarea maintains dark theme styles
+    useEffect(() => {
+        if (showEventModal && jsonTextareaRef.current) {
+            const textarea = jsonTextareaRef.current;
+            // Force apply dark theme styles immediately and on any changes
+            const applyDarkTheme = () => {
+                if (textarea) {
+                    textarea.style.backgroundColor = '#2b2b2b';
+                    textarea.style.color = 'white';
+                    textarea.style.border = '1px solid #555';
+                }
+            };
+            
+            applyDarkTheme();
+            
+            // Reapply styles after short delays to catch any style resets from re-renders
+            const timeouts = [
+                setTimeout(applyDarkTheme, 50),
+                setTimeout(applyDarkTheme, 150),
+                setTimeout(applyDarkTheme, 300)
+            ];
+            
+            // Set up an interval to check and reapply styles periodically while modal is open
+            const intervalId = setInterval(() => {
+                if (textarea && showEventModal) {
+                    const computedBg = window.getComputedStyle(textarea).backgroundColor;
+                    if (computedBg !== 'rgb(43, 43, 43)') {
+                        applyDarkTheme();
+                    }
+                }
+            }, 200);
+            
+            return () => {
+                timeouts.forEach(clearTimeout);
+                clearInterval(intervalId);
+            };
+        }
+    }, [showEventModal, eventFormData.config]);
+
     // Main initialization effect
     useEffect(() => {
         if (!router.isReady || !pid || !hash) return;
@@ -1816,6 +2047,11 @@ const Home = () => {
                                 placeholder={`Search ${currentResource}...`}
                                 className="search-input"
                             />
+                            {currentResource === 'prompts' && (
+                                <Button variant="warning" onClick={() => setShowCreatePromptsModal(true)}>
+                                    + Create New Prompts
+                                </Button>
+                            )}
                             {currentResource !== 'prompts' && (
                                 <Button variant="warning" onClick={handleCreateNew}>
                                     + Create New {currentResource === 'events' ? 'Event' : currentResource === 'pools' ? 'Pool' : currentResource === 'scripts' ? 'Script' : currentResource === 'offerings' ? 'Offering' : currentResource === 'views' ? 'View' : 'Item'}
@@ -1874,7 +2110,7 @@ const Home = () => {
                         {filteredPromptGroups.map(group => (
                             <div key={group.aid} className="event-item">
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
-                                    <div style={{ flex: 1 }}>
+                                    <div style={{ flex: 1, cursor: 'pointer' }} onClick={() => handleEditPrompts(group)}>
                                         <h5 style={{ color: '#ffc107', marginBottom: '0.5rem' }}>
                                             {group.eventDate ? `${group.eventDate} - ` : ''}{group.eventName || group.aid}
                                         </h5>
@@ -1884,16 +2120,12 @@ const Home = () => {
                                     </div>
                                     <div style={{ display: 'flex', gap: '0.5rem' }}>
                                         <Button
-                                            variant="outline-info"
-                                            size="sm"
-                                            onClick={() => handleEditPrompts(group)}
-                                        >
-                                            ✏️ Edit
-                                        </Button>
-                                        <Button
                                             variant="outline-warning"
                                             size="sm"
-                                            onClick={() => handleDuplicatePrompts(group)}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDuplicatePrompts(group);
+                                            }}
                                         >
                                             📋 Duplicate
                                         </Button>
@@ -2348,6 +2580,59 @@ const Home = () => {
                             </div>
                         </div>
 
+                        {/* Coordinator Emails Section */}
+                        <div className="card" style={{ marginTop: '1.5rem' }}>
+                            <h5 style={{ color: '#ffc107', marginBottom: '1rem' }}>Coordinator Emails</h5>
+                            <Row>
+                                <Col md={6}>
+                                    <Form.Group className="mb-3">
+                                        <Form.Label>Coordinator Email (Americas)</Form.Label>
+                                        <Form.Control
+                                            type="email"
+                                            value={eventFormData.config?.coordEmailAmericas || ''}
+                                            onChange={(e) => {
+                                                setEventFormData({
+                                                    ...eventFormData,
+                                                    config: {
+                                                        ...eventFormData.config,
+                                                        coordEmailAmericas: e.target.value
+                                                    }
+                                                });
+                                            }}
+                                            placeholder="americas-coordinator@example.com"
+                                            style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                                        />
+                                        <Form.Text className="text-muted" style={{ fontSize: '0.75rem' }}>
+                                            Email address for Americas coordinator
+                                        </Form.Text>
+                                    </Form.Group>
+                                </Col>
+                                <Col md={6}>
+                                    <Form.Group className="mb-3">
+                                        <Form.Label>Coordinator Email (Europe)</Form.Label>
+                                        <Form.Control
+                                            type="email"
+                                            value={eventFormData.config?.coordEmailEurope || ''}
+                                            onChange={(e) => {
+                                                setEventFormData({
+                                                    ...eventFormData,
+                                                    config: {
+                                                        ...eventFormData.config,
+                                                        coordEmailEurope: e.target.value
+                                                    }
+                                                });
+                                            }}
+                                            placeholder="europe-coordinator@example.com"
+                                            style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                                        />
+                                        <Form.Text className="text-muted" style={{ fontSize: '0.75rem' }}>
+                                            Email address for Europe coordinator
+                                        </Form.Text>
+                                    </Form.Group>
+                                </Col>
+                            </Row>
+                        </div>
+
                         {/* Config Section (collapsed by default) */}
                         <Accordion className="mb-3">
                             <Accordion.Item eventKey="0">
@@ -2356,6 +2641,7 @@ const Home = () => {
                                     <Form.Group>
                                         <Form.Label>Config Object (JSON)</Form.Label>
                                         <Form.Control
+                                            ref={jsonTextareaRef}
                                             as="textarea"
                                             rows={10}
                                             value={JSON.stringify(eventFormData.config, null, 2)}
@@ -2367,7 +2653,12 @@ const Home = () => {
                                                     // Invalid JSON, don't update
                                                 }
                                             }}
-                                            style={{ fontFamily: 'monospace' }}
+                                            style={{ 
+                                                fontFamily: 'monospace',
+                                                backgroundColor: '#2b2b2b', 
+                                                color: 'white', 
+                                                border: '1px solid #555'
+                                            }}
                                         />
                                     </Form.Group>
                                 </Accordion.Body>
@@ -2675,12 +2966,13 @@ const Home = () => {
                                                                 />
                                                             </Form.Group>
                                                             <Form.Group className="mb-2">
-                                                                <Form.Label>Subevent (subevent)</Form.Label>
-                                                                <Form.Control
-                                                                    type="text"
+                                                                <SubeventAutocomplete
                                                                     value={attr.subevent || ''}
-                                                                    onChange={(e) => handleUpdatePoolAttribute(index, 'subevent', e.target.value)}
+                                                                    onChange={(value) => handleUpdatePoolAttribute(index, 'subevent', value)}
                                                                     placeholder="Subevent key (e.g., 'retreat-2024') or 'any' for any subevent"
+                                                                    label="Subevent (subevent)"
+                                                                    id={`offering-subevent-${index}`}
+                                                                    eventAid={attr.aid}
                                                                 />
                                                             </Form.Group>
                                                         </>
@@ -2725,12 +3017,13 @@ const Home = () => {
                                                                 />
                                                             </Form.Group>
                                                             <Form.Group className="mb-2">
-                                                                <Form.Label>Subevent (subevent)</Form.Label>
-                                                                <Form.Control
-                                                                    type="text"
+                                                                <SubeventAutocomplete
                                                                     value={attr.subevent || ''}
-                                                                    onChange={(e) => handleUpdatePoolAttribute(index, 'subevent', e.target.value)}
+                                                                    onChange={(value) => handleUpdatePoolAttribute(index, 'subevent', value)}
                                                                     placeholder="Subevent key - must have offeringSKU"
+                                                                    label="Subevent (subevent)"
+                                                                    id={`offeringandpools-subevent-${index}`}
+                                                                    eventAid={attr.aid}
                                                                 />
                                                             </Form.Group>
                                                             <Form.Group className="mb-2">
@@ -4084,6 +4377,58 @@ const Home = () => {
                         {isDuplicatingPrompts ? 'Save Duplicated Prompts' : 'Save Changes'}
                     </Button>
                 </Modal.Footer>
+            </Modal>
+
+            {/* Create Prompts Modal */}
+            <Modal show={showCreatePromptsModal} onHide={() => setShowCreatePromptsModal(false)}>
+                <Modal.Header closeButton>
+                    <Modal.Title>Create New Prompts</Modal.Title>
+                </Modal.Header>
+                <Modal.Body>
+                    <Form>
+                        <Form.Group className="mb-3">
+                            <Form.Label>Event Code (aid)*</Form.Label>
+                            <EventCodeAutocomplete
+                                value={createPromptsAid}
+                                onChange={(value) => setCreatePromptsAid(value)}
+                                placeholder="Select or enter event code"
+                                label=""
+                                id="create-prompts-aid"
+                            />
+                        </Form.Group>
+                        <Form.Group className="mb-3">
+                            <Form.Label>Template Type*</Form.Label>
+                            <Form.Select
+                                value={createPromptsTemplate}
+                                onChange={(e) => setCreatePromptsTemplate(e.target.value)}
+                                style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                            >
+                                <option value="basicSupplication">basicSupplication</option>
+                            </Form.Select>
+                        </Form.Group>
+                    </Form>
+                </Modal.Body>
+                <Modal.Footer>
+                    <Button variant="secondary" onClick={() => setShowCreatePromptsModal(false)}>
+                        Cancel
+                    </Button>
+                    <Button variant="warning" onClick={handleCreatePrompts}>
+                        Create Prompts
+                    </Button>
+                </Modal.Footer>
+            </Modal>
+
+            {/* Saving Prompts Progress Modal */}
+            <Modal show={showSavingPromptsModal} onHide={() => {}} backdrop="static" keyboard={false}>
+                <Modal.Body style={{ textAlign: 'center', padding: '2rem' }}>
+                    <Spinner animation="border" variant="warning" style={{ marginBottom: '1rem' }} />
+                    <div style={{ color: 'white', fontSize: '1.1rem' }}>
+                        Saving prompts...
+                    </div>
+                    <div style={{ color: '#aaa', fontSize: '0.9rem', marginTop: '0.5rem' }}>
+                        Please wait while prompts are being saved.
+                    </div>
+                </Modal.Body>
             </Modal>
         </>
     );
