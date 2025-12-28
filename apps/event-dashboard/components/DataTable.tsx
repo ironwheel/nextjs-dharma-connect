@@ -37,6 +37,7 @@ export interface DataTableProps {
      */
     pid?: string;
     hash?: string;
+    recordCountLabel?: string;
 }
 
 export const DataTable: React.FC<DataTableProps> = ({
@@ -58,7 +59,8 @@ export const DataTable: React.FC<DataTableProps> = ({
     canRefreshCache,
     onRefreshCache,
     pid,
-    hash
+    hash,
+    recordCountLabel
 }) => {
     const [sortConfig, setSortConfig] = useState<{ field: string; direction: 'asc' | 'desc' }>({ field: 'name', direction: 'asc' });
     const [editingCell, setEditingCell] = useState<{ rowIndex: number; field: string } | null>(null);
@@ -237,7 +239,7 @@ export const DataTable: React.FC<DataTableProps> = ({
         <div className="data-table-container">
             <div className="status-bar">
                 <span className="status-item">
-                    Records: {itemCount}
+                    Records: {recordCountLabel || itemCount}
                 </span>
                 {websocketStatus && (
                     <span className={`status-item ${websocketStatus === 'open' ? 'websocket-connected' : 'websocket-disconnected'}`}>

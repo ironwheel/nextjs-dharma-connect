@@ -34,6 +34,7 @@ interface Student {
     spokenLangPref?: string;
     writtenLangPref?: string;
     unsubscribe?: boolean;
+    deceased?: boolean;
     owyaaLease?: string;
     // Note: Other fields like programs, practice, emails, offeringHistory 
     // are not loaded by the projection expression to optimize performance
@@ -137,6 +138,8 @@ const Home = () => {
             email: string;
             writtenLangPref: string;
             spokenLangPref: string;
+            unsubscribe?: boolean;
+            deceased?: boolean;
         };
         shadowValues: {
             first: string;
@@ -144,6 +147,8 @@ const Home = () => {
             email: string;
             writtenLangPref: string;
             spokenLangPref: string;
+            unsubscribe?: boolean;
+            deceased?: boolean;
         };
         config: {
             [host: string]: {
@@ -159,7 +164,9 @@ const Home = () => {
             last: '',
             email: '',
             writtenLangPref: '',
-            spokenLangPref: ''
+            spokenLangPref: '',
+            unsubscribe: false,
+            deceased: false
         },
         // Shadow values to track changes
         shadowValues: {
@@ -167,7 +174,9 @@ const Home = () => {
             last: '',
             email: '',
             writtenLangPref: '',
-            spokenLangPref: ''
+            spokenLangPref: '',
+            unsubscribe: false,
+            deceased: false
         },
         // Auth fields (auth table) - will be dynamically populated based on permitted hosts
         config: {},
@@ -197,13 +206,14 @@ const Home = () => {
 
             // Use projection expression to only load the fields we need
             // Note: 'first' and 'last' are reserved keywords in DynamoDB, so we need to use expression attribute names
-            const projectionExpression = '#id, #first, #last, #email, #unsubscribe, #writtenLangPref, #spokenLangPref, #owyaaLease';
+            const projectionExpression = '#id, #first, #last, #email, #unsubscribe, #deceased, #writtenLangPref, #spokenLangPref, #owyaaLease';
             const expressionAttributeNames = {
                 '#id': 'id',
                 '#first': 'first',
                 '#last': 'last',
                 '#email': 'email',
                 '#unsubscribe': 'unsubscribe',
+                '#deceased': 'deceased',
                 '#writtenLangPref': 'writtenLangPref',
                 '#spokenLangPref': 'spokenLangPref',
                 '#owyaaLease': 'owyaaLease'
@@ -465,6 +475,7 @@ const Home = () => {
             { field: 'rowIndex', headerName: '#', pinned: 'left', width: 75 },
             { field: 'studentName', headerName: 'Student Name', pinned: 'left', sortable: true },
             { field: 'unsubscribed', headerName: 'Unsub', width: 80, cellRenderer: 'checkboxRenderer', writeEnabled: true, sortable: true },
+            { field: 'deceased', headerName: 'Deceased', width: 100, cellRenderer: 'checkboxRenderer', writeEnabled: true, sortable: true },
             { field: 'email', headerName: 'Email', sortable: true },
             { field: 'language', headerName: 'Language', sortable: true },
             { field: 'permittedApps', headerName: 'Permitted Apps', sortable: true },
@@ -512,6 +523,7 @@ const Home = () => {
                 rowIndex: index + 1,
                 studentName: `${student.first} ${student.last}`,
                 unsubscribed: student.unsubscribe || false,
+                deceased: student.deceased || false,
                 email,
                 language,
                 permittedApps,
@@ -579,14 +591,18 @@ const Home = () => {
                         last: fullStudent?.last || '',
                         email: fullStudent?.email || '',
                         writtenLangPref: fullStudent?.writtenLangPref || 'English',
-                        spokenLangPref: fullStudent?.spokenLangPref || 'English'
+                        spokenLangPref: fullStudent?.spokenLangPref || 'English',
+                        unsubscribe: fullStudent?.unsubscribe || false,
+                        deceased: fullStudent?.deceased || false
                     },
                     shadowValues: {
                         first: fullStudent?.first || '',
                         last: fullStudent?.last || '',
                         email: fullStudent?.email || '',
                         writtenLangPref: fullStudent?.writtenLangPref || 'English',
-                        spokenLangPref: fullStudent?.spokenLangPref || 'English'
+                        spokenLangPref: fullStudent?.spokenLangPref || 'English',
+                        unsubscribe: fullStudent?.unsubscribe || false,
+                        deceased: fullStudent?.deceased || false
                     },
                     // Initialize config with discovered schema
                     config: (() => {
@@ -706,51 +722,87 @@ const Home = () => {
         let dataField = field;
         if (field === 'unsubscribed') dataField = 'unsubscribe';
 
-        const success = await updateStudentField(studentId, dataField, checked);
-        if (success) {
-            // Update the global allStudents array first
-            const studentIndex = allStudents.findIndex(s => s.id === studentId);
-            if (studentIndex !== -1) {
-                const updatedStudents = [...allStudents];
-                updatedStudents[studentIndex] = { ...allStudents[studentIndex], unsubscribe: checked };
-                allStudents = updatedStudents;
+        // Handle deceased checkbox: if checked, also set unsubscribe to true
+        if (field === 'deceased' && checked) {
+            // First update deceased
+            const deceasedSuccess = await updateStudentField(studentId, 'deceased', checked);
+            if (deceasedSuccess) {
+                // Then update unsubscribe to true
+                await updateStudentField(studentId, 'unsubscribe', true);
+            } else {
+                return; // If deceased update failed, don't proceed
             }
-
-            // Recalculate permitted apps for this student
-            const updatedStudent = allStudents.find(s => s.id === studentId);
-            const defaultAuthRecord = allAuthRecords.find(ar => ar.id === 'default');
-            const authRecord = allAuthRecords.find(ar => ar.id === studentId);
-
-            // Determine permitted apps: show None for unsubscribed students, otherwise use auth record or default
-            let permittedApps = 'None';
-            if (!checked) { // Only show permitted apps if not unsubscribed
-                if (authRecord && authRecord['permitted-hosts']) {
-                    permittedApps = authRecord['permitted-hosts'].map(formatDomainForDisplay).join(', ');
-                } else if (defaultAuthRecord && defaultAuthRecord['permitted-hosts']) {
-                    permittedApps = defaultAuthRecord['permitted-hosts'].map(formatDomainForDisplay).join(', ');
-                }
+        } else if (field === 'deceased' && !checked) {
+            // When deceased is unchecked, only update deceased field, don't change unsubscribe
+            const deceasedSuccess = await updateStudentField(studentId, 'deceased', checked);
+            if (!deceasedSuccess) {
+                return;
             }
+        } else {
+            // For other fields (including unsubscribe), just update the field
+            const success = await updateStudentField(studentId, dataField, checked);
+            if (!success) {
+                return;
+            }
+        }
 
-            // Update local data by finding the correct row index
-            const rowIndex = rowData.findIndex(s => s.studentId === studentId);
-            if (rowIndex !== -1) {
-                const updatedRowData = [...rowData];
-                const updatedStudent = allStudents.find(s => s.id === studentId);
-
-                // Determine email and language - hide for unsubscribed students
-                const email = checked ? '' : maskEmail(updatedStudent?.email || '', emailDisplayPermission);
-                const language = checked ? '' : (updatedStudent?.writtenLangPref || 'English');
-
-                updatedRowData[rowIndex] = {
-                    ...student,
-                    [field]: checked,
-                    email,
-                    language,
-                    permittedApps: permittedApps,
-                    isUnsubscribed: checked
+        // Update the global allStudents array
+        const studentIndex = allStudents.findIndex(s => s.id === studentId);
+        if (studentIndex !== -1) {
+            const updatedStudents = [...allStudents];
+            if (field === 'deceased') {
+                updatedStudents[studentIndex] = { 
+                    ...allStudents[studentIndex], 
+                    deceased: checked,
+                    unsubscribe: checked ? true : allStudents[studentIndex].unsubscribe // If deceased is checked, set unsubscribe to true; otherwise keep current value
                 };
-                setRowData(updatedRowData);
+            } else if (field === 'unsubscribed') {
+                updatedStudents[studentIndex] = { 
+                    ...allStudents[studentIndex], 
+                    unsubscribe: checked 
+                };
             }
+            allStudents = updatedStudents;
+        }
+
+        // Recalculate permitted apps for this student
+        const updatedStudent = allStudents.find(s => s.id === studentId);
+        const defaultAuthRecord = allAuthRecords.find(ar => ar.id === 'default');
+        const authRecord = allAuthRecords.find(ar => ar.id === studentId);
+
+        // Determine if student is unsubscribed (either directly or via deceased)
+        const isUnsubscribed = updatedStudent?.unsubscribe || false;
+
+        // Determine permitted apps: show None for unsubscribed students, otherwise use auth record or default
+        let permittedApps = 'None';
+        if (!isUnsubscribed) {
+            if (authRecord && authRecord['permitted-hosts']) {
+                permittedApps = authRecord['permitted-hosts'].map(formatDomainForDisplay).join(', ');
+            } else if (defaultAuthRecord && defaultAuthRecord['permitted-hosts']) {
+                permittedApps = defaultAuthRecord['permitted-hosts'].map(formatDomainForDisplay).join(', ');
+            }
+        }
+
+        // Update local data by finding the correct row index
+        const rowIndex = rowData.findIndex(s => s.studentId === studentId);
+        if (rowIndex !== -1) {
+            const updatedRowData = [...rowData];
+
+            // Determine email and language - hide for unsubscribed students
+            const email = isUnsubscribed ? '' : maskEmail(updatedStudent?.email || '', emailDisplayPermission);
+            const language = isUnsubscribed ? '' : (updatedStudent?.writtenLangPref || 'English');
+
+            updatedRowData[rowIndex] = {
+                ...student,
+                [field]: checked,
+                deceased: field === 'deceased' ? checked : (updatedStudent?.deceased || false),
+                unsubscribed: isUnsubscribed,
+                email,
+                language,
+                permittedApps: permittedApps,
+                isUnsubscribed: isUnsubscribed
+            };
+            setRowData(updatedRowData);
         }
     };
 
@@ -1551,6 +1603,57 @@ const Home = () => {
                                                 </option>
                                             ))}
                                         </Form.Select>
+                                    </Form.Group>
+                                </Col>
+                            </Row>
+                            <Row>
+                                <Col md={6}>
+                                    <Form.Group className="mb-3">
+                                        <Form.Check
+                                            type="checkbox"
+                                            label={<span style={{ color: 'white' }}>Deceased</span>}
+                                            checked={formData.studentProfile.deceased || false}
+                                            onChange={(e) => {
+                                                const isDeceased = e.target.checked;
+                                                setFormData(prev => ({
+                                                    ...prev,
+                                                    studentProfile: {
+                                                        ...prev.studentProfile,
+                                                        deceased: isDeceased,
+                                                        unsubscribe: isDeceased ? true : prev.studentProfile.unsubscribe // Only set to true when checked, keep current value when unchecked
+                                                    }
+                                                }));
+                                            }}
+                                        />
+                                    </Form.Group>
+                                </Col>
+                                <Col md={6}>
+                                    <Form.Group className="mb-3">
+                                        <Form.Check
+                                            type="checkbox"
+                                            label={<span style={{ color: 'white' }}>Unsubscribe</span>}
+                                            checked={formData.studentProfile.unsubscribe || false}
+                                            onChange={(e) => {
+                                                const isUnsubscribed = e.target.checked;
+                                                setFormData(prev => ({
+                                                    ...prev,
+                                                    studentProfile: {
+                                                        ...prev.studentProfile,
+                                                        unsubscribe: isUnsubscribed
+                                                    }
+                                                }));
+                                            }}
+                                            disabled={formData.studentProfile.deceased || false}
+                                        />
+                                        {formData.studentProfile.deceased ? (
+                                            <Form.Text className="text-muted" style={{ fontSize: '0.75rem', display: 'block' }}>
+                                                Unsubscribe is automatically set to true when deceased is checked
+                                            </Form.Text>
+                                        ) : (
+                                            <Form.Text className="text-muted" style={{ fontSize: '0.75rem', display: 'block' }}>
+                                                Unsubscribe can be set independently when deceased is not checked
+                                            </Form.Text>
+                                        )}
                                     </Form.Group>
                                 </Col>
                             </Row>

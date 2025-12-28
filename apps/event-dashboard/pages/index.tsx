@@ -479,6 +479,7 @@ const Home = () => {
     // Use a ref to maintain accumulated eligible students across callbacks
     const accumulatedEligibleStudentsRef = useRef<Student[]>([]);
     const currentLoadingAbortControllerRef = useRef<AbortController | null>(null);
+    const fetchingStudentsPromiseRef = useRef<Promise<Student[]> | null>(null);
     let demoMode = false;
 
     // WebSocket connection
@@ -493,9 +494,12 @@ const Home = () => {
 
         if (currentEvent && Array.isArray(students)) {
             students.forEach((student, index) => {
+                // Removed global unsubscribe filter to allow specific views to show them
+                /*
                 if (student.unsubscribe) {
                     return;
                 }
+                */
                 if (currentEvent.config?.pool && Array.isArray(pools) && pools.length > 0) {
                     const isEligible = checkEligibility(currentEvent.config.pool, student, currentEvent.aid, pools);
                     if (isEligible) {
@@ -534,46 +538,60 @@ const Home = () => {
     };
 
     // API functions using sharedFrontend
+    // API functions using sharedFrontend
     const fetchStudents = async () => {
-        try {
-            // First, try to get the total count
-            let totalCount = 0;
+        // Deduplicate fetch requests
+        if (fetchingStudentsPromiseRef.current) {
+            console.log('fetchStudents: Deduping fetch request, returning existing promise');
+            return fetchingStudentsPromiseRef.current;
+        }
+
+        const fetchPromise = (async () => {
             try {
-                const countResponse = await getTableCount('students', pid as string, hash as string);
-                if (countResponse && !('redirected' in countResponse) && countResponse.count) {
-                    totalCount = countResponse.count;
+                // First, try to get the total count
+                let totalCount = 0;
+                try {
+                    const countResponse = await getTableCount('students', pid as string, hash as string);
+                    if (countResponse && !('redirected' in countResponse) && countResponse.count) {
+                        totalCount = countResponse.count;
+                        setLoadingProgress(prev => ({
+                            ...prev,
+                            total: totalCount,
+                            message: `Loading all students...`
+                        }));
+                    }
+                } catch (countError) {
+                    console.log('Could not get total count, will estimate:', countError);
+                }
+
+                const students = await getAllTableItems('students', pid as string, hash as string, (count, chunkNumber, totalChunks) => {
                     setLoadingProgress(prev => ({
                         ...prev,
-                        total: totalCount,
+                        current: count,
+                        total: totalCount || Math.max(count, prev.total), // Use actual total if available
                         message: `Loading all students...`
                     }));
+                });
+
+                // Check if we got a redirected response
+                if (students && 'redirected' in students) {
+                    console.log('Students fetch redirected - authentication required');
+                    return [];
                 }
-            } catch (countError) {
-                console.log('Could not get total count, will estimate:', countError);
-            }
 
-            const students = await getAllTableItems('students', pid as string, hash as string, (count, chunkNumber, totalChunks) => {
-                setLoadingProgress(prev => ({
-                    ...prev,
-                    current: count,
-                    total: totalCount || Math.max(count, prev.total), // Use actual total if available
-                    message: `Loading all students...`
-                }));
-            });
-
-            // Check if we got a redirected response
-            if (students && 'redirected' in students) {
-                console.log('Students fetch redirected - authentication required');
+                setAllStudentsLoaded(true);
+                return students as Student[];
+            } catch (error) {
+                console.error('Error fetching students:', error);
+                toast.error('Failed to fetch students');
                 return [];
+            } finally {
+                fetchingStudentsPromiseRef.current = null;
             }
+        })();
 
-            setAllStudentsLoaded(true);
-            return students as Student[];
-        } catch (error) {
-            console.error('Error fetching students:', error);
-            toast.error('Failed to fetch students');
-            return [];
-        }
+        fetchingStudentsPromiseRef.current = fetchPromise;
+        return fetchPromise;
     };
 
     // Function to load students for a specific event using eligibility cache with incremental updates
@@ -615,14 +633,19 @@ const Home = () => {
             }
 
             // Check if eligibility cache is disabled for this event
-            const cacheDisabled = currentEvent.config?.eligibilityCacheDisabled === true;
+            // Cache is disabled if: config.eligibilityCacheDisabled is true OR event.list is true
+            const cacheDisabled = currentEvent.config?.eligibilityCacheDisabled === true || currentEvent.list === true;
 
             // First, check if we have an eligibility cache record for this event (if not disabled)
             let cacheRecord: any = null;
             if (!cacheDisabled) {
                 cacheRecord = await getTableItemOrNull('eligibility-cache', eventAid, pid as string, hash as string);
             } else {
-                console.log(`Eligibility cache disabled for event ${eventAid}`);
+                if (currentEvent.list === true) {
+                    console.log(`Eligibility cache skipped for list event ${eventAid}`);
+                } else {
+                    console.log(`Eligibility cache disabled for event ${eventAid}`);
+                }
             }
 
             if (cacheRecord && !('redirected' in cacheRecord) && cacheRecord.studentIdList) {
@@ -752,6 +775,12 @@ const Home = () => {
                     }));
 
                     const allStudentsData = await fetchStudents();
+
+                    // Check if operation was aborted during fetch
+                    if (abortController?.signal.aborted) {
+                        throw new Error('Loading operation aborted');
+                    }
+
                     if (allStudentsData.length === 0) {
                         setLoadingEligibilityCache(false);
                         return [];
@@ -784,10 +813,12 @@ const Home = () => {
                 }
 
                 // Create cache record for future use (only include originally eligible students)
-                // Only if cache is not disabled
+                // Only if cache is not disabled (not disabled via config AND not a list event)
                 if (!cacheDisabled) {
                     const eligibleStudentIds = eligibleStudents.map(s => s.id);
                     await createEligibilityCacheRecord(eventAid, eligibleStudentIds);
+                } else if (currentEvent.list === true) {
+                    console.log(`Skipping eligibility cache creation for list event ${eventAid}`);
                 }
 
                 // Trigger incremental update with final result
@@ -1487,7 +1518,7 @@ const Home = () => {
 
         // Get all lists if user has listAccess
         const allLists = userListAccess ? getAllLists(allEvents) : [];
-        const sortedLists = [...allLists].sort((a, b) => 
+        const sortedLists = [...allLists].sort((a, b) =>
             a.displayText.localeCompare(b.displayText) // Alphabetical for lists
         );
 
@@ -1495,13 +1526,13 @@ const Home = () => {
         const allItems = [...sortedSubEvents, ...sortedLists];
 
         // Filter items based on search term
-        const filteredItems = eventListSearchTerm.trim() === '' 
-            ? allItems 
+        const filteredItems = eventListSearchTerm.trim() === ''
+            ? allItems
             : allItems.filter(item => {
                 const searchLower = eventListSearchTerm.toLowerCase();
                 return item.displayText.toLowerCase().includes(searchLower) ||
-                       item.event.aid.toLowerCase().includes(searchLower) ||
-                       (item.event.name && item.event.name.toLowerCase().includes(searchLower));
+                    item.event.aid.toLowerCase().includes(searchLower) ||
+                    (item.event.name && item.event.name.toLowerCase().includes(searchLower));
             });
 
         // Find the current item for the title
@@ -1600,7 +1631,7 @@ const Home = () => {
                     </svg>
 
                     {/* Progressive purple overlay that fills the dropdown bubble */}
-                    {(loadingEligibilityCache || allStudentsLoadedForCurrentEvent) && (
+                    {loadingEligibilityCache && (
                         <div style={{
                             position: 'absolute',
                             top: 0,
@@ -1724,11 +1755,11 @@ const Home = () => {
                             ) : (
                                 filteredItems.map((item, index) => {
                                     // Add visual divider between events and lists if both are present
-                                    const showDivider = userListAccess && 
-                                        index > 0 && 
-                                        sortedSubEvents.length > 0 && 
+                                    const showDivider = userListAccess &&
+                                        index > 0 &&
+                                        sortedSubEvents.length > 0 &&
                                         sortedLists.length > 0 &&
-                                        item.event.list === true && 
+                                        item.event.list === true &&
                                         filteredItems[index - 1].event.list !== true;
 
                                     return (
@@ -1866,6 +1897,17 @@ const Home = () => {
         currentEvent: Event,
         allPools: Pool[]
     ): boolean {
+        // Check for implicit unsubscribe filter
+        // If the view does not explicitly ask for 'unsubscribe' status (via baseBool),
+        // we hide unsubscribed students by default.
+        const hasExplicitUnsubscribe = Array.isArray(conditions) && conditions.some(c =>
+            c.name === 'baseBool' && c.boolName === 'unsubscribe'
+        );
+
+        if (!hasExplicitUnsubscribe && student.unsubscribe) {
+            return false;
+        }
+
         if (!Array.isArray(conditions) || conditions.length === 0) {
             return true;
         }
@@ -2188,10 +2230,10 @@ const Home = () => {
                     rowValues[field] = typeof stringName === 'string' ? (student as any)[stringName] ?? 'unknown' : 'unknown';
                 } else if (field.includes('baseBool')) {
                     const boolName = columnMetaData[field]?.boolName;
-                    rowValues[field] = typeof boolName === 'string' ? (student as any)[boolName] ?? 'unknown' : 'unknown';
+                    rowValues[field] = typeof boolName === 'string' ? (student as any)[boolName] ?? false : false;
                 } else if (field.includes('practiceBool')) {
                     const boolName = columnMetaData[field]?.boolName;
-                    rowValues[field] = typeof boolName === 'string' ? student.practice?.[boolName] ?? 'unknown' : 'unknown';
+                    rowValues[field] = typeof boolName === 'string' ? student.practice?.[boolName] ?? false : false;
                 } else if (field === 'emailRegSent') {
                     const key = `${currentEvent.aid}_${currentEvent.selectedSubEvent}_reg_EN`;
                     rowValues[field] = student.emails?.[key]?.substring(0, 10) ?? '';
@@ -2283,7 +2325,7 @@ const Home = () => {
                         let installmentTotal = 0;
                         let installmentReceived = 0;
                         let installmentRefunded = 0;
-                        
+
                         if (person) {
                             // Calculate total from whichRetreats and whichRetreatsConfig
                             let limitCount = 100;
@@ -2298,7 +2340,7 @@ const Home = () => {
                                     }
                                 }
                             }
-                            
+
                             // Calculate received and refunded from installments
                             if (selectedSubEvent && person.offeringHistory?.[selectedSubEvent]?.installments) {
                                 const installments = person.offeringHistory[selectedSubEvent].installments;
@@ -2311,7 +2353,7 @@ const Home = () => {
                                 }
                             }
                         }
-                        
+
                         if (field === 'installmentsTotal') {
                             rowValues[field] = installmentTotal;
                         } else if (field === 'installmentsReceived') {
@@ -2750,7 +2792,7 @@ const Home = () => {
 
                 if (userConfig?.event && Array.isArray(filteredEvents)) {
                     const foundEvent = filteredEvents.find(e => e.aid === userConfig.event) || null;
-                    
+
                     if (foundEvent) {
                         // Check if it's a list
                         if (foundEvent.list === true) {
@@ -2818,6 +2860,12 @@ const Home = () => {
                     // Reset the "all students loaded" state for initial load
                     setAllStudentsLoadedForCurrentEvent(false);
 
+                    // Abort any current loading operation
+                    if (currentLoadingAbortControllerRef.current) {
+                        currentLoadingAbortControllerRef.current.abort();
+                        console.log('Aborted previous loading operation for initial load');
+                    }
+
                     // Create abort controller for initial load
                     currentLoadingAbortControllerRef.current = new AbortController();
 
@@ -2860,6 +2908,12 @@ const Home = () => {
     // Handle refresh cache
     const handleRefreshCache = async () => {
         if (!evShadow || !evShadow.aid) return;
+
+        // Don't allow refresh for list events
+        if (evShadow.list === true) {
+            console.log(`Cannot refresh eligibility cache for list event ${evShadow.aid}`);
+            return;
+        }
 
         const confirmRefresh = window.confirm(`Are you sure you want to refresh the eligibility cache for ${evShadow.name}? This will delete the existing cache and rebuild it.`);
         if (!confirmRefresh) return;
@@ -3073,10 +3127,13 @@ const Home = () => {
                     connectionId={connectionId || undefined}
                     studentUpdateCount={studentUpdateCount}
                     itemCount={itemCount}
+                    recordCountLabel={loadingEligibilityCache && loadingProgress.total > 0
+                        ? `${loadingProgress.current}/${loadingProgress.total}`
+                        : undefined}
                     canWriteViews={canWriteViews}
                     canExportCSV={canExportCSV}
                     canViewStudentHistory={canViewStudentHistory}
-                    canRefreshCache={canRefreshCache && evShadow?.config?.eligibilityCacheDisabled !== true}
+                    canRefreshCache={canRefreshCache && evShadow?.config?.eligibilityCacheDisabled !== true && evShadow?.list !== true}
                     onRefreshCache={handleRefreshCache}
                     currentUserName={currentUserName}
                     pid={pid as string}
