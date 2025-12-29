@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { Form, Button, Spinner, Badge } from 'react-bootstrap'
+import { Form, Button, Spinner, Badge, Modal } from 'react-bootstrap'
 import { toast } from 'react-toastify'
 import { getTableItem, putTableItem, deleteTableItem, getAllTableItems, getAllTableItemsFiltered } from 'sharedFrontend'
 
@@ -171,6 +171,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
     const [inPerson, setInPerson] = useState(false)
     const [optionsLoaded, setOptionsLoaded] = useState(false)
     const [testers, setTesters] = useState<string[]>([])
+    const [showTesterModal, setShowTesterModal] = useState(false)
     const [sendContinuously, setSendContinuously] = useState(false)
     const [sendUntil, setSendUntil] = useState('')
     const [sendInterval, setSendInterval] = useState(process.env.EMAIL_CONTINUOUS_SLEEP_SECS || '600')
@@ -942,25 +943,71 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
 
             <Form.Group className="mb-3">
                 <Form.Label>Testers</Form.Label>
-                <Form.Select
-                    multiple
-                    value={testers}
-                    onChange={e => {
-                        const selectedOptions = Array.from(e.target.selectedOptions, option => option.value)
-                        setTesters(selectedOptions)
-                    }}
-                    className="bg-dark text-light border-secondary"
-                >
-                    {testParticipantOptions.map(option => (
-                        <option key={option.id} value={option.id}>
-                            {option.name}
-                        </option>
-                    ))}
-                </Form.Select>
+                <div className="d-flex align-items-center gap-2 mb-2">
+                    <div className="flex-grow-1 form-control bg-dark text-light border-secondary" style={{ minHeight: '38px', padding: '0.375rem 0.75rem', display: 'flex', alignItems: 'center' }}>
+                        {testers.length === 0 ? (
+                            <span className="text-muted">None selected</span>
+                        ) : (
+                            <div className="d-flex flex-wrap gap-1">
+                                {testers.map(testerId => {
+                                    const tester = testParticipantOptions.find(opt => opt.id === testerId)
+                                    return (
+                                        <Badge key={testerId} bg="primary" className="me-1">
+                                            {tester?.name || testerId}
+                                        </Badge>
+                                    )
+                                })}
+                            </div>
+                        )}
+                    </div>
+                    <Button
+                        variant="outline-secondary"
+                        onClick={() => setShowTesterModal(true)}
+                        disabled={loading || !writePermission}
+                    >
+                        Select Testers
+                    </Button>
+                </div>
                 <Form.Text className="text-light" style={{ opacity: 0.8 }}>
-                    Select one or more testers to receive test emails (hold Ctrl/Cmd to select multiple)
+                    Select one or more testers to receive test emails
                 </Form.Text>
             </Form.Group>
+
+            {/* Tester Selection Modal */}
+            <Modal show={showTesterModal} onHide={() => setShowTesterModal(false)} className="text-light">
+                <Modal.Header closeButton className="bg-dark border-secondary">
+                    <Modal.Title>Select Testers</Modal.Title>
+                </Modal.Header>
+                <Modal.Body className="bg-dark">
+                    <div className="d-flex flex-column gap-2">
+                        {testParticipantOptions.map(option => (
+                            <Form.Check
+                                key={option.id}
+                                type="checkbox"
+                                id={`tester-${option.id}`}
+                                label={option.name}
+                                checked={testers.includes(option.id)}
+                                onChange={e => {
+                                    if (e.target.checked) {
+                                        setTesters([...testers, option.id])
+                                    } else {
+                                        setTesters(testers.filter(id => id !== option.id))
+                                    }
+                                }}
+                                className="text-light"
+                            />
+                        ))}
+                        {testParticipantOptions.length === 0 && (
+                            <div className="text-muted">No testers available</div>
+                        )}
+                    </div>
+                </Modal.Body>
+                <Modal.Footer className="bg-dark border-secondary">
+                    <Button variant="secondary" onClick={() => setShowTesterModal(false)}>
+                        Done
+                    </Button>
+                </Modal.Footer>
+            </Modal>
 
             <Form.Group className="mb-3">
                 <Form.Check
