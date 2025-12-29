@@ -519,6 +519,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 const existingRevision = existingWorkOrder.revision
                 const revisionChanged = currentRevision !== existingRevision
 
+                // Note: testers and sendContinuously are intentionally excluded from structuralFieldsChanged
+                // Changing these fields should NOT reset the stages/workflow progress
                 structuralFieldsChanged =
                     existingWorkOrder.eventCode !== eventCode ||
                     existingWorkOrder.subEvent !== subEvent ||
