@@ -12,10 +12,10 @@ import {
 import nodemailer from 'nodemailer';
 import Stripe from 'stripe';
 import { tableGetConfig } from './tableConfig';
-import { getOne } from './dynamoClient';
+import { getOne, listAllFiltered } from './dynamoClient';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-    apiVersion: '2024-12-18.acacia',
+    apiVersion: '2023-10-16',
 });
 
 const SMTP_USERNAME = process.env.SMTP_USERNAME;
@@ -183,8 +183,8 @@ export async function sendRefundEmail(
     // Fallback to charges if payment_method not expanded or null (e.g. older API version default)
     // But we are expanding 'payment_method' in retrieve.
     // Also check charges array just in case
-    else if (pi.charges && pi.charges.data && pi.charges.data.length > 0) {
-        const charge = pi.charges.data[0];
+    else if ((pi as any).charges && (pi as any).charges.data && (pi as any).charges.data.length > 0) {
+        const charge = (pi as any).charges.data[0];
         if (charge.payment_method_details && charge.payment_method_details.card) {
             cardType = charge.payment_method_details.card.brand ? charge.payment_method_details.card.brand.toUpperCase() : 'Card';
             last4 = charge.payment_method_details.card.last4 || '????';
