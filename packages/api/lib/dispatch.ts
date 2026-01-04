@@ -595,10 +595,7 @@ async function dispatchStripe(
         // 2. Send Email
         if (refund.status === 'succeeded' || refund.status === 'pending') {
           try {
-            // We need currency and amount from refund object or passed params
-            const refundAmount = refund.amount; // in cents
-            const refundCurrency = refund.currency;
-            await import('./stripe').then(m => m.sendRefundEmail(studentId, aid || 'refund-manager', refundAmount, refundCurrency));
+            await import('./stripe').then(m => m.sendRefundEmail(studentId, aid || 'refund-manager', undefined, offeringIntent));
           } catch (emailErr) {
             console.error("[STRIPE] Refund succeeded but email failed:", emailErr);
             // Don't fail the response, just log

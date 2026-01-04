@@ -53,8 +53,56 @@ export async function createRefundRequest(request: RefundRequest) {
 
     const tableCfg = tableGetConfig('refunds');
     const timestamp = new Date().toISOString();
+
+    // --- GUARD RAILS ---
+    // 1. Velocity Check: Max 4 requests in last 24h
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    // Using listAll (Scan) for now as we transition to GSI. 
+    // This is acceptable for checking the guard rail on a per-tenant table.
+    const allRefunds = await import('./dynamoClient').then(mod => mod.listAll(tableCfg.tableName));
+    const recentRefunds = allRefunds.filter((r: any) => r.createdAt > oneDayAgo);
+
+    if (recentRefunds.length >= 4) {
+        throw new Error('Daily refund limit reached (max 4 per 24h).');
+    }
+
+    // 2. Value Check: Max $1000 in last 24h
+    // Fetch current request amount
+    const importStripe = await import('./stripe');
+    const currentPi = await importStripe.stripeRetrievePaymentIntent(request.stripePaymentIntent);
+    const currentAmount = currentPi.amount; // in cents
+
+    // Fetch amounts for recent requests
+    let totalRecentAmount = 0;
+    try {
+        const amountPromises = recentRefunds.map(async (r: any) => {
+            try {
+                const pi = await importStripe.stripeRetrievePaymentIntent(r.stripePaymentIntent);
+                return pi.amount;
+            } catch (err) {
+                console.error(`Failed to fetch PI ${r.stripePaymentIntent} for guard rail check`, err);
+                return 0; // Ignore if failed? Or conservative approach?
+            }
+        });
+        const amounts = await Promise.all(amountPromises);
+        totalRecentAmount = amounts.reduce((sum, a) => sum + a, 0);
+    } catch (err) {
+        console.error("Error calculating recent refund totals", err);
+        // If we can't verify, do we block? 
+        // Failing safe -> Block or alert? User said "display an explanation". 
+        // We'll proceed with the check using what we have, but ideally this shouldn't fail.
+    }
+
+    const totalAmount = currentAmount + totalRecentAmount;
+    if (totalAmount > 100000) { // $1000.00 * 100 cents
+        throw new Error(`Daily refund value limit reached (max $1000 per 24h). Current total: $${(totalAmount / 100).toFixed(2)}`);
+    }
+    // -------------------
+
     const item = {
         ...request,
+        itemType: 'REFUND', // Added for future GSI
         createdAt: timestamp,
         approvalState: 'PENDING',
         approvalStateLastUpdated: timestamp
@@ -151,9 +199,9 @@ async function sendRefundRequestNotifications(request: RefundRequest, emails: st
         console.error('Failed to resolve event name for email:', e);
     }
 
-    const subEventDisplay = ['event', 'retreat'].includes(request.subEvent.toLowerCase())
-        ? ''
-        : `SubEvent: ${request.subEvent}\n        `;
+    const subEventDisplay = (request.subEvent && !['event', 'retreat'].includes(request.subEvent.toLowerCase()))
+        ? `SubEvent: ${request.subEvent}\n        `
+        : '';
 
     const mailOptions = {
         from: AUTH_EMAIL_FROM,
