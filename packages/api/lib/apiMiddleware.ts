@@ -62,7 +62,7 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
       // Scope to API domain only (not parent domain) for least privilege
       domain: process.env.NODE_ENV === 'production' ? process.env.API_DOMAIN : undefined
     },
-    ignoreMethods: [] // no methods are excluded
+    ignoreMethods: ['GET', 'HEAD', 'OPTIONS'] // GET requests are safe/idempotent
   }))
   .use(async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');

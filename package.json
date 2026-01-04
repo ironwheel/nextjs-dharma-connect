@@ -10,6 +10,8 @@
     "dev:event-dashboard": "pnpm --filter event-dashboard dev",
     "dev:email-manager": "pnpm --filter email-manager dev",
     "dev:translation-manager": "pnpm --filter translation-manager dev",
+    "dev:refund-request": "pnpm --filter refund-request dev",
+    "dev:refund-approve": "pnpm --filter refund-approve dev",
     "build:api": "pnpm --filter api build",
     "build:student-manager": "pnpm --filter student-manager build",
     "build:student-dashboard": "pnpm --filter student-dashboard build",
@@ -17,6 +19,8 @@
     "build:event-dashboard": "pnpm --filter event-dashboard build",
     "build:email-manager": "pnpm --filter email-manager build",
     "build:translation-manager": "pnpm --filter translation-manager build",
+    "build:refund-request": "pnpm --filter refund-request build",
+    "build:refund-approve": "pnpm --filter refund-approve build",
     "build:all": "pnpm -r build",
     "lint:all": "pnpm -r lint"
   }

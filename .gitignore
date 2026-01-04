@@ -88,4 +88,4 @@ utils/refresh_prompts_student_dashboard_cache.py
 utils/write-cache.sh
 
 # Optional Typescript cache
-*.tsbuildinfo
+*.tsbuildinfopackages/api/staging/
