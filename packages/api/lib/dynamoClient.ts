@@ -347,6 +347,50 @@ export async function putOne(
 
 /**
  * @async
+ * @function putOneWithCondition
+ * @description Put a single item into the table with a condition expression.
+ * @param {string} tableName - The name of the table to put the item into.
+ * @param {Record<string, any>} item - The item to put into the table.
+ * @param {string} conditionExpression - The condition expression to evaluate.
+ * @param {Record<string, any>} expressionAttributeValues - Optional expression attribute values.
+ * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @returns {Promise<void>}
+ * @throws {Error} When AWS operation fails or item cannot be put into the table.
+ */
+export async function putOneWithCondition(
+  tableName: string,
+  item: Record<string, any>,
+  conditionExpression: string,
+  expressionAttributeValues?: Record<string, any>,
+  identityPoolIdOverride?: string
+) {
+  const client = getDocClient(identityPoolIdOverride);
+  try {
+    const params: any = {
+      TableName: tableName,
+      Item: item,
+      ConditionExpression: conditionExpression,
+    };
+
+    if (expressionAttributeValues && Object.keys(expressionAttributeValues).length > 0) {
+      params.ExpressionAttributeValues = expressionAttributeValues;
+    }
+
+    await client.send(new PutCommand(params));
+  } catch (error) {
+    console.error(`Failed to put item with condition into table ${tableName}:`, error);
+    if (error instanceof Error) {
+      if (error.name === 'ConditionalCheckFailedException') {
+        throw new Error(`Condition check failed for item in table ${tableName}: ${error.message}`);
+      }
+      throw new Error(`Failed to put item with condition into table ${tableName}: ${error.message}`);
+    }
+    throw new Error(`Failed to put item with condition into table ${tableName}: Unknown error occurred`);
+  }
+}
+
+/**
+ * @async
  * @function updateItem
  * @description Update specific attributes of an item in the table.
  * @param {string} tableName - The name of the table to update the item in.
