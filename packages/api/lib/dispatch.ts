@@ -40,9 +40,35 @@ async function dispatchTable(
     const tableName = process.env[cfg.envVar]!;
     if (!tableName) throw new Error(`Missing env var: ${cfg.envVar}`);
 
+    // Check Email Masking for Students
+    let maskEmail = false;
+    if (resource === 'students') {
+      const pid = req.headers['x-user-id'] as string;
+      const host = req.headers['x-host'] as string;
+      try {
+        // getConfigValue is async
+        const display = await getConfigValue(pid, host, 'emailDisplay');
+        if (!display) maskEmail = true;
+      } catch (e) {
+        // Default to masking if check fails (e.g. permission error or missing default)
+        // If config is simply missing, getConfigValue returns false, so logic holds.
+        // If it throws, we should probably mask to be safe.
+        maskEmail = true;
+      }
+    }
+
+    const mask = (item: any) => {
+      if (maskEmail && item && item.email) {
+        item.email = '**********';
+      }
+      return item;
+    };
+    const maskList = (items: any[]) => items.map(mask);
+
     // LIST
     if (req.method === 'GET' && !id && cfg.ops.includes('list')) {
       const items = await listAll(tableName);
+      if (maskEmail) maskList(items);
       return res.status(200).json(items);
     }
 
@@ -50,6 +76,7 @@ async function dispatchTable(
     if (req.method === 'POST' && !id && req.body && req.body.limit) {
       const { limit, lastEvaluatedKey, scanParams = {}, projectionExpression, expressionAttributeNames } = req.body;
       const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit, undefined, projectionExpression, expressionAttributeNames);
+      if (maskEmail && result.items) maskList(result.items);
       return res.status(200).json(result);
     }
 
@@ -57,6 +84,7 @@ async function dispatchTable(
     if (req.method === 'POST' && id === 'chunked' && req.body && req.body.limit) {
       const { limit, lastEvaluatedKey, scanParams = {}, projectionExpression, expressionAttributeNames } = req.body;
       const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit, undefined, projectionExpression, expressionAttributeNames);
+      if (maskEmail && result.items) maskList(result.items);
       return res.status(200).json(result);
     }
 
@@ -64,6 +92,7 @@ async function dispatchTable(
     if (req.method === 'POST' && id === 'filtered' && req.body && req.body.filterFieldName && req.body.filterFieldValue) {
       const { filterFieldName, filterFieldValue } = req.body;
       const items = await listAllFiltered(tableName, filterFieldName, filterFieldValue);
+      if (maskEmail) maskList(items);
       return res.status(200).json({ items });
     }
 
@@ -72,6 +101,13 @@ async function dispatchTable(
       const { primaryKeyValue, sortKeyValue } = req.body;
 
       const results = await listAllQueryBeginsWithSortKeyMultiple(tableName, cfg.pk, primaryKeyValue, cfg.sk, sortKeyValue);
+      if (maskEmail) {
+        Object.keys(results).forEach(key => {
+          if (Array.isArray(results[key])) {
+            maskList(results[key]);
+          }
+        });
+      }
       return res.status(200).json({ results });
     }
 
@@ -79,6 +115,7 @@ async function dispatchTable(
     if (req.method === 'POST' && id === 'batch' && req.body && req.body.ids && Array.isArray(req.body.ids)) {
       const { ids } = req.body;
       const items = await batchGetItems(tableName, cfg.pk, ids);
+      if (maskEmail) maskList(items);
       return res.status(200).json(items);
     }
 
@@ -91,6 +128,7 @@ async function dispatchTable(
     // GET ONE
     if (req.method === 'GET' && id && cfg.ops.includes('get')) {
       const item = await getOne(tableName, cfg.pk, id);
+      if (maskEmail && item) mask(item);
       return item ? res.status(200).json(item) : res.status(404).json({ error: `${resource} ${id} not found` });
     }
 
