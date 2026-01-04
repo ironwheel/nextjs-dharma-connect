@@ -124,15 +124,37 @@ export async function createRefundRequest(request: RefundRequest) {
  * @description Checks a list of payment intent IDs to see which ones already have refund requests.
  * @returns List of payment intent IDs that exist in the refunds table.
  */
-export async function checkRefundRequests(paymentIntentIds: string[]): Promise<string[]> {
-    if (paymentIntentIds.length === 0) return [];
-
+export async function checkRefundRequests(paymentIntentIds: string[]): Promise<Record<string, { approvalState: string, approverName?: string }>> {
     const tableCfg = tableGetConfig('refunds');
-    // Batch get only supports up to 100 items, handled by batchGetItems wrapper
-    // We only need the keys back to know they exist
+    const studentTableCfg = tableGetConfig('students');
+    // Batch get supports up to 100 items
     const items = await batchGetItems(tableCfg.tableName, tableCfg.pk, paymentIntentIds);
 
-    return items.map(item => item[tableCfg.pk]);
+    const resultMap: Record<string, { approvalState: string, approverName?: string }> = {};
+
+    // Collect approver PIDs to resolve names
+    const approverPids = new Set<string>();
+    items.forEach(item => {
+        if (item.approverPid) approverPids.add(item.approverPid);
+    });
+
+    // Resolve approver names
+    const approverNames: Record<string, string> = {};
+    if (approverPids.size > 0) {
+        const approvers = await batchGetItems(studentTableCfg.tableName, studentTableCfg.pk, Array.from(approverPids));
+        approvers.forEach(a => {
+            approverNames[a.id] = `${a.first} ${a.last}`;
+        });
+    }
+
+    items.forEach(item => {
+        resultMap[item[tableCfg.pk]] = {
+            approvalState: item.approvalState,
+            approverName: item.approverPid ? approverNames[item.approverPid] : undefined
+        };
+    });
+
+    return resultMap;
 }
 
 /**

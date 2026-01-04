@@ -20,7 +20,7 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
     const [stripeDetails, setStripeDetails] = useState<any | null>(null);
     const [loadingStripe, setLoadingStripe] = useState(false);
     const [reason, setReason] = useState('');
-    const [existingRequests, setExistingRequests] = useState<string[]>([]);
+    const [refundRequests, setRefundRequests] = useState<Record<string, { approvalState: string, approverName?: string }>>({});
     const [userEventAccess, setUserEventAccess] = useState<string[]>([]);
 
     useEffect(() => {
@@ -93,7 +93,7 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
             if (intentIds.length === 0) return;
             try {
                 const res = await api.post('/api/refunds/check', creds.pid, creds.hash, { paymentIntentIds: intentIds });
-                setExistingRequests(res.existingRequests || []);
+                setRefundRequests(res.refundRequests || {});
             } catch (e) {
                 console.error("Failed to check existing refunds", e);
             }
@@ -227,7 +227,10 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
                 reason
             });
             toast.success("Refund request submitted successfully!");
-            setExistingRequests(prev => [...prev, offeringIntent]);
+            setRefundRequests((prev: Record<string, { approvalState: string, approverName?: string }>) => ({
+                ...prev,
+                [offeringIntent]: { approvalState: 'PENDING' }
+            }));
             setShowRefundModal(false);
         } catch (err: any) {
             console.error(err);
@@ -293,16 +296,37 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
                                         </td>
                                         <td>{off.offeringTime || '-'}</td>
                                         <td>
-                                            {off.offeringIntent && (
-                                                <Button
-                                                    variant={existingRequests.includes(off.offeringIntent) ? "secondary" : "warning"}
-                                                    size="sm"
-                                                    disabled={processing === off.offeringIntent || existingRequests.includes(off.offeringIntent)}
-                                                    onClick={() => initiateRefund(off)}
-                                                >
-                                                    {processing === off.offeringIntent ? 'Processing...' : (existingRequests.includes(off.offeringIntent) ? 'Request Pending' : 'Request Refund')}
-                                                </Button>
-                                            )}
+                                            {(() => {
+                                                const request = refundRequests[off.offeringIntent];
+                                                if (request) {
+                                                    if (request.approvalState === 'COMPLETE') {
+                                                        return <Badge bg="success">Refunded by {request.approverName || 'Admin'}</Badge>;
+                                                    }
+                                                    if (request.approvalState === 'DENY' || request.approvalState === 'DENIED') {
+                                                        return <Badge bg="danger">Denied by {request.approverName || 'Admin'}</Badge>;
+                                                    }
+                                                    if (request.approvalState === 'ERROR') {
+                                                        return <Badge bg="danger">Error</Badge>;
+                                                    }
+                                                    // Default or PENDING
+                                                    return <Button variant="secondary" size="sm" disabled>Request Pending</Button>;
+                                                }
+
+                                                if (off.offeringIntent) {
+                                                    return (
+                                                        <Button
+                                                            variant="warning"
+                                                            size="sm"
+                                                            disabled={processing === off.offeringIntent}
+                                                            onClick={() => initiateRefund(off)}
+                                                        >
+                                                            {processing === off.offeringIntent ? 'Processing...' : 'Request Refund'}
+                                                        </Button>
+                                                    );
+                                                }
+
+                                                return null;
+                                            })()}
                                         </td>
                                     </tr>
                                 ))}

@@ -737,8 +737,8 @@ async function dispatchRefunds(
           return res.status(400).json({ error: "paymentIntentIds must be an array" });
         }
 
-        const existing = await import('./refunds').then(m => m.checkRefundRequests(paymentIntentIds));
-        return res.status(200).json({ existingRequests: existing });
+        const refundRequests = await import('./refunds').then(m => m.checkRefundRequests(paymentIntentIds));
+        return res.status(200).json({ refundRequests });
 
       case 'list':
         if (req.method !== 'GET') {
