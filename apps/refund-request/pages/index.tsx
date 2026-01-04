@@ -26,7 +26,7 @@ export default function Home() {
     return (
         <div style={{ minHeight: '100vh', backgroundColor: '#212529', color: 'white' }}>
             <Head>
-                <title>Refund Manager</title>
+                <title>Refund Request</title>
                 <link rel="icon" href="/recycle.png" />
             </Head>
             <Navbar bg="dark" variant="dark" className="mb-4 border-bottom border-secondary">
