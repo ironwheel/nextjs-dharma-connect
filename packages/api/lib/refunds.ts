@@ -427,18 +427,44 @@ export async function processRefund(
         const studentPid = refundRequest.pid;
 
         try {
-            // Construct path: programs.<eventCode>.offeringHistory.<subEvent>.offeringRefund
-            // Need expression names for path parts to avoid reserved words bugs
-            const updateExpr = 'SET programs.#eventCode.offeringHistory.#subEvent.offeringRefund = :trueVal';
+            // First, fetch the student record to determine if this is an installment
+            // and which installment key it corresponds to.
+            const student = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, studentPid);
+
+            let updatePath = 'programs.#eventCode.offeringHistory.#subEvent.offeringRefund';
+            let expressionAttributeNames: any = {
+                '#eventCode': eventCode,
+                '#subEvent': subEvent
+            };
+
+            // Attempt to find specific installment
+            let foundInstallment = false;
+            if (student && student.programs && student.programs[eventCode] &&
+                student.programs[eventCode].offeringHistory &&
+                student.programs[eventCode].offeringHistory[subEvent]) {
+
+                const offData = student.programs[eventCode].offeringHistory[subEvent];
+                if (offData.installments) {
+                    for (const [key, instData] of Object.entries(offData.installments)) {
+                        if ((instData as any).offeringIntent === stripePaymentIntent) {
+                            // Found the specific installment!
+                            updatePath = `programs.#eventCode.offeringHistory.#subEvent.installments.#instKey.offeringRefund`;
+                            expressionAttributeNames['#instKey'] = key;
+                            foundInstallment = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            const updateExpr = `SET ${updatePath} = :trueVal`;
+
             await updateItem(
                 studentsTableCfg.tableName,
                 { [studentsTableCfg.pk]: studentPid },
                 updateExpr,
                 { ':trueVal': true },
-                {
-                    '#eventCode': eventCode,
-                    '#subEvent': subEvent
-                }
+                expressionAttributeNames
             );
         } catch (dbErr) {
             console.error('Failed to update student record offeringRefund:', dbErr);
