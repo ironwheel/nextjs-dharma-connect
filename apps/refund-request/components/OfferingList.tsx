@@ -304,7 +304,7 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
         }
 
         const { programId, eventId } = refundCandidate;
-        const itemsToProcess = [...selectedRefundItems];
+        const itemsToProcess = Array.from(selectedRefundItems);
 
         if (itemsToProcess.length === 0) {
             toast.error("Please select at least one item to refund.");
