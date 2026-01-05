@@ -71,7 +71,7 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({ show, onHide, refund, cre
                     )}
                     <p><strong>Student:</strong> {refund.studentName || refund.pid}</p>
                     <p><strong>Reason:</strong> {refund.reason}</p>
-                    <p><strong>Requested By:</strong> {refund.requesterName || refund.requestPid}</p>
+                    <p><strong>Requested By:</strong> {refund.requesterName || refund.requesterPid || 'Unknown'}</p>
                 </div>
 
                 <hr className="border-secondary" />
