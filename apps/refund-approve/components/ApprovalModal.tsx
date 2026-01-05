@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Button, Spinner, Form, Badge } from 'react-bootstrap';
-import { api } from 'sharedFrontend';
+import { api, getTableItemOrNull } from 'sharedFrontend';
 import { toast } from 'react-toastify';
 
 interface ApprovalModalProps {
@@ -19,6 +19,7 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({ show, onHide, refund, cre
     // Confirmation States
     const [showConfirmDeny, setShowConfirmDeny] = useState(false);
     const [showConfirmApprove, setShowConfirmApprove] = useState(false);
+    const [requesterName, setRequesterName] = useState<string | null>(null);
 
     useEffect(() => {
         if (show && refund && refund.stripePaymentIntent) {
@@ -37,6 +38,20 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({ show, onHide, refund, cre
             setShowConfirmApprove(false);
         }
     }, [show, refund, creds]);
+
+    // Fetch requester name
+    useEffect(() => {
+        if (show && refund && refund.requesterPid && creds) {
+            setRequesterName(null);
+            getTableItemOrNull('students', refund.requesterPid, creds.pid, creds.hash)
+                .then(user => {
+                    if (user) {
+                        setRequesterName(`${user.first} ${user.last}`);
+                    }
+                })
+                .catch(err => console.error("Failed to fetch requester details", err));
+        }
+    }, [show, refund?.requesterPid, creds]);
 
     const handleProcess = async (action: 'APPROVE' | 'DENY') => {
         setProcessing(true);
@@ -71,7 +86,7 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({ show, onHide, refund, cre
                     )}
                     <p><strong>Student:</strong> {refund.studentName || refund.pid}</p>
                     <p><strong>Reason:</strong> {refund.reason}</p>
-                    <p><strong>Requested By:</strong> {refund.requesterName || refund.requesterPid || 'Unknown'}</p>
+                    <p><strong>Requested By:</strong> {requesterName || refund.requesterName || refund.requesterPid || 'Unknown'}</p>
                 </div>
 
                 <hr className="border-secondary" />
