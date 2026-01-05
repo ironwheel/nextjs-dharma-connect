@@ -15,13 +15,19 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
     const [creds, setCreds] = useState<{ pid: string, hash: string } | null>(null);
 
     // Add state for modal
+    // Add state for modal
     const [showRefundModal, setShowRefundModal] = useState(false);
     const [refundCandidate, setRefundCandidate] = useState<any | null>(null);
-    const [stripeDetails, setStripeDetails] = useState<any | null>(null);
+    const [stripeDetailsMap, setStripeDetailsMap] = useState<Record<string, any>>({});
     const [loadingStripe, setLoadingStripe] = useState(false);
     const [reason, setReason] = useState('');
     const [refundRequests, setRefundRequests] = useState<Record<string, { approvalState: string, approverName?: string }>>({});
     const [userEventAccess, setUserEventAccess] = useState<string[]>([]);
+
+    // Refund Logic State
+    const [selectedRefundItems, setSelectedRefundItems] = useState<Set<string>>(new Set());
+    const [refundAmounts, setRefundAmounts] = useState<Record<string, number>>({});
+    const [customAmounts, setCustomAmounts] = useState<Record<string, boolean>>({}); // Track if user unchecked "Full Refund"
 
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
@@ -33,22 +39,50 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
     }, []);
 
     // 1. Initial Extraction (Raw Data)
+    // 1. Initial Extraction (Raw Data)
     const extractOfferings = () => {
         const offerings: any[] = [];
         if (!student.programs) return offerings;
 
-        const sixMonthsAgo = new Date();
-        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+        const lookbackDate = new Date();
+        lookbackDate.setMonth(lookbackDate.getMonth() - 12);
 
         Object.entries(student.programs).forEach(([progId, progData]: [string, any]) => {
             if (progData.offeringHistory) {
                 Object.entries(progData.offeringHistory).forEach(([eventId, offData]: [string, any]) => {
                     const offeringDate = offData.offeringTime ? new Date(offData.offeringTime) : null;
-                    if (offeringDate && offeringDate >= sixMonthsAgo) {
+
+                    if (offeringDate && offeringDate >= lookbackDate) {
+                        const refundItems: any[] = [];
+
+                        // Handle Installments Pattern
+                        if (offData.installments) {
+                            Object.entries(offData.installments).forEach(([key, instData]: [string, any]) => {
+                                if (instData.offeringIntent) {
+                                    refundItems.push({
+                                        offeringIntent: instData.offeringIntent,
+                                        offeringSKU: instData.offeringSKU,
+                                        offeringAmount: instData.offeringAmount,
+                                        label: key.charAt(0).toUpperCase() + key.slice(1) // e.g. "Balance"
+                                    });
+                                }
+                            });
+                        }
+                        // Handle standard pattern
+                        else if (offData.offeringIntent) {
+                            refundItems.push({
+                                offeringIntent: offData.offeringIntent,
+                                offeringSKU: offData.offeringSKU,
+                                offeringAmount: offData.offeringAmount, // Might be undefined
+                                label: 'Full Payment'
+                            });
+                        }
+
                         offerings.push({
                             programId: progId,
                             eventId: eventId,
-                            ...offData
+                            ...offData,
+                            refundItems // Attach normalized refund items
                         });
                     }
                 });
@@ -89,10 +123,13 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
         };
 
         const checkRefunds = async () => {
-            const intentIds = rawOfferings.map(o => o.offeringIntent).filter(Boolean);
-            if (intentIds.length === 0) return;
+            // Collect all unique intents from all refundItems
+            const allIntents = rawOfferings.flatMap(o => o.refundItems?.map((ri: any) => ri.offeringIntent) || []).filter(Boolean);
+            const uniqueIntents = Array.from(new Set(allIntents));
+
+            if (uniqueIntents.length === 0) return;
             try {
-                const res = await api.post('/api/refunds/check', creds.pid, creds.hash, { paymentIntentIds: intentIds });
+                const res = await api.post('/api/refunds/check', creds.pid, creds.hash, { paymentIntentIds: uniqueIntents });
                 setRefundRequests(res.refundRequests || {});
             } catch (e) {
                 console.error("Failed to check existing refunds", e);
@@ -175,21 +212,75 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
 
     const initiateRefund = async (offering: any) => {
         setRefundCandidate(offering);
-        setStripeDetails(null);
+        setStripeDetailsMap({});
         setLoadingStripe(true);
         setShowRefundModal(true);
         setReason(''); // Reset reason
 
-        // Fetch stripe details
-        if (offering.offeringIntent) {
+        // Default selection: all items not already requested
+        const initialUsage = new Set<string>();
+        const initialCustom = {};
+
+        const itemsToProcess = offering.refundItems || [];
+
+        // Filter out items that already have requests?
+        // User might want to see them but maybe disabled?
+        // For now select all.
+        itemsToProcess.forEach((item: any) => {
+            // Only select if not already requested?
+            if (!refundRequests[item.offeringIntent]) {
+                initialUsage.add(item.offeringIntent);
+            }
+        });
+        setSelectedRefundItems(initialUsage);
+        setCustomAmounts({});
+        setRefundAmounts({});
+
+        // Fetch stripe details for all items
+        if (itemsToProcess.length > 0) {
             try {
                 if (creds) {
-                    const data = await api.get(`/api/stripe/retrieve?id=${offering.offeringIntent}`, creds.pid, creds.hash);
-                    setStripeDetails(data);
+                    const promises = itemsToProcess.map(async (item: any) => {
+                        try {
+                            // Optimization: Check loop cache or multiple?
+                            // Just parallel fetch for now.
+                            const data = await api.get(`/api/stripe/retrieve?id=${item.offeringIntent}`, creds.pid, creds.hash);
+                            return { id: item.offeringIntent, data };
+                        } catch (e) {
+                            console.error(`Failed to fetch stripe for ${item.offeringIntent}`, e);
+                            return { id: item.offeringIntent, error: true };
+                        }
+                    });
+
+                    const results = await Promise.all(promises);
+                    const newMap: Record<string, any> = {};
+                    const newAmounts: Record<string, number> = {};
+
+                    results.forEach((res: any) => {
+                        if (!res.error) {
+                            newMap[res.id] = res.data;
+                            // Initialize amount to full amount (in cents)
+                            newAmounts[res.id] = res.data.amount;
+                        } else {
+                            // Fallback to local amount if available
+                            const localItem = itemsToProcess.find((i: any) => i.offeringIntent === res.id);
+                            if (localItem && localItem.offeringAmount) {
+                                newAmounts[res.id] = localItem.offeringAmount * 100; // Assuming offeringAmount is dollars?
+                                // Wait offeringAmount in data model is typically dollars? 
+                                // Example: "offeringAmount": 350. Stripe "amount": 35000.
+                                // We need to be careful with units.
+                                // Let's assume input should be in dollars for user convenience?
+                                // Or cents? Stripe uses cents.
+                                // Let's store cents in state, display dollars.
+                            }
+                        }
+                    });
+                    setStripeDetailsMap(newMap);
+                    setRefundAmounts(newAmounts);
                 }
             } catch (error: any) {
                 console.error("Failed to fetch stripe details", error);
-                toast.error(error.message || "Could not retrieve transaction details from Stripe.");
+                toast.error("Could not retrieve some transaction details.");
             } finally {
                 setLoadingStripe(false);
             }
@@ -200,7 +291,7 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
 
     const cancelRefund = () => {
         setRefundCandidate(null);
-        setStripeDetails(null);
+        setStripeDetailsMap({});
         setShowRefundModal(false);
     };
 
@@ -212,33 +303,65 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
             return;
         }
 
-        const { offeringIntent, programId, eventId } = refundCandidate;
+        const { programId, eventId } = refundCandidate;
+        const itemsToProcess = [...selectedRefundItems];
 
-        setProcessing(offeringIntent);
+        if (itemsToProcess.length === 0) {
+            toast.error("Please select at least one item to refund.");
+            return;
+        }
+
+        // Set processing for the main offering (composite) 
+        // Or should we track generic processing?
+        // Using "installments" ID if available, or first ID?
+        // The Action button uses off.offeringIntent.
+        setProcessing(refundCandidate.offeringIntent || itemsToProcess[0]);
 
         if (!creds) return;
 
-        try {
-            await api.post('/api/refunds/request', creds.pid, creds.hash, {
-                stripePaymentIntent: offeringIntent,
-                pid: student.id,
-                eventCode: programId,
-                subEvent: eventId,
-                reason
-            });
-            toast.success("Refund request submitted successfully!");
-            setRefundRequests((prev: Record<string, { approvalState: string, approverName?: string }>) => ({
-                ...prev,
-                [offeringIntent]: { approvalState: 'PENDING' }
-            }));
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const intentId of itemsToProcess) {
+            const amount = refundAmounts[intentId];
+
+            // Validate amount?
+            // If customAmounts[intentId] is true, we must have a valid amount.
+
+            try {
+                await api.post('/api/refunds/request', creds.pid, creds.hash, {
+                    stripePaymentIntent: intentId,
+                    pid: student.id,
+                    eventCode: programId,
+                    subEvent: eventId,
+                    reason,
+                    refundAmount: amount // Send the amount (in cents)
+                });
+                successCount++;
+
+                setRefundRequests((prev: Record<string, { approvalState: string, approverName?: string }>) => ({
+                    ...prev,
+                    [intentId]: { approvalState: 'PENDING' }
+                }));
+            } catch (err: any) {
+                console.error(`Failed to request refund for ${intentId}`, err);
+                failCount++;
+                // Continue with others?
+            }
+        }
+
+        if (successCount > 0) {
+            toast.success(`Submitted ${successCount} refund request(s).`);
+        }
+        if (failCount > 0) {
+            toast.error(`Failed to submit ${failCount} request(s).`);
+        }
+
+        setProcessing(null);
+        if (failCount === 0) {
             setShowRefundModal(false);
-        } catch (err: any) {
-            console.error(err);
-            toast.error(err.message || err.details?.error || "Request failed");
-        } finally {
-            setProcessing(null);
             setRefundCandidate(null);
-            setStripeDetails(null);
+            setStripeDetailsMap({});
         }
     };
 
@@ -336,7 +459,6 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
                 </Card.Body>
             </Card>
 
-            {/* Refund Confirmation Modal */}
             <Modal show={showRefundModal} onHide={cancelRefund} size="lg" centered>
                 <Modal.Header closeButton className="bg-dark text-white border-secondary">
                     <Modal.Title>Confirm Request</Modal.Title>
@@ -356,37 +478,89 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
                                         <Spinner animation="border" size="sm" className="me-2" />
                                         Fetching transaction details...
                                     </div>
-                                ) : stripeDetails ? (
-                                    <>
-                                        <hr className="border-secondary my-2" />
-                                        <div className="mb-1 text-uppercase small text-muted">Stripe Details</div>
-                                        <div className="mb-2">
-                                            <strong>Amount:</strong> <span className="text-success fs-5 me-2">${(stripeDetails.amount / 100).toFixed(2)}</span>
-                                            {stripeDetails.currency.toUpperCase()}
-                                        </div>
-                                        {stripeDetails.description && (
-                                            <div className="mb-2"><strong>Description:</strong> {stripeDetails.description}</div>
-                                        )}
-                                        {/* Card Details from expanded payment_method */}
-                                        {stripeDetails.payment_method && stripeDetails.payment_method.card && (
-                                            <div className="mb-2">
-                                                <strong>Card:</strong> {stripeDetails.payment_method.card.brand.toUpperCase()} •••• {stripeDetails.payment_method.card.last4}
-                                                <br />
-                                                <small className="text-muted">
-                                                    Expires: {stripeDetails.payment_method.card.exp_month}/{stripeDetails.payment_method.card.exp_year} | {stripeDetails.payment_method.card.country}
-                                                </small>
-                                            </div>
-                                        )}
-                                        {stripeDetails.status !== 'succeeded' && (
-                                            <div className="mb-2"><strong>Status:</strong> {stripeDetails.status}</div>
-                                        )}
-                                        <div className="mb-2 small text-muted">ID: {stripeDetails.id}</div>
-                                    </>
                                 ) : (
-                                    <div className="mb-2 text-warning">
-                                        <small>Could not fetch details. Using stored amount:</small><br />
-                                        <strong>Amount:</strong> <span className="text-success fs-5">${(refundCandidate?.offeringAmount / 100).toFixed(2)}</span> {refundCandidate?.offeringCurrency?.toUpperCase() || 'USD'}
-                                    </div>
+                                    <>
+                                        {(refundCandidate.refundItems || []).map((item: any) => {
+                                            const intentId = item.offeringIntent;
+                                            const details = stripeDetailsMap[intentId];
+                                            const isSelected = selectedRefundItems.has(intentId);
+                                            const isCustom = customAmounts[intentId];
+                                            const amount = refundAmounts[intentId] || 0;
+                                            const maxAmount = details ? details.amount : (item.offeringAmount ? item.offeringAmount * 100 : 0);
+                                            const isPending = refundRequests[intentId]?.approvalState === 'PENDING';
+                                            const isComplete = refundRequests[intentId]?.approvalState === 'COMPLETE';
+
+                                            // If already processed/pending, maybe show status instead of inputs?
+                                            if (isPending || isComplete) {
+                                                return (
+                                                    <div key={intentId} className="mb-3 p-2 border border-secondary rounded bg-dark">
+                                                        <div className="d-flex justify-content-between">
+                                                            <strong>{item.label}</strong>
+                                                            <Badge bg={isComplete ? "success" : "warning"}>
+                                                                {isComplete ? "Refunded" : "Request Pending"}
+                                                            </Badge>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
+
+                                            return (
+                                                <div key={intentId} className="mb-3 p-2 border border-secondary rounded">
+                                                    <div className="d-flex justify-content-between align-items-center mb-2">
+                                                        <Form.Check
+                                                            type="checkbox"
+                                                            label={<strong>{item.label}</strong>}
+                                                            checked={isSelected}
+                                                            onChange={(e) => {
+                                                                const newSet = new Set(selectedRefundItems);
+                                                                if (e.target.checked) newSet.add(intentId);
+                                                                else newSet.delete(intentId);
+                                                                setSelectedRefundItems(newSet);
+                                                            }}
+                                                        />
+                                                        {details && (
+                                                            <span className="text-muted small">
+                                                                Max: ${(maxAmount / 100).toFixed(2)} {details.currency.toUpperCase()}
+                                                            </span>
+                                                        )}
+                                                    </div>
+
+                                                    {isSelected && (
+                                                        <div className="ms-4">
+                                                            <Form.Check
+                                                                type="checkbox"
+                                                                label="Full Refund"
+                                                                checked={!isCustom}
+                                                                onChange={(e) => {
+                                                                    setCustomAmounts(prev => ({ ...prev, [intentId]: !e.target.checked }));
+                                                                    if (e.target.checked) {
+                                                                        // Reset to max
+                                                                        setRefundAmounts(prev => ({ ...prev, [intentId]: maxAmount }));
+                                                                    }
+                                                                }}
+                                                                className="mb-2 text-warning"
+                                                            />
+
+                                                            <Form.Control
+                                                                type="number"
+                                                                value={(amount / 100).toFixed(2)}
+                                                                onChange={(e) => {
+                                                                    const val = parseFloat(e.target.value);
+                                                                    if (!isNaN(val)) {
+                                                                        setRefundAmounts(prev => ({ ...prev, [intentId]: Math.round(val * 100) }));
+                                                                    }
+                                                                }}
+                                                                disabled={!isCustom}
+                                                                step="0.01"
+                                                                className="bg-dark text-white border-secondary"
+                                                            />
+                                                            {details?.description && <div className="small text-muted mt-1">{details.description}</div>}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </>
                                 )}
                             </div>
 
@@ -410,13 +584,14 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
                     <Button variant="secondary" onClick={cancelRefund}>
                         Cancel
                     </Button>
-                    <Button variant="warning" onClick={confirmRefund} disabled={loadingStripe || (!stripeDetails && !refundCandidate?.offeringAmount) || reason.length < 10}>
+                    <Button variant="warning" onClick={confirmRefund} disabled={loadingStripe || selectedRefundItems.size === 0 || reason.length < 10}>
                         Confirm Request
                     </Button>
                 </Modal.Footer>
-            </Modal >
+            </Modal>
         </>
     );
 };
+
 
 export default OfferingList;

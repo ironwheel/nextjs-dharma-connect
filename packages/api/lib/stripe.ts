@@ -138,7 +138,8 @@ export async function sendRefundEmail(
     pid: string,
     eventCode: string,
     subEvent: string | undefined,
-    paymentIntentId: string
+    paymentIntentId: string,
+    refundedAmount?: number // Optional amount in cents
 ) {
     if (!SMTP_USERNAME || !SMTP_PASSWORD || !AUTH_EMAIL_FROM || !AUTH_EMAIL_REPLY_TO) {
         // Log instead of throw to avoid crashing the refund process? 
@@ -164,7 +165,11 @@ export async function sendRefundEmail(
 
     // 3. Fetch Stripe Details
     const pi = await stripeRetrievePaymentIntent(paymentIntentId);
-    const amount = (pi.amount / 100).toFixed(2);
+
+    // Determine amount to display
+    const originalAmount = (pi.amount / 100).toFixed(2);
+    const refundedAmountFormatted = refundedAmount ? (refundedAmount / 100).toFixed(2) : originalAmount;
+
     const currency = pi.currency.toUpperCase();
     const chargeDate = new Date(pi.created * 1000).toLocaleDateString('en-US', {
         year: 'numeric', month: 'long', day: 'numeric'
@@ -204,9 +209,16 @@ export async function sendRefundEmail(
     const subEventText = subEvent && !['event', 'retreat'].includes(subEvent.toLowerCase()) ? `(${subEvent})` : '';
 
     const subject = `Refund of offering for ${eventName}`;
+
+    // Adjust text if partial?
+    // "Your offering ... has been refunded." -> "A refund of X for your offering ... has been issued."
+    // Keeping similar phrasing but using the refunded amount.
+    // "Your offering ... has been refunded." usually implies full.
+    // "A refund of <amount> <currency> for your offering ... has been processed."
+
     const body = `
         <p>Dear ${studentName},</p>
-        <p>Your offering for <strong>${eventName}</strong> ${subEventText} for <strong>${amount} ${currency}</strong> charged on ${chargeDate} on <strong>${cardType} ... ${last4}</strong> (${description}) has been refunded. It may take a few days for the money to reach your credit card account.</p>
+        <p>A refund of <strong>${refundedAmountFormatted} ${currency}</strong> for your offering for <strong>${eventName}</strong> ${subEventText} (charged on ${chargeDate} on <strong>${cardType} ... ${last4}</strong>) has been processed. It may take a few days for the money to reach your credit card account.</p>
         <p>With best wishes,<br/>The Offerings Support Team</p>
     `;
 
