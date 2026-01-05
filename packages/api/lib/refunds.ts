@@ -21,6 +21,7 @@ export interface RefundRequest {
     subEvent?: string;
     reason: string;
     requestPid: string;
+    refundAmount?: number; // Amount in cents
 }
 
 /**
@@ -70,13 +71,23 @@ export async function createRefundRequest(request: RefundRequest) {
     // 2. Value Check: Max $1000 in last 24h
     // Fetch current request amount
     const importStripe = await import('./stripe');
-    const currentPi = await importStripe.stripeRetrievePaymentIntent(request.stripePaymentIntent);
-    const currentAmount = currentPi.amount; // in cents
+    let currentAmount = 0;
+
+    if (request.refundAmount) {
+        currentAmount = request.refundAmount;
+    } else {
+        const currentPi = await importStripe.stripeRetrievePaymentIntent(request.stripePaymentIntent);
+        currentAmount = currentPi.amount; // in cents
+    }
 
     // Fetch amounts for recent requests
     let totalRecentAmount = 0;
     try {
         const amountPromises = recentRefunds.map(async (r: any) => {
+            // Use stored refundAmount if available (new records), else fetch PI (legacy)
+            if (r.refundAmount) {
+                return r.refundAmount;
+            }
             try {
                 const pi = await importStripe.stripeRetrievePaymentIntent(r.stripePaymentIntent);
                 return pi.amount;
@@ -100,18 +111,26 @@ export async function createRefundRequest(request: RefundRequest) {
     }
     // -------------------
 
-    const item = {
-        ...request,
-        itemType: 'REFUND', // Added for future GSI
+    // 3. Create Refund Request Record
+    // Use putOneWithCondition to ensure we don't overwrite an existing request
+    // Condition: attribute_not_exists(stripePaymentIntent)
+    const refundRecord = {
+        stripePaymentIntent: request.stripePaymentIntent,
+        pid: request.pid,
+        eventCode: request.eventCode,
+        subEvent: request.subEvent,
+        reason: request.reason,
+        requesterPid: request.requestPid,
         createdAt: timestamp,
         approvalState: 'PENDING',
-        approvalStateLastUpdated: timestamp
+        approvalStateLastUpdated: timestamp,
+        host: request.host,
+        itemType: 'REFUND', // For GSI
+        refundAmount: request.refundAmount // Store requested amount
     };
-
-    // 3. Create the record, ensuring uniqueness
     await putOneWithCondition(
         tableCfg.tableName,
-        item,
+        refundRecord,
         'attribute_not_exists(stripePaymentIntent)'
     );
 
@@ -127,8 +146,12 @@ export async function createRefundRequest(request: RefundRequest) {
 export async function checkRefundRequests(paymentIntentIds: string[]): Promise<Record<string, { approvalState: string, approverName?: string }>> {
     const tableCfg = tableGetConfig('refunds');
     const studentTableCfg = tableGetConfig('students');
+
+    // Deduplicate IDs to prevent DynamoDB BatchGetItem error
+    const uniqueIds = Array.from(new Set(paymentIntentIds));
+
     // Batch get supports up to 100 items
-    const items = await batchGetItems(tableCfg.tableName, tableCfg.pk, paymentIntentIds);
+    const items = await batchGetItems(tableCfg.tableName, tableCfg.pk, uniqueIds);
 
     const resultMap: Record<string, { approvalState: string, approverName?: string }> = {};
 
@@ -372,7 +395,9 @@ export async function processRefund(
         let refundResult;
         try {
             // A. Stripe Refund
-            refundResult = await stripeCreateRefund(stripePaymentIntent);
+            // Pass refundAmount if it exists in the request
+            const amountToRefund = refundRequest.refundAmount; // Can be undefined
+            refundResult = await stripeCreateRefund(stripePaymentIntent, amountToRefund);
         } catch (stripeErr: any) {
             console.error('Stripe refund failed:', stripeErr);
             // Update status to ERROR
@@ -422,7 +447,7 @@ export async function processRefund(
 
         // C. Send Email to Student
         try {
-            await sendRefundEmail(studentPid, eventCode, subEvent, stripePaymentIntent);
+            await sendRefundEmail(studentPid, eventCode, subEvent, stripePaymentIntent, refundResult?.amount);
         } catch (emailErr) {
             console.error('Failed to send student refund email:', emailErr);
             // Non-fatal

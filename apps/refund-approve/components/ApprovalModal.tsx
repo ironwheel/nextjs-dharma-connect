@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Button, Spinner, Form } from 'react-bootstrap';
+import { Modal, Button, Spinner, Form, Badge } from 'react-bootstrap';
 import { api } from 'sharedFrontend';
 import { toast } from 'react-toastify';
 
@@ -82,9 +82,22 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({ show, onHide, refund, cre
                 ) : stripeDetails ? (
                     <div className="p-3 border border-secondary rounded bg-secondary bg-opacity-10">
                         <div className="mb-2">
-                            <strong>Amount:</strong> <span className="text-success fs-5 me-2">${(stripeDetails.amount / 100).toFixed(2)}</span>
+                            <strong>Total Transaction Amount:</strong> <span className="text-white me-2">${(stripeDetails.amount / 100).toFixed(2)}</span>
                             {stripeDetails.currency.toUpperCase()}
                         </div>
+
+                        <hr className="border-secondary" />
+
+                        <div className="mb-2">
+                            <strong>Refund Requested:</strong> <span className="text-success fs-4 me-2">
+                                ${refund.refundAmount ? (refund.refundAmount / 100).toFixed(2) : (stripeDetails.amount / 100).toFixed(2)}
+                            </span>
+                            {stripeDetails.currency.toUpperCase()}
+                            {refund.refundAmount && refund.refundAmount < stripeDetails.amount && (
+                                <Badge bg="info" className="ms-2">Partial Refund</Badge>
+                            )}
+                        </div>
+
                         {stripeDetails.description && (
                             <div className="mb-2"><strong>Description:</strong> {stripeDetails.description}</div>
                         )}
