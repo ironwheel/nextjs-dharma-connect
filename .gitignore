@@ -89,3 +89,6 @@ utils/write-cache.sh
 
 # Optional Typescript cache
 *.tsbuildinfopackages/api/staging/
+
+# Proposed Guest Role Policy
+docs/proposed-guest-role-policy.md
