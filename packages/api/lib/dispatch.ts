@@ -725,6 +725,7 @@ async function dispatchRefunds(
   console.log("dispatchRefunds: x-vercel-oidc-token present:", !!oidcToken);
   if (!oidcToken) {
     console.log("dispatchRefunds: req.headers:", JSON.stringify(req.headers, null, 2));
+    throw new Error("Missing x-vercel-oidc-token header");
   }
 
   try {
