@@ -27,9 +27,7 @@ function getAwsRegion() {
   return process.env.AWS_REGION;
 }
 
-function getVercelOidcToken() {
-  return process.env.VERCEL_OIDC_TOKEN;
-}
+
 
 // Cache docClientInstance per roleArn (or 'default')
 const docClientInstances: Record<string, DynamoDBDocumentClient> = {};
@@ -58,8 +56,8 @@ async function getDocClient(roleArnOverride?: string, oidcToken?: string): Promi
 
   try {
     let baseCredentials;
-    // Prefer passed OIDC token, fallback to runtime helper (for non-request contexts if any)
-    const tokenToUse = oidcToken || getVercelOidcToken();
+    // Prefer passed OIDC token. If not present, we will fall back to default credentials (local dev)
+    const tokenToUse = oidcToken;
 
     if (tokenToUse) {
       const defaultRoleArn = process.env.DEFAULT_GUEST_ROLE_ARN;
@@ -115,11 +113,11 @@ async function getDocClient(roleArnOverride?: string, oidcToken?: string): Promi
     console.error("db-client: Failed to initialize DynamoDBDocumentClient:", error);
 
     // Enhanced error logging for diagnosis
-    const tokenToUse = oidcToken || getVercelOidcToken();
+    const tokenToUse = oidcToken;
     if (tokenToUse) {
       console.error("db-client: VERCEL_OIDC_TOKEN length:", tokenToUse.length);
     } else {
-      console.log("db-client: VERCEL_OIDC_TOKEN is missing.");
+      console.log("db-client: VERCEL_OIDC_TOKEN is missing (or not passed).");
     }
     console.log("db-client: AWS_REGION:", REGION);
 

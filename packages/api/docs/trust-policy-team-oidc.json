@@ -1,0 +1,42 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "Federated": "arn:aws:iam::011754621643:oidc-provider/oidc.vercel.com"
+            },
+            "Action": "sts:AssumeRoleWithWebIdentity",
+            "Condition": {
+                "StringEquals": {
+                    "oidc.vercel.com:aud": "vercel"
+                },
+                "StringLike": {
+                    "oidc.vercel.com:sub": "principal:team_Thib8LQbmLQIC0Vo2v9eT3L0:project:prj_Bv0h0Kzx86LSgn0AIFVA9jjEIgt6:*"
+                }
+            }
+        },
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "Federated": "arn:aws:iam::011754621643:oidc-provider/oidc.vercel.com/lineage-support"
+            },
+            "Action": "sts:AssumeRoleWithWebIdentity",
+            "Condition": {
+                "StringEquals": {
+                    "oidc.vercel.com/lineage-support:aud": "https://vercel.com/lineage-support"
+                },
+                "StringLike": {
+                    "oidc.vercel.com/lineage-support:sub": "owner:lineage-support:project:nextjs-dharma-connect-api:environment:production"
+                }
+            }
+        },
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::011754621643:root"
+            },
+            "Action": "sts:AssumeRole"
+        }
+    ]
+}

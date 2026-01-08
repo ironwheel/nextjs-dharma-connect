@@ -24,7 +24,7 @@ let sqsClientInstances: Record<string, SQSClient> = {};
 export async function getSqsClient(roleArnOverride?: string, oidcToken?: string): Promise<SQSClient> {
     const cacheKey = roleArnOverride || 'default';
     // Prefer passed OIDC token, fallback to runtime helper env var if needed
-    const tokenToUse = oidcToken || process.env.VERCEL_OIDC_TOKEN;
+    const tokenToUse = oidcToken;
 
     if (!REGION) {
         console.error("sqsClient: AWS_REGION environment variable is not set.");
