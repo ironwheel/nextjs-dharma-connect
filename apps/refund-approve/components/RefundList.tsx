@@ -150,7 +150,15 @@ const RefundList: React.FC = () => {
                                     r.approvalState === 'COMPLETE' ? 'success' :
                                         r.approvalState === 'DENIED' ? 'danger' :
                                             r.approvalState === 'ERROR' ? 'warning' : 'secondary'
-                                }>
+                                }
+                                    style={{
+                                        cursor: r.approvalState !== 'PENDING' ? 'pointer' : 'default'
+                                    }}
+                                    onClick={() => {
+                                        if (r.approvalState !== 'PENDING') {
+                                            handleAction(r);
+                                        }
+                                    }}>
                                     {r.approvalState === 'COMPLETE' ? 'Complete' :
                                         r.approvalState === 'DENIED' ? 'Denied' :
                                             r.approvalState === 'ERROR' ? 'Error' : r.approvalState || 'Unknown'}

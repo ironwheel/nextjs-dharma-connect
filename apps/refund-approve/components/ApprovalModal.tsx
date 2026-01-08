@@ -157,7 +157,7 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({ show, onHide, refund, cre
 
             </Modal.Body>
             <Modal.Footer className="bg-dark border-secondary">
-                {!showConfirmDeny && !showConfirmApprove && (
+                {!showConfirmDeny && !showConfirmApprove && refund.approvalState === 'PENDING' && (
                     <>
                         <Button variant="danger" onClick={() => setShowConfirmDeny(true)}>Deny</Button>
                         <Button variant="success" onClick={() => setShowConfirmApprove(true)}>Approve</Button>
