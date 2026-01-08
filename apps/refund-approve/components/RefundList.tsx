@@ -120,6 +120,7 @@ const RefundList: React.FC = () => {
                         <th>Event</th>
                         <th>SubEvent</th>
                         <th>Student</th>
+                        <th>Requested By</th>
                         <th>Amount</th>
                         <th>Status</th>
                         <th>Action</th>
@@ -137,8 +138,12 @@ const RefundList: React.FC = () => {
                                     : r.subEvent
                             }</td>
                             <td>{r.studentName || r.pid}</td>
+                            <td>{r.requesterName || r.requesterPid || r.requestPid || '-'}</td>
                             <td>
-                                {r.refundAmount ? `$${(r.refundAmount / 100).toFixed(2)}` : 'Full Payment'}
+                                {r.refundAmount
+                                    ? `$${(r.refundAmount / 100).toFixed(2)}`
+                                    : (r.isInstallment ? 'Installment Offering' : 'Full Offering')
+                                }
                             </td>
                             <td>
                                 <Badge bg={

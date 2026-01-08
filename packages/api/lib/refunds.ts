@@ -305,32 +305,91 @@ export async function listRefunds(limit: number = 20, offset: number = 0, oidcTo
         const eventsTableCfg = tableGetConfig('events');
 
         let studentName = r.pid;
-        let requesterName = r.requestPid;
+        let requesterName = r.requesterPid || r.requestPid;
         let approverName = r.approverPid;
         let eventName = r.eventCode;
+        let isInstallment = false;
 
         // Resolve Student
         if (r.pid) {
             try {
                 const s = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.pid, process.env.AUTH_ROLE_ARN, oidcToken);
-                if (s && s.first && s.last) studentName = `${s.first} ${s.last}`;
-            } catch (e) { console.error('Failed to resolve student', e); }
+                if (s) {
+                    if (s.first && s.last) {
+                        studentName = `${s.first} ${s.last}`;
+                    } else if (s.name) {
+                        studentName = s.name;
+                    } else if (s.email) {
+                        studentName = s.email;
+                    }
+
+                    // Check for Installment
+                    if (r.eventCode && r.subEvent &&
+                        s.programs && s.programs[r.eventCode] &&
+                        s.programs[r.eventCode].offeringHistory &&
+                        s.programs[r.eventCode].offeringHistory[r.subEvent] &&
+                        s.programs[r.eventCode].offeringHistory[r.subEvent].installments) {
+
+                        const installments = s.programs[r.eventCode].offeringHistory[r.subEvent].installments;
+                        // Iterate values to find matching intent
+                        for (const inst of Object.values(installments)) {
+                            if ((inst as any).offeringIntent === r.stripePaymentIntent) {
+                                isInstallment = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            } catch (e) { console.error(`Failed to resolve student ${r.pid}`, e); }
         }
 
         // Resolve Requester
-        if (r.requestPid) {
+        if (r.requesterPid) { // Changed from r.requestPid to match what might be in DB or fallback
+            // The createRefundRequest uses request.requestPid mapping to requesterPid in DB record?
+            // Let's check createRefundRequest: 
+            // 124:         requesterPid: request.requestPid,
+            // So in DB it is requesterPid.
+            // But in listRefunds (line 308) it was pulling r.requestPid which might be undefined if the DB field is requesterPid.
+            // Line 308: let requesterName = r.requestPid; -> This was likely the bug for empty requester name/ID.
+
+            // Update variable init too? No, I'll fix the property access here.
+
+            try {
+                const req = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.requesterPid, process.env.AUTH_ROLE_ARN, oidcToken);
+                if (req) {
+                    if (req.first && req.last) {
+                        requesterName = `${req.first} ${req.last}`;
+                    } else if (req.name) {
+                        requesterName = req.name;
+                    }
+                } else {
+                    requesterName = r.requesterPid;
+                }
+            } catch (e) {
+                console.error(`Failed to resolve requester ${r.requesterPid}`, e);
+                requesterName = r.requesterPid;
+            }
+        } else if (r.requestPid) {
+            // Fallback if field name was inconsistent in old records
             try {
                 const req = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.requestPid, process.env.AUTH_ROLE_ARN, oidcToken);
                 if (req && req.first && req.last) requesterName = `${req.first} ${req.last}`;
-            } catch (e) { console.error('Failed to resolve requester', e); }
+                else requesterName = r.requestPid;
+            } catch (e) { console.error('Failed to resolve requester (legacy)', e); }
         }
 
         // Resolve Approver
         if (r.approverPid) {
             try {
                 const app = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.approverPid, process.env.AUTH_ROLE_ARN, oidcToken);
-                if (app && app.first && app.last) approverName = `${app.first} ${app.last}`;
-            } catch (e) { console.error('Failed to resolve approver', e); }
+                if (app) {
+                    if (app.first && app.last) {
+                        approverName = `${app.first} ${app.last}`;
+                    } else if (app.name) {
+                        approverName = app.name;
+                    }
+                }
+            } catch (e) { console.error(`Failed to resolve approver ${r.approverPid}`, e); }
         }
 
         // Resolve Event
@@ -346,7 +405,8 @@ export async function listRefunds(limit: number = 20, offset: number = 0, oidcTo
             studentName,
             requesterName,
             approverName,
-            eventName
+            eventName,
+            isInstallment
         };
     }));
 
