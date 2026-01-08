@@ -42,7 +42,7 @@ const docClientInstances: Record<string, DynamoDBDocumentClient> = {};
  * @returns {Promise<DynamoDBDocumentClient>} The initialized document client.
  * @throws {Error} If essential AWS configuration environment variables are not set or client fails to initialize.
  */
-async function getDocClient(roleArnOverride?: string): Promise<DynamoDBDocumentClient> {
+async function getDocClient(roleArnOverride?: string, oidcToken?: string): Promise<DynamoDBDocumentClient> {
   const REGION = getAwsRegion();
   if (!REGION) {
     console.error("db-client: AWS_REGION environment variable is not set.");
@@ -58,13 +58,18 @@ async function getDocClient(roleArnOverride?: string): Promise<DynamoDBDocumentC
 
   try {
     let baseCredentials;
-    const oidcToken = getVercelOidcToken();
+    // Prefer passed OIDC token, fallback to runtime helper (for non-request contexts if any)
+    const tokenToUse = oidcToken || getVercelOidcToken();
 
-    if (oidcToken) {
-      console.log("db-client: VERCEL_OIDC_TOKEN detected. Using fromWebToken.");
+    if (tokenToUse) {
+      const defaultRoleArn = process.env.DEFAULT_GUEST_ROLE_ARN;
+      if (!defaultRoleArn) {
+        throw new Error("Server configuration error: Missing DEFAULT_GUEST_ROLE_ARN.");
+      }
+      console.log("db-client: VERCEL_OIDC_TOKEN detected (via " + (oidcToken ? "arg" : "env") + "). Using fromWebToken.");
       baseCredentials = fromWebToken({
-        roleArn: "arn:aws:iam::011754621643:role/DharmaConnectDefaultGuestRole", // Base Guest Role
-        webIdentityToken: oidcToken,
+        roleArn: defaultRoleArn,
+        webIdentityToken: tokenToUse,
         roleSessionName: "VercelSession"
       });
     }
@@ -110,9 +115,9 @@ async function getDocClient(roleArnOverride?: string): Promise<DynamoDBDocumentC
     console.error("db-client: Failed to initialize DynamoDBDocumentClient:", error);
 
     // Enhanced error logging for diagnosis
-    const oidcToken = getVercelOidcToken();
-    if (oidcToken) {
-      console.error("db-client: VERCEL_OIDC_TOKEN length:", oidcToken.length);
+    const tokenToUse = oidcToken || getVercelOidcToken();
+    if (tokenToUse) {
+      console.error("db-client: VERCEL_OIDC_TOKEN length:", tokenToUse.length);
     } else {
       console.log("db-client: VERCEL_OIDC_TOKEN is missing.");
     }
@@ -131,8 +136,8 @@ async function getDocClient(roleArnOverride?: string): Promise<DynamoDBDocumentC
  * @returns {Promise<any[]>} A promise that resolves to an array of items.
  * @throws {Error} When AWS operation fails or table cannot be scanned.
  */
-export async function listAll(tableName: string, roleArnOverride?: string) {
-  const client = await getDocClient(roleArnOverride);
+export async function listAll(tableName: string, roleArnOverride?: string, oidcToken?: string) {
+  const client = await getDocClient(roleArnOverride, oidcToken);
   const items: any[] = [];
   let ExclusiveStartKey;
   try {
@@ -165,8 +170,8 @@ export async function listAll(tableName: string, roleArnOverride?: string) {
  * @returns {Promise<number>} A promise that resolves to the total number of items.
  * @throws {Error} When AWS operation fails or table cannot be counted.
  */
-export async function countAll(tableName: string, roleArnOverride?: string) {
-  const client = await getDocClient(roleArnOverride);
+export async function countAll(tableName: string, roleArnOverride?: string, oidcToken?: string) {
+  const client = await getDocClient(roleArnOverride, oidcToken);
   let totalCount = 0;
   let ExclusiveStartKey;
   try {
@@ -212,9 +217,10 @@ export async function listAllChunked(
   limit?: number,
   roleArnOverride?: string,
   projectionExpression?: string,
-  expressionAttributeNames?: Record<string, string>
+  expressionAttributeNames?: Record<string, string>,
+  oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride);
+  const client = await getDocClient(roleArnOverride, oidcToken);
   const baseParams = {
     TableName: tableName,
     ...scanParams,
@@ -260,9 +266,10 @@ export async function listAllFiltered(
   tableName: string,
   fieldName: string,
   fieldValue: string,
-  roleArnOverride?: string
+  roleArnOverride?: string,
+  oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride);
+  const client = await getDocClient(roleArnOverride, oidcToken);
   const items: any[] = [];
   let ExclusiveStartKey;
   console.log("listAllFiltered: tableName:", tableName);
@@ -309,9 +316,10 @@ export async function getOne(
   tableName: string,
   pkName: string,
   id: string,
-  roleArnOverride?: string
+  roleArnOverride?: string,
+  oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride);
+  const client = await getDocClient(roleArnOverride, oidcToken);
   try {
     const { Item } = await client.send(
       new GetCommand({
@@ -348,9 +356,10 @@ export async function getOneWithSort(
   pkValue: string,
   skName: string,
   skValue: string,
-  roleArnOverride?: string
+  roleArnOverride?: string,
+  oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride);
+  const client = await getDocClient(roleArnOverride, oidcToken);
   try {
     const { Item } = await client.send(
       new GetCommand({
@@ -384,9 +393,10 @@ export async function getOneWithSort(
 export async function putOne(
   tableName: string,
   item: Record<string, any>,
-  roleArnOverride?: string
+  roleArnOverride?: string,
+  oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride);
+  const client = await getDocClient(roleArnOverride, oidcToken);
   try {
     await client.send(
       new PutCommand({
@@ -420,9 +430,10 @@ export async function putOneWithCondition(
   item: Record<string, any>,
   conditionExpression: string,
   expressionAttributeValues?: Record<string, any>,
-  roleArnOverride?: string
+  roleArnOverride?: string,
+  oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride);
+  const client = await getDocClient(roleArnOverride, oidcToken);
   try {
     const params: any = {
       TableName: tableName,
@@ -466,9 +477,10 @@ export async function updateItem(
   updateExpression: string,
   expressionAttributeValues: Record<string, any>,
   expressionAttributeNames?: Record<string, string>,
-  roleArnOverride?: string
+  roleArnOverride?: string,
+  oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride);
+  const client = await getDocClient(roleArnOverride, oidcToken);
   try {
     const updateParams: any = {
       TableName: tableName,
@@ -515,9 +527,10 @@ export async function updateItemWithCondition(
   updateExpression: string,
   expressionAttributeValues: Record<string, any>,
   expressionAttributeNames?: Record<string, string>,
-  roleArnOverride?: string
+  roleArnOverride?: string,
+  oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride);
+  const client = await getDocClient(roleArnOverride, oidcToken);
   try {
     const updateParams: any = {
       TableName: tableName,
@@ -565,9 +578,10 @@ export async function deleteOne(
   tableName: string,
   pkName: string,
   id: string,
-  roleArnOverride?: string
+  roleArnOverride?: string,
+  oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride);
+  const client = await getDocClient(roleArnOverride, oidcToken);
   try {
     await client.send(
       new DeleteCommand({
@@ -603,9 +617,10 @@ export async function deleteOneWithSort(
   pkValue: string,
   skName: string,
   skValue: string,
-  roleArnOverride?: string
+  roleArnOverride?: string,
+  oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride);
+  const client = await getDocClient(roleArnOverride, oidcToken);
   try {
     await client.send(
       new DeleteCommand({
@@ -640,9 +655,10 @@ export async function batchGetItems(
   tableName: string,
   pkName: string,
   ids: string[],
-  roleArnOverride?: string
+  roleArnOverride?: string,
+  oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride);
+  const client = await getDocClient(roleArnOverride, oidcToken);
   const items: any[] = [];
 
   // DynamoDB BatchGet has a limit of 100 items per request
@@ -699,9 +715,10 @@ async function listAllQueryBeginsWithSortKey(
   primaryKeyValue: string,
   sortKeyName: string,
   sortKeyValue: string,
-  roleArnOverride?: string
+  roleArnOverride?: string,
+  oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride);
+  const client = await getDocClient(roleArnOverride, oidcToken);
   const items: any[] = [];
   let ExclusiveStartKey;
 
@@ -751,7 +768,8 @@ export async function listAllQueryBeginsWithSortKeyMultiple(
   primaryKeyValues: string,
   sortKeyName: string,
   sortKeyValue: string,
-  roleArnOverride?: string
+  roleArnOverride?: string,
+  oidcToken?: string
 ) {
   const primaryKeyList = primaryKeyValues.split(',');
   const results: Record<string, any[]> = {};
@@ -770,7 +788,8 @@ export async function listAllQueryBeginsWithSortKeyMultiple(
         primaryKeyValue.trim(),
         sortKeyName,
         sortKeyValue,
-        roleArnOverride
+        roleArnOverride,
+        oidcToken
       );
       results[primaryKeyValue.trim()] = items;
       console.log("listAllQueryBeginsWithSortKeyMultiple: results:", results);

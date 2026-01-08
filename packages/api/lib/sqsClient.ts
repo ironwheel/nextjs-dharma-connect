@@ -7,6 +7,7 @@
 
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { STSClient, AssumeRoleCommand } from '@aws-sdk/client-sts';
+import { fromWebToken } from "@aws-sdk/credential-provider-web-identity";
 
 const REGION = process.env.AWS_REGION;
 let sqsClientInstances: Record<string, SQSClient> = {};
@@ -16,11 +17,14 @@ let sqsClientInstances: Record<string, SQSClient> = {};
  * @function getSqsClient
  * @description Initializes and returns a singleton SQSClient instance.
  * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} oidcToken - Optional OIDC token to use for credentials.
  * @returns {Promise<SQSClient>} The initialized SQS client.
  * @throws {Error} If essential AWS configuration environment variables are not set or client fails to initialize.
  */
-export async function getSqsClient(roleArnOverride?: string): Promise<SQSClient> {
+export async function getSqsClient(roleArnOverride?: string, oidcToken?: string): Promise<SQSClient> {
     const cacheKey = roleArnOverride || 'default';
+    // Prefer passed OIDC token, fallback to runtime helper env var if needed
+    const tokenToUse = oidcToken || process.env.VERCEL_OIDC_TOKEN;
 
     if (!REGION) {
         console.error("sqsClient: AWS_REGION environment variable is not set.");
@@ -33,9 +37,26 @@ export async function getSqsClient(roleArnOverride?: string): Promise<SQSClient>
 
     try {
         let sqsClient: SQSClient;
+        let baseCredentials;
+
+        if (tokenToUse) {
+            const defaultRoleArn = process.env.DEFAULT_GUEST_ROLE_ARN;
+            if (!defaultRoleArn) {
+                throw new Error("Server configuration error: Missing DEFAULT_GUEST_ROLE_ARN.");
+            }
+            console.log("sqsClient: VERCEL_OIDC_TOKEN detected (via " + (oidcToken ? "arg" : "env") + "). Using fromWebToken.");
+            baseCredentials = fromWebToken({
+                roleArn: defaultRoleArn,
+                webIdentityToken: tokenToUse,
+                roleSessionName: "VercelSession"
+            });
+        }
 
         if (roleArnOverride) {
-            const stsClient = new STSClient({ region: REGION });
+            const stsClient = new STSClient({
+                region: REGION,
+                credentials: baseCredentials // Use OIDC credentials if available, otherwise default chain
+            });
             const assumeRoleCommand = new AssumeRoleCommand({
                 RoleArn: roleArnOverride,
                 RoleSessionName: 'DharmaConnectSQSSession',
@@ -55,8 +76,11 @@ export async function getSqsClient(roleArnOverride?: string): Promise<SQSClient>
                 },
             });
         } else {
-            // Use default credential provider chain
-            sqsClient = new SQSClient({ region: REGION });
+            // Use default credential provider chain or explicit OIDC
+            sqsClient = new SQSClient({
+                region: REGION,
+                credentials: baseCredentials
+            });
         }
 
         sqsClientInstances[cacheKey] = sqsClient;
@@ -75,15 +99,22 @@ export async function getSqsClient(roleArnOverride?: string): Promise<SQSClient>
  * @param {string} stepName - The name of the step.
  * @param {string} action - The action to perform.
  * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} oidcToken - Optional OIDC token to use.
  * @returns {Promise<any>} A promise that resolves to the result of the send message command.
  * @throws {Error} If the SQS_QUEUE_URL environment variable is not set or the message fails to send.
  */
-export async function sendWorkOrderMessage(workOrderId: string, stepName: string, action: string, roleArnOverride?: string) {
+export async function sendWorkOrderMessage(
+    workOrderId: string,
+    stepName: string,
+    action: string,
+    roleArnOverride?: string,
+    oidcToken?: string
+) {
     const startTime = Date.now();
     console.log(`[SQS-SEND] Starting SQS message send for work order ${workOrderId}, step ${stepName}, action: ${action}`);
     console.log(`[SQS-SEND] Timestamp: ${new Date().toISOString()}`);
 
-    const sqsClient = await getSqsClient(roleArnOverride);
+    const sqsClient = await getSqsClient(roleArnOverride, oidcToken);
     const queueUrl = process.env.SQS_QUEUE_URL;
 
     if (!queueUrl) {

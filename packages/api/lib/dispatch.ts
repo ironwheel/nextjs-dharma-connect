@@ -64,10 +64,11 @@ async function dispatchTable(
       return item;
     };
     const maskList = (items: any[]) => items.map(mask);
+    const oidcToken = req.headers['x-vercel-oidc-token'] as string;
 
     // LIST
     if (req.method === 'GET' && !id && cfg.ops.includes('list')) {
-      const items = await listAll(tableName);
+      const items = await listAll(tableName, undefined, oidcToken);
       if (maskEmail) maskList(items);
       return res.status(200).json(items);
     }
@@ -75,7 +76,7 @@ async function dispatchTable(
     // LIST CHUNKED (POST method for chunked scanning)
     if (req.method === 'POST' && !id && req.body && req.body.limit) {
       const { limit, lastEvaluatedKey, scanParams = {}, projectionExpression, expressionAttributeNames } = req.body;
-      const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit, undefined, projectionExpression, expressionAttributeNames);
+      const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit, undefined, projectionExpression, expressionAttributeNames, oidcToken);
       if (maskEmail && result.items) maskList(result.items);
       return res.status(200).json(result);
     }
@@ -83,7 +84,7 @@ async function dispatchTable(
     // LIST CHUNKED (special case when id is "chunked")
     if (req.method === 'POST' && id === 'chunked' && req.body && req.body.limit) {
       const { limit, lastEvaluatedKey, scanParams = {}, projectionExpression, expressionAttributeNames } = req.body;
-      const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit, undefined, projectionExpression, expressionAttributeNames);
+      const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit, undefined, projectionExpression, expressionAttributeNames, oidcToken);
       if (maskEmail && result.items) maskList(result.items);
       return res.status(200).json(result);
     }
@@ -91,7 +92,7 @@ async function dispatchTable(
     // LIST FILTERED (POST method for filtered scanning)
     if (req.method === 'POST' && id === 'filtered' && req.body && req.body.filterFieldName && req.body.filterFieldValue) {
       const { filterFieldName, filterFieldValue } = req.body;
-      const items = await listAllFiltered(tableName, filterFieldName, filterFieldValue);
+      const items = await listAllFiltered(tableName, filterFieldName, filterFieldValue, undefined, oidcToken);
       if (maskEmail) maskList(items);
       return res.status(200).json({ items });
     }
@@ -99,8 +100,7 @@ async function dispatchTable(
     // QUERY (POST method for querying with begins_with on sort key)
     if (req.method === 'POST' && id === 'query' && req.body && req.body.primaryKeyValue && req.body.sortKeyValue && cfg.ops.includes('query')) {
       const { primaryKeyValue, sortKeyValue } = req.body;
-
-      const results = await listAllQueryBeginsWithSortKeyMultiple(tableName, cfg.pk, primaryKeyValue, cfg.sk, sortKeyValue);
+      const results = await listAllQueryBeginsWithSortKeyMultiple(tableName, cfg.pk, primaryKeyValue, cfg.sk, sortKeyValue, undefined, oidcToken);
       if (maskEmail) {
         Object.keys(results).forEach(key => {
           if (Array.isArray(results[key])) {
@@ -114,20 +114,20 @@ async function dispatchTable(
     // BATCH GET (POST method for batch retrieval by IDs)
     if (req.method === 'POST' && id === 'batch' && req.body && req.body.ids && Array.isArray(req.body.ids)) {
       const { ids } = req.body;
-      const items = await batchGetItems(tableName, cfg.pk, ids);
+      const items = await batchGetItems(tableName, cfg.pk, ids, undefined, oidcToken);
       if (maskEmail) maskList(items);
       return res.status(200).json(items);
     }
 
     // COUNT (POST method for counting items)
     if (req.method === 'POST' && id === 'count' && cfg.ops.includes('count')) {
-      const count = await countAll(tableName);
+      const count = await countAll(tableName, undefined, oidcToken);
       return res.status(200).json({ count });
     }
 
     // GET ONE
     if (req.method === 'GET' && id && cfg.ops.includes('get')) {
-      const item = await getOne(tableName, cfg.pk, id);
+      const item = await getOne(tableName, cfg.pk, id, undefined, oidcToken);
       if (maskEmail && item) mask(item);
       return item ? res.status(200).json(item) : res.status(404).json({ error: `${resource} ${id} not found` });
     }
@@ -138,7 +138,7 @@ async function dispatchTable(
         return res.status(400).json({ error: 'Missing or invalid request body for PUT' });
       }
       // Upsert the item using the provided body
-      await putOne(tableName, req.body);
+      await putOne(tableName, req.body, undefined, oidcToken);
       return res.status(200).json({ success: true });
     }
 
@@ -189,7 +189,7 @@ async function dispatchTable(
             throw error;
           }
         } else {
-          await updateItem(tableName, { [cfg.pk]: id }, updateExpression, {}, expressionAttributeNames);
+          await updateItem(tableName, { [cfg.pk]: id }, updateExpression, {}, expressionAttributeNames, undefined, oidcToken);
           return res.status(200).json({ success: true });
         }
       } else {
@@ -237,7 +237,7 @@ async function dispatchTable(
             throw error;
           }
         } else {
-          await updateItem(tableName, { [cfg.pk]: id }, updateExpression, expressionAttributeValues, expressionAttributeNames);
+          await updateItem(tableName, { [cfg.pk]: id }, updateExpression, expressionAttributeValues, expressionAttributeNames, undefined, oidcToken);
           return res.status(200).json({ success: true });
         }
       }
@@ -245,7 +245,7 @@ async function dispatchTable(
 
     // DELETE
     if (req.method === 'DELETE' && id && cfg.ops.includes('delete')) {
-      await deleteOne(tableName, cfg.pk, id);
+      await deleteOne(tableName, cfg.pk, id, undefined, oidcToken);
       return res.status(204).end();
     }
 
@@ -307,6 +307,7 @@ async function dispatchAuth(
   const host = req.headers['x-host'] as string;
   const deviceFingerprint = req.headers['x-device-fingerprint'] as string;
   const clientIp = req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || null;
+  const oidcToken = req.headers['x-vercel-oidc-token'] as string;
 
   // Validate required parameters
   if (!pid || !hash || !host || !deviceFingerprint) {
@@ -316,28 +317,28 @@ async function dispatchAuth(
   try {
     switch (action) {
       case 'verificationEmailSend':
-        const sendResult = await verificationEmailSend(pid, hash, host, deviceFingerprint, clientIp);
+        const sendResult = await verificationEmailSend(pid, hash, host, deviceFingerprint, clientIp, oidcToken);
         return res.status(200).json({ success: sendResult });
       case 'verificationEmailCallback':
         if (!id) {
           return res.status(400).json({ error: 'Verification token ID is required for callback' });
         }
-        const callbackResult = await verificationEmailCallback(pid, hash, host, deviceFingerprint, id);
+        const callbackResult = await verificationEmailCallback(pid, hash, host, deviceFingerprint, id, oidcToken);
         return res.status(200).json(callbackResult);
       case 'verificationCheck':
         const checkResult = await verificationCheck(pid, hash, host, deviceFingerprint);
         return res.status(200).json(checkResult);
       case 'getActionsProfiles':
-        const profileNames = await getActionsProfiles();
+        const profileNames = await getActionsProfiles(oidcToken);
         return res.status(200).json({ profileNames });
       case 'getAuthList':
-        const authRecords = await getAuthList();
+        const authRecords = await getAuthList(oidcToken);
         return res.status(200).json({ authRecords });
       case 'getViewsProfiles':
-        const viewsProfileNames = await getViewsProfiles();
+        const viewsProfileNames = await getViewsProfiles(oidcToken);
         return res.status(200).json({ viewsProfileNames });
       case 'getViews':
-        const viewsListData = await getViews(pid, host);
+        const viewsListData = await getViews(pid, host, oidcToken);
         console.log('dispatchAuth getViews: returning views data:', { views: viewsListData });
         return res.status(200).json({ views: viewsListData });
       case 'putAuthItem':
@@ -345,7 +346,7 @@ async function dispatchAuth(
         if (!authRecord || !authRecord.id) {
           return res.status(400).json({ error: 'Missing required parameters: authRecord with id' });
         }
-        await putAuthItem(authRecord.id, authRecord);
+        await putAuthItem(authRecord.id, authRecord, oidcToken);
         return res.status(200).json({ success: true });
       case 'linkEmailSend':
         const { linkHost, targetUserPid } = req.body;
@@ -355,7 +356,7 @@ async function dispatchAuth(
         if (!targetUserPid) {
           return res.status(400).json({ error: 'Missing required parameter: targetUserPid' });
         }
-        const linkEmailResult = await linkEmailSend(pid, hash, host, linkHost, targetUserPid);
+        const linkEmailResult = await linkEmailSend(pid, hash, host, linkHost, targetUserPid, oidcToken);
         return res.status(200).json({ success: linkEmailResult });
       case 'getConfigValue':
         const { key } = req.body;
@@ -463,6 +464,7 @@ async function dispatchSQS(
   const hash = req.headers['x-verification-hash'] as string;
   const host = req.headers['x-host'] as string;
   const deviceFingerprint = req.headers['x-device-fingerprint'] as string;
+  const oidcToken = req.headers['x-vercel-oidc-token'] as string;
 
   // Validate required parameters
   if (!pid || !hash || !host || !deviceFingerprint) {
@@ -488,7 +490,7 @@ async function dispatchSQS(
 
         try {
           // Send SQS message to email-agent
-          const result = await sendWorkOrderMessage(workOrderId, stepName, messageAction);
+          const result = await sendWorkOrderMessage(workOrderId, stepName, messageAction, undefined, oidcToken);
           console.log(`[SQS-SEND] SUCCESS: Sent ${messageAction} message for work order ${workOrderId}, step ${stepName}`);
           return res.status(200).json({ success: true, messageId: result.MessageId });
         } catch (error: any) {

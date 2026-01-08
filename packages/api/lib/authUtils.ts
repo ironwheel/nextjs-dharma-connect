@@ -151,9 +151,9 @@ export const DEFAULT_NO_PERMISSIONS = {
  * @returns {Promise<string>} The actions profile name for the host
  * @throws {Error} If host not found in app.actions table
  */
-async function getActionsProfileForHost(host: string): Promise<string> {
+async function getActionsProfileForHost(host: string, oidcToken?: string): Promise<string> {
     const tableCfg = tableGetConfig('app.actions');
-    const appActionData = await getOne(tableCfg.tableName, tableCfg.pk, host, process.env.AUTH_ROLE_ARN);
+    const appActionData = await getOne(tableCfg.tableName, tableCfg.pk, host, process.env.AUTH_ROLE_ARN, oidcToken);
     if (!appActionData) {
         throw new Error(`AUTH_APP_ACTIONS_NOT_FOUND: No actions profile found for host '${host}'`);
     }
@@ -168,16 +168,16 @@ async function getActionsProfileForHost(host: string): Promise<string> {
  * @returns {Promise<string[]>} Array of all actions the user has access to
  * @throws {Error} If any host's actions profile is not found
  */
-async function getAllActionsForUser(permittedHosts: string[]): Promise<string[]> {
+async function getAllActionsForUser(permittedHosts: string[], oidcToken?: string): Promise<string[]> {
     const allActions: string[] = [];
 
     for (const host of permittedHosts) {
         try {
-            const actionsProfile = await getActionsProfileForHost(host);
+            const actionsProfile = await getActionsProfileForHost(host, oidcToken);
 
             // Lookup the actions list for this profile
             const tableCfg = tableGetConfig('actions-profile');
-            const actionsListData = await getOne(tableCfg.tableName, tableCfg.pk, actionsProfile, process.env.AUTH_ROLE_ARN);
+            const actionsListData = await getOne(tableCfg.tableName, tableCfg.pk, actionsProfile, process.env.AUTH_ROLE_ARN, oidcToken);
 
             if (!actionsListData) {
                 throw new Error(`AUTH_ACTIONS_LIST_NOT_FOUND: No actions list found for profile '${actionsProfile}'`);
@@ -220,9 +220,9 @@ async function getAllActionsForUser(permittedHosts: string[]): Promise<string[]>
  * @returns {Promise<Array<object>>} A promise that resolves to an array of prompt items.
  * @throws {Error} If the database scan fails or table name is not configured.
  */
-async function getPromptsForAid(aid: string): Promise<Array<any>> {
+async function getPromptsForAid(aid: string, oidcToken?: string): Promise<Array<any>> {
     const tableCfg = tableGetConfig('prompts');
-    return await listAllFiltered(tableCfg.tableName, 'aid', aid);
+    return await listAllFiltered(tableCfg.tableName, 'aid', aid, undefined, oidcToken);
 }
 
 /**
@@ -233,9 +233,9 @@ async function getPromptsForAid(aid: string): Promise<Array<any>> {
  * @returns {Promise<object>} A promise that resolves to the participant's data (specific fields for auth).
  * @throws {Error} If participant not found or database query fails or table name not configured.
  */
-async function findParticipantForAuth(id: string): Promise<any> {
+async function findParticipantForAuth(id: string, oidcToken?: string): Promise<any> {
     const tableCfg = tableGetConfig('students');
-    return await getOne(tableCfg.tableName, tableCfg.pk, id);
+    return await getOne(tableCfg.tableName, tableCfg.pk, id, undefined, oidcToken);
 }
 
 /**
@@ -372,7 +372,7 @@ function generateAuthHash(guid: string, secretKeyHex: string): string {
  * @returns { Promise<string> } The access link in format: https://${domainName}/?pid=${studentId}&hash=${appSpecificHash}
  * @throws { Error } If the student doesn't have access to the domain or configuration is missing.
     */
-async function authGetLink(studentId: string, linkHost: string): Promise<string> {
+async function authGetLink(studentId: string, linkHost: string, oidcToken?: string): Promise<string> {
     // Parse and validate APP_ACCESS_JSON
     const accessJson = process.env.APP_ACCESS_JSON;
     if (!accessJson) {
@@ -394,10 +394,10 @@ async function authGetLink(studentId: string, linkHost: string): Promise<string>
 
     // Check if student has access to this domain
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, studentId, process.env.AUTH_ROLE_ARN);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, studentId, process.env.AUTH_ROLE_ARN, oidcToken);
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN, oidcToken);
         if (!data) {
             throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
         }
@@ -431,7 +431,7 @@ async function authGetLink(studentId: string, linkHost: string): Promise<string>
  * @returns {Promise<boolean>} Resolves with true on success.
  * @throws {Error} If configuration is missing or sending fails.
  */
-export async function linkEmailSend(pid: string, hash: string, host: string, linkHost: string, targetUserPid: string): Promise<boolean> {
+export async function linkEmailSend(pid: string, hash: string, host: string, linkHost: string, targetUserPid: string, oidcToken?: string): Promise<boolean> {
     // Validate inputs
     if (!pid || !hash || !host || !linkHost || !targetUserPid) {
         throw new Error('linkEmailSend(): Missing required parameters');
@@ -462,10 +462,10 @@ export async function linkEmailSend(pid: string, hash: string, host: string, lin
 
     // Does the originating user have access to the originating host
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN, oidcToken);
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN, oidcToken);
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
 
@@ -474,10 +474,10 @@ export async function linkEmailSend(pid: string, hash: string, host: string, lin
     if (!hasPermission) throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
 
     // Does the target user have access to the link host?
-    data = await getOne(tableCfg.tableName, tableCfg.pk, targetUserPid, process.env.AUTH_ROLE_ARN);
+    data = await getOne(tableCfg.tableName, tableCfg.pk, targetUserPid, process.env.AUTH_ROLE_ARN, oidcToken);
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN, oidcToken);
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
 
@@ -490,13 +490,13 @@ export async function linkEmailSend(pid: string, hash: string, host: string, lin
     if (!EMAIL_FROM || !EMAIL_REPLY_TO) throw new Error("Sender email addresses not configured for email sending.");
 
     // Find participant data internally for the target user
-    const participantData = await findParticipantForAuth(targetUserPid);
+    const participantData = await findParticipantForAuth(targetUserPid, oidcToken);
     if (!participantData) {
         throw new Error('AUTH_PID_NOT_FOUND');
     }
 
     const language = participantData.writtenLangPref || 'English';
-    const localPrompts = await getPromptsForAid('link');
+    const localPrompts = await getPromptsForAid('link', oidcToken);
     const getLinkPrompt = (promptId: string, lang: string): string => {
         const found = localPrompts.find((p: any) => p.prompt === `link-${promptId}` && p.language === lang);
         if (found) return found.text;
@@ -504,7 +504,7 @@ export async function linkEmailSend(pid: string, hash: string, host: string, lin
         return englishFallback ? englishFallback.text : `link-${promptId}-${lang}-unknown`;
     };
 
-    const link = await authGetLink(targetUserPid, linkHost);
+    const link = await authGetLink(targetUserPid, linkHost, oidcToken);
 
     let emailBody = getLinkPrompt('email', language)
         .replace(/\|\|name\|\|/g, `${participantData.first} ${participantData.last}`)
@@ -551,7 +551,7 @@ export async function linkEmailSend(pid: string, hash: string, host: string, lin
  * @returns {Promise<boolean>} Resolves with true on success.
  * @throws {Error} If configuration is missing or sending fails.
  */
-export async function verificationEmailSend(pid: string, hash: string, host: string, deviceFingerprint: string, clientIp: string | null): Promise<boolean> {
+export async function verificationEmailSend(pid: string, hash: string, host: string, deviceFingerprint: string, clientIp: string | null, oidcToken?: string): Promise<boolean> {
     // Validate inputs
     if (!pid || !hash || !host || !deviceFingerprint) {
         throw new Error('verificationEmailSend(): Missing required parameters');
@@ -583,10 +583,10 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
 
     // Does this user have access?
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN, oidcToken);
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN, oidcToken);
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
 
@@ -597,7 +597,7 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
 
     // Check for rate limiting - look for recent verification emails sent
     tableCfg = tableGetConfig('verification-tokens');
-    const recentEmails = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AUTH_ROLE_ARN);
+    const recentEmails = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AUTH_ROLE_ARN, oidcToken);
     const recentVerificationEmails = recentEmails.filter((token: any) =>
         token.pid === pid &&
         token.deviceFingerprint === deviceFingerprint &&
@@ -617,13 +617,13 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
     if (!EMAIL_FROM || !EMAIL_REPLY_TO) throw new Error("Sender email addresses not configured for email sending.");
 
     // Find participant data internally
-    const participantData = await findParticipantForAuth(pid);
+    const participantData = await findParticipantForAuth(pid, oidcToken);
     if (!participantData) {
         throw new Error('AUTH_PID_NOT_FOUND');
     }
 
     const language = participantData.writtenLangPref || 'English';
-    const localPrompts = await getPromptsForAid('confirm');
+    const localPrompts = await getPromptsForAid('confirm', oidcToken);
     const getConfirmPrompt = (promptId: string, lang: string): string => {
         const found = localPrompts.find((p: any) => p.prompt === `confirm-${promptId}` && p.language === lang);
         if (found) return found.text;
@@ -664,7 +664,7 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
             deviceFingerprint: deviceFingerprint,
             createdAt: Date.now(),
             ttl: Math.floor((Date.now() + VERIFICATION_DURATION_MS) / 1000) // TTL in seconds for DynamoDB
-        }, process.env.AUTH_ROLE_ARN);
+        }, process.env.AUTH_ROLE_ARN, oidcToken);
     } catch (e) {
         console.error("verificationEmailSend: Failed to create verification token:", e);
         throw new Error('AUTH_VERIFICATION_TOKEN_CREATION_FAILED');
@@ -715,7 +715,7 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
  * @returns {Promise<any>} Resolves with the authentication status and access token on success.
  * @throws {Error} If configuration is missing or verification fails.
  */
-export async function verificationEmailCallback(pid: string, hash: string, host: string, deviceFingerprint: string, verificationTokenId: string): Promise<any> {
+export async function verificationEmailCallback(pid: string, hash: string, host: string, deviceFingerprint: string, verificationTokenId: string, oidcToken?: string): Promise<any> {
 
     // Validate inputs
     if (!pid || !hash || !host || !deviceFingerprint) {
@@ -753,10 +753,10 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
 
     // Does this user have access?
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN, oidcToken);
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN, oidcToken);
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
 
@@ -766,11 +766,11 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
     if (!hasPermission) {
         throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
     }
-    const actionsProfile = await getActionsProfileForHost(host);
+    const actionsProfile = await getActionsProfileForHost(host, oidcToken);
 
     // Check for rate limiting - look for recent failed attempts
     tableCfg = tableGetConfig('verification-tokens');
-    const recentFailedAttempts = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AUTH_ROLE_ARN);
+    const recentFailedAttempts = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AUTH_ROLE_ARN, oidcToken);
     const failedAttempts = recentFailedAttempts.filter((token: any) =>
         token.pid === pid &&
         token.deviceFingerprint === deviceFingerprint &&
@@ -783,7 +783,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
     }
 
     // User has access to this host, so if we can find the verification record we're good to go
-    const verificationToken = await getOne(tableCfg.tableName, tableCfg.pk, verificationTokenId, process.env.AUTH_ROLE_ARN);
+    const verificationToken = await getOne(tableCfg.tableName, tableCfg.pk, verificationTokenId, process.env.AUTH_ROLE_ARN, oidcToken);
 
     if (!verificationToken) {
         // Record failed attempt
@@ -797,7 +797,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
                 failedAttempt: true,
                 createdAt: Date.now(),
                 ttl: Math.floor((Date.now() + (10 * 60 * 1000)) / 1000) // 10 minutes TTL in seconds for DynamoDB
-            }, process.env.AUTH_ROLE_ARN);
+            }, process.env.AUTH_ROLE_ARN, oidcToken);
         } catch (e) {
             console.error("verificationEmailCallback: Failed to record failed attempt:", e);
         }
@@ -816,7 +816,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
                 failedAttempt: true,
                 createdAt: Date.now(),
                 ttl: Math.floor((Date.now() + (10 * 60 * 1000)) / 1000) // 10 minutes TTL in seconds for DynamoDB
-            }, process.env.AUTH_ROLE_ARN);
+            }, process.env.AUTH_ROLE_ARN, oidcToken);
         } catch (e) {
             console.error("verificationEmailCallback: Failed to record failed attempt:", e);
         }
@@ -891,7 +891,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
             fingerprint: deviceFingerprint,
             createdAt: sessionCreatedAt,
             ttl: sessionTTL // TTL in seconds for DynamoDB
-        }, process.env.AUTH_ROLE_ARN);
+        }, process.env.AUTH_ROLE_ARN, oidcToken);
         console.log(`SESSION CREATION [pid=${pid}]: Successfully created session in DynamoDB`);
     } catch (e) {
         console.error("verificationEmailCallback: Failed to create session:", e);
@@ -1279,16 +1279,16 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
  * @returns {Promise<any>} Resolves with the config value
  * @throws {Error} If configuration is missing or host is not permitted
  */
-export async function getConfigValue(pid: string, host: string, key: string): Promise<any> {
+export async function getConfigValue(pid: string, host: string, key: string, oidcToken?: string): Promise<any> {
     console.log("getConfigValue: pid:", pid, "host:", host, "key:", key);
 
     // Does this user have access to the host they're trying to get the config value for?
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN, oidcToken);
     let usingDefaultData = false;
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN, oidcToken);
         usingDefaultData = true;
         if (!data) {
             throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
@@ -1309,7 +1309,7 @@ export async function getConfigValue(pid: string, host: string, key: string): Pr
 
     // Key not found in user's record and possibly in default record
     if (!usingDefaultData) {
-        const defaultData = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN);
+        const defaultData = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN, oidcToken);
         if (!defaultData) {
             throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
         }
@@ -1330,9 +1330,9 @@ export async function getConfigValue(pid: string, host: string, key: string): Pr
  * @returns {Promise<string[]>} Resolves with a list of profile names from the 'profile' field
  * @throws {Error} If the database scan fails or table name is not configured.
  */
-export async function getActionsProfiles(): Promise<string[]> {
+export async function getActionsProfiles(oidcToken?: string): Promise<string[]> {
     const tableCfg = tableGetConfig('actions-profile');
-    const allProfiles = await listAllFiltered(tableCfg.tableName, 'profile', 'profile', process.env.AUTH_ROLE_ARN);
+    const allProfiles = await listAllFiltered(tableCfg.tableName, 'profile', 'profile', process.env.AUTH_ROLE_ARN, oidcToken);
 
     // Extract just the profile names from the results
     const profileNames = allProfiles.map((item: any) => item.profile).filter(Boolean);
@@ -1347,9 +1347,9 @@ export async function getActionsProfiles(): Promise<string[]> {
  * @returns {Promise<any[]>} Resolves with a list of all auth records
  * @throws {Error} If the database scan fails or table name is not configured.
  */
-export async function getAuthList(): Promise<any[]> {
+export async function getAuthList(oidcToken?: string): Promise<any[]> {
     const tableCfg = tableGetConfig('auth');
-    const allAuthRecords = await listAll(tableCfg.tableName, process.env.AUTH_ROLE_ARN);
+    const allAuthRecords = await listAll(tableCfg.tableName, process.env.AUTH_ROLE_ARN, oidcToken);
 
     return allAuthRecords;
 }
@@ -1363,9 +1363,9 @@ export async function getAuthList(): Promise<any[]> {
  * @returns {Promise<void>} Resolves when the record is saved
  * @throws {Error} If the database operation fails or table name is not configured.
  */
-export async function putAuthItem(id: string, authRecord: any): Promise<void> {
+export async function putAuthItem(id: string, authRecord: any, oidcToken?: string): Promise<void> {
     const tableCfg = tableGetConfig('auth');
-    await putOne(tableCfg.tableName, authRecord, process.env.AUTH_ROLE_ARN);
+    await putOne(tableCfg.tableName, authRecord, process.env.AUTH_ROLE_ARN, oidcToken);
 }
 
 /**
@@ -1377,10 +1377,10 @@ export async function putAuthItem(id: string, authRecord: any): Promise<void> {
  * @returns {Promise<string[]>} Resolves with a list of views the participant has access to
  * @throws {Error} If configuration is missing
  */
-export async function getViews(pid: string, host: string): Promise<string[]> {
+export async function getViews(pid: string, host: string, oidcToken?: string): Promise<string[]> {
 
     // Get the views profile name from the config
-    const viewsProfile = await getConfigValue(pid, host, 'viewsProfile');
+    const viewsProfile = await getConfigValue(pid, host, 'viewsProfile', oidcToken);
     if (!viewsProfile) {
         throw new Error('AUTH_VIEWS_NO_PROFILE');
     }
@@ -1389,7 +1389,7 @@ export async function getViews(pid: string, host: string): Promise<string[]> {
     const tableCfg = tableGetConfig('views-profiles');
     console.log('getViews(): Got views-profiles table config:', tableCfg);
 
-    const viewsListData = await getOne(tableCfg.tableName, tableCfg.pk, viewsProfile as string, process.env.AUTH_ROLE_ARN);
+    const viewsListData = await getOne(tableCfg.tableName, tableCfg.pk, viewsProfile as string, process.env.AUTH_ROLE_ARN, oidcToken);
     console.log('getViews(): Retrieved views list data for profile:', viewsProfile, 'data:', viewsListData);
 
     if (!viewsListData) {
@@ -1408,13 +1408,13 @@ export async function getViews(pid: string, host: string): Promise<string[]> {
  * @returns {Promise<string[]>} Resolves with a list of profile names from the 'profile' field
  * @throws {Error} If the database scan fails or table name is not configured.
  */
-export async function getViewsProfiles(): Promise<string[]> {
+export async function getViewsProfiles(oidcToken?: string): Promise<string[]> {
     const tableCfg = tableGetConfig('views-profiles');
     console.log('getViewsProfiles: tableCfg:', tableCfg);
 
     try {
         // Try listAll first to see what's in the table
-        const allProfiles = await listAll(tableCfg.tableName, process.env.AUTH_ROLE_ARN);
+        const allProfiles = await listAll(tableCfg.tableName, process.env.AUTH_ROLE_ARN, oidcToken);
         console.log('getViewsProfiles: allProfiles from listAll:', allProfiles);
 
         // Extract just the profile names from the results
@@ -1427,13 +1427,13 @@ export async function getViewsProfiles(): Promise<string[]> {
 
         // Fallback to listAllFiltered if listAll fails
         try {
-            const filteredProfiles = await listAllFiltered(tableCfg.tableName, 'profile', 'profile', process.env.AUTH_ROLE_ARN);
+            const filteredProfiles = await listAllFiltered(tableCfg.tableName, 'profile', 'profile', process.env.AUTH_ROLE_ARN, oidcToken);
             console.log('getViewsProfiles: filteredProfiles from listAllFiltered:', filteredProfiles);
 
-            const profileNames = filteredProfiles.map((item: any) => item.profile).filter(Boolean);
-            console.log('getViewsProfiles: extracted profileNames from filtered:', profileNames);
+            const filteredProfileNames = filteredProfiles.map((item: any) => item.profile).filter(Boolean);
+            console.log('getViewsProfiles: extracted profileNames from filtered:', filteredProfileNames);
 
-            return profileNames;
+            return filteredProfileNames;
         } catch (filteredError) {
             console.error('getViewsProfiles: Error with listAllFiltered:', filteredError);
             return [];
