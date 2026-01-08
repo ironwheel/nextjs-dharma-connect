@@ -6,39 +6,60 @@
  */
 
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { fromCognitoIdentityPool } from '@aws-sdk/credential-provider-cognito-identity';
+import { STSClient, AssumeRoleCommand } from '@aws-sdk/client-sts';
 
 const REGION = process.env.AWS_REGION;
-const IDENTITY_POOL_ID = process.env.AWS_COGNITO_IDENTITY_POOL_ID;
 let sqsClientInstances: Record<string, SQSClient> = {};
 
 /**
+ * @async
  * @function getSqsClient
  * @description Initializes and returns a singleton SQSClient instance.
- * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
- * @returns {SQSClient} The initialized SQS client.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @returns {Promise<SQSClient>} The initialized SQS client.
  * @throws {Error} If essential AWS configuration environment variables are not set or client fails to initialize.
  */
-export function getSqsClient(identityPoolIdOverride?: string) {
-    const identityPoolId = identityPoolIdOverride || IDENTITY_POOL_ID;
+export async function getSqsClient(roleArnOverride?: string): Promise<SQSClient> {
+    const cacheKey = roleArnOverride || 'default';
+
     if (!REGION) {
         console.error("sqsClient: AWS_REGION environment variable is not set.");
         throw new Error("Server configuration error: Missing AWS Region.");
     }
-    if (!identityPoolId) {
-        console.error("sqsClient: AWS_COGNITO_IDENTITY_POOL_ID environment variable is not set.");
-        throw new Error("Server configuration error: Missing AWS Cognito Identity Pool ID.");
+
+    if (sqsClientInstances[cacheKey]) {
+        return sqsClientInstances[cacheKey];
     }
-    if (sqsClientInstances[identityPoolId]) {
-        return sqsClientInstances[identityPoolId];
-    }
+
     try {
-        const credentials = fromCognitoIdentityPool({
-            clientConfig: { region: REGION },
-            identityPoolId,
-        });
-        const sqsClient = new SQSClient({ region: REGION, credentials });
-        sqsClientInstances[identityPoolId] = sqsClient;
+        let sqsClient: SQSClient;
+
+        if (roleArnOverride) {
+            const stsClient = new STSClient({ region: REGION });
+            const assumeRoleCommand = new AssumeRoleCommand({
+                RoleArn: roleArnOverride,
+                RoleSessionName: 'DharmaConnectSQSSession',
+            });
+            const { Credentials } = await stsClient.send(assumeRoleCommand);
+
+            if (!Credentials || !Credentials.AccessKeyId || !Credentials.SecretAccessKey || !Credentials.SessionToken) {
+                throw new Error("Failed to obtain temporary credentials from STS.");
+            }
+
+            sqsClient = new SQSClient({
+                region: REGION,
+                credentials: {
+                    accessKeyId: Credentials.AccessKeyId,
+                    secretAccessKey: Credentials.SecretAccessKey,
+                    sessionToken: Credentials.SessionToken,
+                },
+            });
+        } else {
+            // Use default credential provider chain
+            sqsClient = new SQSClient({ region: REGION });
+        }
+
+        sqsClientInstances[cacheKey] = sqsClient;
         return sqsClient;
     } catch (error) {
         console.error("sqsClient: Failed to initialize SQSClient:", error);
@@ -53,16 +74,16 @@ export function getSqsClient(identityPoolIdOverride?: string) {
  * @param {string} workOrderId - The ID of the work order.
  * @param {string} stepName - The name of the step.
  * @param {string} action - The action to perform.
- * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
  * @returns {Promise<any>} A promise that resolves to the result of the send message command.
  * @throws {Error} If the SQS_QUEUE_URL environment variable is not set or the message fails to send.
  */
-export async function sendWorkOrderMessage(workOrderId: string, stepName: string, action: string, identityPoolIdOverride?: string) {
+export async function sendWorkOrderMessage(workOrderId: string, stepName: string, action: string, roleArnOverride?: string) {
     const startTime = Date.now();
     console.log(`[SQS-SEND] Starting SQS message send for work order ${workOrderId}, step ${stepName}, action: ${action}`);
     console.log(`[SQS-SEND] Timestamp: ${new Date().toISOString()}`);
 
-    const sqsClient = getSqsClient(identityPoolIdOverride);
+    const sqsClient = await getSqsClient(roleArnOverride);
     const queueUrl = process.env.SQS_QUEUE_URL;
 
     if (!queueUrl) {
