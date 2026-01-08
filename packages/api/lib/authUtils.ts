@@ -153,7 +153,7 @@ export const DEFAULT_NO_PERMISSIONS = {
  */
 async function getActionsProfileForHost(host: string): Promise<string> {
     const tableCfg = tableGetConfig('app.actions');
-    const appActionData = await getOne(tableCfg.tableName, tableCfg.pk, host, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    const appActionData = await getOne(tableCfg.tableName, tableCfg.pk, host, process.env.AUTH_ROLE_ARN);
     if (!appActionData) {
         throw new Error(`AUTH_APP_ACTIONS_NOT_FOUND: No actions profile found for host '${host}'`);
     }
@@ -177,7 +177,7 @@ async function getAllActionsForUser(permittedHosts: string[]): Promise<string[]>
 
             // Lookup the actions list for this profile
             const tableCfg = tableGetConfig('actions-profile');
-            const actionsListData = await getOne(tableCfg.tableName, tableCfg.pk, actionsProfile, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+            const actionsListData = await getOne(tableCfg.tableName, tableCfg.pk, actionsProfile, process.env.AUTH_ROLE_ARN);
 
             if (!actionsListData) {
                 throw new Error(`AUTH_ACTIONS_LIST_NOT_FOUND: No actions list found for profile '${actionsProfile}'`);
@@ -394,10 +394,10 @@ async function authGetLink(studentId: string, linkHost: string): Promise<string>
 
     // Check if student has access to this domain
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, studentId, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, studentId, process.env.AUTH_ROLE_ARN);
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN);
         if (!data) {
             throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
         }
@@ -462,10 +462,10 @@ export async function linkEmailSend(pid: string, hash: string, host: string, lin
 
     // Does the originating user have access to the originating host
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN);
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN);
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
 
@@ -474,10 +474,10 @@ export async function linkEmailSend(pid: string, hash: string, host: string, lin
     if (!hasPermission) throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
 
     // Does the target user have access to the link host?
-    data = await getOne(tableCfg.tableName, tableCfg.pk, targetUserPid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    data = await getOne(tableCfg.tableName, tableCfg.pk, targetUserPid, process.env.AUTH_ROLE_ARN);
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN);
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
 
@@ -583,10 +583,10 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
 
     // Does this user have access?
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN);
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN);
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
 
@@ -597,7 +597,7 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
 
     // Check for rate limiting - look for recent verification emails sent
     tableCfg = tableGetConfig('verification-tokens');
-    const recentEmails = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    const recentEmails = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AUTH_ROLE_ARN);
     const recentVerificationEmails = recentEmails.filter((token: any) =>
         token.pid === pid &&
         token.deviceFingerprint === deviceFingerprint &&
@@ -664,7 +664,7 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
             deviceFingerprint: deviceFingerprint,
             createdAt: Date.now(),
             ttl: Math.floor((Date.now() + VERIFICATION_DURATION_MS) / 1000) // TTL in seconds for DynamoDB
-        }, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        }, process.env.AUTH_ROLE_ARN);
     } catch (e) {
         console.error("verificationEmailSend: Failed to create verification token:", e);
         throw new Error('AUTH_VERIFICATION_TOKEN_CREATION_FAILED');
@@ -753,10 +753,10 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
 
     // Does this user have access?
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN);
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN);
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
 
@@ -770,7 +770,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
 
     // Check for rate limiting - look for recent failed attempts
     tableCfg = tableGetConfig('verification-tokens');
-    const recentFailedAttempts = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    const recentFailedAttempts = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AUTH_ROLE_ARN);
     const failedAttempts = recentFailedAttempts.filter((token: any) =>
         token.pid === pid &&
         token.deviceFingerprint === deviceFingerprint &&
@@ -783,7 +783,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
     }
 
     // User has access to this host, so if we can find the verification record we're good to go
-    const verificationToken = await getOne(tableCfg.tableName, tableCfg.pk, verificationTokenId, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    const verificationToken = await getOne(tableCfg.tableName, tableCfg.pk, verificationTokenId, process.env.AUTH_ROLE_ARN);
 
     if (!verificationToken) {
         // Record failed attempt
@@ -797,7 +797,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
                 failedAttempt: true,
                 createdAt: Date.now(),
                 ttl: Math.floor((Date.now() + (10 * 60 * 1000)) / 1000) // 10 minutes TTL in seconds for DynamoDB
-            }, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+            }, process.env.AUTH_ROLE_ARN);
         } catch (e) {
             console.error("verificationEmailCallback: Failed to record failed attempt:", e);
         }
@@ -816,7 +816,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
                 failedAttempt: true,
                 createdAt: Date.now(),
                 ttl: Math.floor((Date.now() + (10 * 60 * 1000)) / 1000) // 10 minutes TTL in seconds for DynamoDB
-            }, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+            }, process.env.AUTH_ROLE_ARN);
         } catch (e) {
             console.error("verificationEmailCallback: Failed to record failed attempt:", e);
         }
@@ -835,7 +835,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
                 failedAttempt: true,
                 createdAt: Date.now(),
                 ttl: Math.floor((Date.now() + (10 * 60 * 1000)) / 1000) // 10 minutes TTL in seconds for DynamoDB
-            }, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+            }, process.env.AUTH_ROLE_ARN);
         } catch (e) {
             console.error("verificationEmailCallback: Failed to record failed attempt:", e);
         }
@@ -855,7 +855,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
                 failedAttempt: true,
                 createdAt: Date.now(),
                 ttl: Math.floor((Date.now() + (10 * 60 * 1000)) / 1000) // 10 minutes TTL in seconds for DynamoDB
-            }, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+            }, process.env.AUTH_ROLE_ARN);
         } catch (e) {
             console.error("verificationEmailCallback: Failed to record failed attempt:", e);
         }
@@ -868,7 +868,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
     console.log("verificationEmailCallback: allActionsList:", allActionsList);
 
     // Delete the current verification record
-    await deleteOne(tableCfg.tableName, tableCfg.pk, verificationTokenId, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    await deleteOne(tableCfg.tableName, tableCfg.pk, verificationTokenId, process.env.AUTH_ROLE_ARN);
 
     // Verification token is valid, so we can create a session
     tableCfg = tableGetConfig('sessions');
@@ -891,7 +891,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
             fingerprint: deviceFingerprint,
             createdAt: sessionCreatedAt,
             ttl: sessionTTL // TTL in seconds for DynamoDB
-        }, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        }, process.env.AUTH_ROLE_ARN);
         console.log(`SESSION CREATION [pid=${pid}]: Successfully created session in DynamoDB`);
     } catch (e) {
         console.error("verificationEmailCallback: Failed to create session:", e);
@@ -921,7 +921,7 @@ export async function verificationCheck(pid: string, hash: string, host: string,
             verificationTokensCfg.tableName,
             'pid',
             pid,
-            process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID
+            process.env.AUTH_ROLE_ARN
         );
 
         const currentTimeSeconds = Math.floor(Date.now() / 1000);
@@ -978,10 +978,10 @@ export async function verificationCheck(pid: string, hash: string, host: string,
     }
 
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN);
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN);
         if (!data) {
             throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
         }
@@ -999,7 +999,7 @@ export async function verificationCheck(pid: string, hash: string, host: string,
         pid,
         tableCfg.sk,
         deviceFingerprint,
-        process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID
+        process.env.AUTH_ROLE_ARN
     );
 
     if (session) {
@@ -1014,7 +1014,7 @@ export async function verificationCheck(pid: string, hash: string, host: string,
                 pid,
                 tableCfg.sk,
                 deviceFingerprint,
-                process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID
+                process.env.AUTH_ROLE_ARN
             );
             return await determineVerificationStatusResponse();
         }
@@ -1144,11 +1144,11 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
 
     // Does this user have access?
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN);
 
     let permittedHosts: PermittedHost[] = [];
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN);
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
     permittedHosts = data['permitted-hosts'] || [];
@@ -1179,7 +1179,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
         console.log(`SECURITY CHECK [pid=${pid}]: NO TOKEN PROVIDED - treating as new login attempt`);
 
         // Look for any existing session for this user/device
-        const existingSession = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        const existingSession = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN);
 
         if (existingSession) {
             // Delete the existing session even if it's not expired
@@ -1188,7 +1188,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
             console.log(`  - Session was created: ${new Date(existingSession.createdAt || 0).toISOString()}`);
             console.log(`  - Session TTL: ${existingSession.ttl} (expires: ${new Date((existingSession.ttl || 0) * 1000).toISOString()})`);
 
-            await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+            await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN);
         } else {
             console.log(`SECURITY CHECK [pid=${pid}]: No existing session found - proceeding to verification flow`);
         }
@@ -1208,7 +1208,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
 
     // Check for existing session which is only created after email verification
     // Sessions records use a primary key of pid-deviceFingerprint
-    const session = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    const session = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN);
 
     // If session found, generate fresh access token if the session isn't expired
     if (session) {
@@ -1233,7 +1233,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
             console.log(`SESSION EXPIRED [pid=${pid}]: Deleting session and requiring re-verification`);
             console.log(`  - Reason: TTL (${sessionTTL}) <= current time (${currentTimeSeconds})`);
             console.log(`  - Session was valid for: ${sessionAgeSeconds} seconds instead of expected ${SESSION_DURATION_SECONDS || 'unknown'} seconds`);
-            await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, session.id, tableCfg.sk, deviceFingerprint, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+            await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, session.id, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN);
         } else {
             // Session is valid, generate fresh access token with all actions
             console.log(`SESSION VALID [pid=${pid}]: Refreshing access token`);
@@ -1284,11 +1284,11 @@ export async function getConfigValue(pid: string, host: string, key: string): Pr
 
     // Does this user have access to the host they're trying to get the config value for?
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN);
     let usingDefaultData = false;
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN);
         usingDefaultData = true;
         if (!data) {
             throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
@@ -1309,7 +1309,7 @@ export async function getConfigValue(pid: string, host: string, key: string): Pr
 
     // Key not found in user's record and possibly in default record
     if (!usingDefaultData) {
-        const defaultData = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        const defaultData = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN);
         if (!defaultData) {
             throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
         }
@@ -1332,7 +1332,7 @@ export async function getConfigValue(pid: string, host: string, key: string): Pr
  */
 export async function getActionsProfiles(): Promise<string[]> {
     const tableCfg = tableGetConfig('actions-profile');
-    const allProfiles = await listAllFiltered(tableCfg.tableName, 'profile', 'profile', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    const allProfiles = await listAllFiltered(tableCfg.tableName, 'profile', 'profile', process.env.AUTH_ROLE_ARN);
 
     // Extract just the profile names from the results
     const profileNames = allProfiles.map((item: any) => item.profile).filter(Boolean);
@@ -1349,7 +1349,7 @@ export async function getActionsProfiles(): Promise<string[]> {
  */
 export async function getAuthList(): Promise<any[]> {
     const tableCfg = tableGetConfig('auth');
-    const allAuthRecords = await listAll(tableCfg.tableName, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    const allAuthRecords = await listAll(tableCfg.tableName, process.env.AUTH_ROLE_ARN);
 
     return allAuthRecords;
 }
@@ -1365,7 +1365,7 @@ export async function getAuthList(): Promise<any[]> {
  */
 export async function putAuthItem(id: string, authRecord: any): Promise<void> {
     const tableCfg = tableGetConfig('auth');
-    await putOne(tableCfg.tableName, authRecord, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    await putOne(tableCfg.tableName, authRecord, process.env.AUTH_ROLE_ARN);
 }
 
 /**
@@ -1389,7 +1389,7 @@ export async function getViews(pid: string, host: string): Promise<string[]> {
     const tableCfg = tableGetConfig('views-profiles');
     console.log('getViews(): Got views-profiles table config:', tableCfg);
 
-    const viewsListData = await getOne(tableCfg.tableName, tableCfg.pk, viewsProfile as string, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+    const viewsListData = await getOne(tableCfg.tableName, tableCfg.pk, viewsProfile as string, process.env.AUTH_ROLE_ARN);
     console.log('getViews(): Retrieved views list data for profile:', viewsProfile, 'data:', viewsListData);
 
     if (!viewsListData) {
@@ -1414,7 +1414,7 @@ export async function getViewsProfiles(): Promise<string[]> {
 
     try {
         // Try listAll first to see what's in the table
-        const allProfiles = await listAll(tableCfg.tableName, process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+        const allProfiles = await listAll(tableCfg.tableName, process.env.AUTH_ROLE_ARN);
         console.log('getViewsProfiles: allProfiles from listAll:', allProfiles);
 
         // Extract just the profile names from the results
@@ -1427,7 +1427,7 @@ export async function getViewsProfiles(): Promise<string[]> {
 
         // Fallback to listAllFiltered if listAll fails
         try {
-            const filteredProfiles = await listAllFiltered(tableCfg.tableName, 'profile', 'profile', process.env.AWS_COGNITO_AUTH_IDENTITY_POOL_ID);
+            const filteredProfiles = await listAllFiltered(tableCfg.tableName, 'profile', 'profile', process.env.AUTH_ROLE_ARN);
             console.log('getViewsProfiles: filteredProfiles from listAllFiltered:', filteredProfiles);
 
             const profileNames = filteredProfiles.map((item: any) => item.profile).filter(Boolean);
