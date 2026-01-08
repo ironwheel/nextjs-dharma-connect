@@ -42,7 +42,7 @@ export async function createRefundRequest(request: RefundRequest) {
 
     // Using simple loop for serial execution, parallel Promise.all map could be faster if list is long
     for (const pid of approverPids) {
-        const student = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, pid, process.env.AUTH_ROLE_ARN, request.oidcToken);
+        const student = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, pid, undefined, request.oidcToken);
         if (student && student.email) {
             emails.push(student.email);
         }
@@ -217,7 +217,7 @@ async function sendRefundRequestNotifications(request: RefundRequest, emails: st
     const studentsTableCfg = tableGetConfig('students');
     let studentName = request.pid;
     try {
-        const student = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, request.pid, process.env.AUTH_ROLE_ARN, request.oidcToken);
+        const student = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, request.pid, undefined, request.oidcToken);
         if (student && student.first && student.last) {
             studentName = `${student.first} ${student.last}`;
         }
@@ -228,7 +228,7 @@ async function sendRefundRequestNotifications(request: RefundRequest, emails: st
     // Fetch Requester Name
     let requesterName = request.requestPid;
     try {
-        const requester = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, request.requestPid, process.env.AUTH_ROLE_ARN, request.oidcToken);
+        const requester = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, request.requestPid, undefined, request.oidcToken);
         if (requester && requester.first && requester.last) {
             requesterName = `${requester.first} ${requester.last}`;
         }
@@ -313,7 +313,7 @@ export async function listRefunds(limit: number = 20, offset: number = 0, oidcTo
         // Resolve Student
         if (r.pid) {
             try {
-                const s = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.pid, process.env.AUTH_ROLE_ARN, oidcToken);
+                const s = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.pid, undefined, oidcToken);
                 if (s) {
                     if (s.first && s.last) {
                         studentName = `${s.first} ${s.last}`;
@@ -355,7 +355,7 @@ export async function listRefunds(limit: number = 20, offset: number = 0, oidcTo
             // Update variable init too? No, I'll fix the property access here.
 
             try {
-                const req = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.requesterPid, process.env.AUTH_ROLE_ARN, oidcToken);
+                const req = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.requesterPid, undefined, oidcToken);
                 if (req) {
                     if (req.first && req.last) {
                         requesterName = `${req.first} ${req.last}`;
@@ -372,7 +372,7 @@ export async function listRefunds(limit: number = 20, offset: number = 0, oidcTo
         } else if (r.requestPid) {
             // Fallback if field name was inconsistent in old records
             try {
-                const req = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.requestPid, process.env.AUTH_ROLE_ARN, oidcToken);
+                const req = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.requestPid, undefined, oidcToken);
                 if (req && req.first && req.last) requesterName = `${req.first} ${req.last}`;
                 else requesterName = r.requestPid;
             } catch (e) { console.error('Failed to resolve requester (legacy)', e); }
@@ -381,7 +381,7 @@ export async function listRefunds(limit: number = 20, offset: number = 0, oidcTo
         // Resolve Approver
         if (r.approverPid) {
             try {
-                const app = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.approverPid, process.env.AUTH_ROLE_ARN, oidcToken);
+                const app = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.approverPid, undefined, oidcToken);
                 if (app) {
                     if (app.first && app.last) {
                         approverName = `${app.first} ${app.last}`;
@@ -496,7 +496,7 @@ export async function processRefund(
         try {
             // First, fetch the student record to determine if this is an installment
             // and which installment key it corresponds to.
-            const student = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, studentPid, process.env.AUTH_ROLE_ARN, oidcToken);
+            const student = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, studentPid, undefined, oidcToken);
 
             let updatePath = 'programs.#eventCode.offeringHistory.#subEvent.offeringRefund';
             let expressionAttributeNames: any = {
@@ -532,7 +532,7 @@ export async function processRefund(
                 updateExpr,
                 { ':trueVal': true },
                 expressionAttributeNames,
-                process.env.AUTH_ROLE_ARN,
+                undefined,
                 oidcToken
             );
         } catch (dbErr) {
