@@ -22,8 +22,14 @@ import { STSClient, AssumeRoleCommand } from '@aws-sdk/client-sts';
 import { fromWebToken } from "@aws-sdk/credential-provider-web-identity";
 
 // --- Configuration from Environment Variables ---
-// These will be read from the environment of the calling application (e.g., student-dashboard API route)
-const REGION = process.env.AWS_REGION; // No default, must be set
+
+function getAwsRegion() {
+  return process.env.AWS_REGION;
+}
+
+function getVercelOidcToken() {
+  return process.env.VERCEL_OIDC_TOKEN;
+}
 
 // Cache docClientInstance per roleArn (or 'default')
 const docClientInstances: Record<string, DynamoDBDocumentClient> = {};
@@ -37,6 +43,7 @@ const docClientInstances: Record<string, DynamoDBDocumentClient> = {};
  * @throws {Error} If essential AWS configuration environment variables are not set or client fails to initialize.
  */
 async function getDocClient(roleArnOverride?: string): Promise<DynamoDBDocumentClient> {
+  const REGION = getAwsRegion();
   if (!REGION) {
     console.error("db-client: AWS_REGION environment variable is not set.");
     throw new Error("Server configuration error: Missing AWS Region.");
@@ -50,11 +57,26 @@ async function getDocClient(roleArnOverride?: string): Promise<DynamoDBDocumentC
   }
 
   try {
+    let baseCredentials;
+    const oidcToken = getVercelOidcToken();
+
+    if (oidcToken) {
+      console.log("db-client: VERCEL_OIDC_TOKEN detected. Using fromWebToken.");
+      baseCredentials = fromWebToken({
+        roleArn: "arn:aws:iam::011754621643:role/DharmaConnectDefaultGuestRole", // Base Guest Role
+        webIdentityToken: oidcToken,
+        roleSessionName: "VercelSession"
+      });
+    }
+
     let ddbBaseClient: DynamoDBClient;
 
     if (roleArnOverride) {
-      // Assume the specified role
-      const stsClient = new STSClient({ region: REGION });
+      // Assume the specified role (Auth Role) using the Base Credentials (Guest Role)
+      const stsClient = new STSClient({
+        region: REGION,
+        credentials: baseCredentials // Use OIDC credentials if available, otherwise default chain
+      });
       const assumeRoleCommand = new AssumeRoleCommand({
         RoleArn: roleArnOverride,
         RoleSessionName: 'DharmaConnectSession',
@@ -74,20 +96,11 @@ async function getDocClient(roleArnOverride?: string): Promise<DynamoDBDocumentC
         },
       });
     } else {
-      // Use default credential provider chain (Vercel OIDC or local profile)
-      if (process.env.VERCEL_OIDC_TOKEN) {
-        console.log("db-client: VERCEL_OIDC_TOKEN detected. Using fromWebToken.");
-        ddbBaseClient = new DynamoDBClient({
-          region: REGION,
-          credentials: fromWebToken({
-            roleArn: "arn:aws:iam::011754621643:role/DharmaConnectDefaultGuestRole", // Hardcoded Base Role for now
-            webIdentityToken: process.env.VERCEL_OIDC_TOKEN,
-            roleSessionName: "VercelSession"
-          })
-        });
-      } else {
-        ddbBaseClient = new DynamoDBClient({ region: REGION });
-      }
+      // Use default credential provider chain or explicit OIDC
+      ddbBaseClient = new DynamoDBClient({
+        region: REGION,
+        credentials: baseCredentials
+      });
     }
 
     const docClientInstance = DynamoDBDocumentClient.from(ddbBaseClient);
@@ -97,8 +110,9 @@ async function getDocClient(roleArnOverride?: string): Promise<DynamoDBDocumentC
     console.error("db-client: Failed to initialize DynamoDBDocumentClient:", error);
 
     // Enhanced error logging for diagnosis
-    if (process.env.VERCEL_OIDC_TOKEN) {
-      console.error("db-client: VERCEL_OIDC_TOKEN length:", process.env.VERCEL_OIDC_TOKEN.length);
+    const oidcToken = getVercelOidcToken();
+    if (oidcToken) {
+      console.error("db-client: VERCEL_OIDC_TOKEN length:", oidcToken.length);
     } else {
       console.log("db-client: VERCEL_OIDC_TOKEN is missing.");
     }
