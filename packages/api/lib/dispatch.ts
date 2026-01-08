@@ -65,6 +65,10 @@ async function dispatchTable(
     };
     const maskList = (items: any[]) => items.map(mask);
     const oidcToken = req.headers['x-vercel-oidc-token'] as string;
+    console.log("dispatchTable: x-vercel-oidc-token present:", !!oidcToken);
+    if (!oidcToken) {
+      console.log("dispatchTable: req.headers:", JSON.stringify(req.headers, null, 2));
+    }
 
     // LIST
     if (req.method === 'GET' && !id && cfg.ops.includes('list')) {
@@ -308,6 +312,10 @@ async function dispatchAuth(
   const deviceFingerprint = req.headers['x-device-fingerprint'] as string;
   const clientIp = req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || null;
   const oidcToken = req.headers['x-vercel-oidc-token'] as string;
+  console.log("dispatchAuth: x-vercel-oidc-token present:", !!oidcToken);
+  if (!oidcToken) {
+    console.log("dispatchAuth: req.headers:", JSON.stringify(req.headers, null, 2));
+  }
 
   // Validate required parameters
   if (!pid || !hash || !host || !deviceFingerprint) {
@@ -465,6 +473,10 @@ async function dispatchSQS(
   const host = req.headers['x-host'] as string;
   const deviceFingerprint = req.headers['x-device-fingerprint'] as string;
   const oidcToken = req.headers['x-vercel-oidc-token'] as string;
+  console.log("dispatchSQS: x-vercel-oidc-token present:", !!oidcToken);
+  if (!oidcToken) {
+    console.log("dispatchSQS: req.headers:", JSON.stringify(req.headers, null, 2));
+  }
 
   // Validate required parameters
   if (!pid || !hash || !host || !deviceFingerprint) {

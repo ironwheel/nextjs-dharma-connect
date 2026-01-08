@@ -64,7 +64,7 @@ async function getDocClient(roleArnOverride?: string, oidcToken?: string): Promi
       if (!defaultRoleArn) {
         throw new Error("Server configuration error: Missing DEFAULT_GUEST_ROLE_ARN.");
       }
-      console.log("db-client: VERCEL_OIDC_TOKEN detected (via " + (oidcToken ? "arg" : "env") + "). Using fromWebToken.");
+      console.log("db-client: OIDC Token detected. Using fromWebToken.");
       baseCredentials = fromWebToken({
         roleArn: defaultRoleArn,
         webIdentityToken: tokenToUse,
@@ -115,9 +115,9 @@ async function getDocClient(roleArnOverride?: string, oidcToken?: string): Promi
     // Enhanced error logging for diagnosis
     const tokenToUse = oidcToken;
     if (tokenToUse) {
-      console.error("db-client: VERCEL_OIDC_TOKEN length:", tokenToUse.length);
+      console.error("db-client: OIDC Token length:", tokenToUse.length);
     } else {
-      console.log("db-client: VERCEL_OIDC_TOKEN is missing (or not passed).");
+      console.log("db-client: OIDC Token is missing (or not passed).");
     }
     console.log("db-client: AWS_REGION:", REGION);
 

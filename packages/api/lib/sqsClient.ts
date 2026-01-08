@@ -44,7 +44,7 @@ export async function getSqsClient(roleArnOverride?: string, oidcToken?: string)
             if (!defaultRoleArn) {
                 throw new Error("Server configuration error: Missing DEFAULT_GUEST_ROLE_ARN.");
             }
-            console.log("sqsClient: VERCEL_OIDC_TOKEN detected (via " + (oidcToken ? "arg" : "env") + "). Using fromWebToken.");
+            console.log("sqsClient: OIDC Token detected. Using fromWebToken.");
             baseCredentials = fromWebToken({
                 roleArn: defaultRoleArn,
                 webIdentityToken: tokenToUse,
