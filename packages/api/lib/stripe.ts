@@ -28,18 +28,18 @@ const AUTH_EMAIL_REPLY_TO = process.env.AUTH_EMAIL_REPLY_TO;
  * @description Fetches prompts relevant to a given application ID (aid) from DynamoDB.
  * Reuse of pattern from authUtils.ts
  */
-async function getPromptsForAid(aid: string): Promise<Array<any>> {
+async function getPromptsForAid(aid: string, oidcToken?: string): Promise<Array<any>> {
     const tableCfg = tableGetConfig('prompts');
-    return await listAllFiltered(tableCfg.tableName, 'aid', aid);
+    return await listAllFiltered(tableCfg.tableName, 'aid', aid, undefined, oidcToken);
 }
 
 /**
  * @function findParticipant
  * @description Finds a participant by ID in DynamoDB (using 'students' resource alias).
  */
-async function findParticipant(id: string): Promise<any> {
+async function findParticipant(id: string, oidcToken?: string): Promise<any> {
     const tableCfg = tableGetConfig('students');
-    return await getOne(tableCfg.tableName, tableCfg.pk, id);
+    return await getOne(tableCfg.tableName, tableCfg.pk, id, undefined, oidcToken);
 }
 
 // --- Stripe Operations ---
@@ -139,7 +139,8 @@ export async function sendRefundEmail(
     eventCode: string,
     subEvent: string | undefined,
     paymentIntentId: string,
-    refundedAmount?: number // Optional amount in cents
+    refundedAmount?: number, // Optional amount in cents
+    oidcToken?: string
 ) {
     if (!SMTP_USERNAME || !SMTP_PASSWORD || !AUTH_EMAIL_FROM || !AUTH_EMAIL_REPLY_TO) {
         // Log instead of throw to avoid crashing the refund process? 
@@ -149,7 +150,7 @@ export async function sendRefundEmail(
 
     // 1. Fetch Participant
     const studentsTableCfg = tableGetConfig('students');
-    const participant = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, pid);
+    const participant = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, pid, process.env.AUTH_ROLE_ARN, oidcToken);
     if (!participant || !participant.email) {
         throw new Error("Participant not found or has no email");
     }
@@ -159,7 +160,7 @@ export async function sendRefundEmail(
     const eventsTableCfg = tableGetConfig('events');
     let eventName = eventCode;
     try {
-        const event = await getOne(eventsTableCfg.tableName, eventsTableCfg.pk, eventCode);
+        const event = await getOne(eventsTableCfg.tableName, eventsTableCfg.pk, eventCode, undefined, oidcToken);
         if (event && event.name) eventName = event.name;
     } catch (e) { console.error("Failed to resolve event for email", e); }
 
