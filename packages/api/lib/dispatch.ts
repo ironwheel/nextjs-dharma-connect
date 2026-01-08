@@ -427,6 +427,10 @@ async function dispatchWebSocket(
         } else if (resource === 'work-orders') {
           url += '&tableType=work-orders';
         }
+        // Extract token from request headers for logging/auth context if needed
+        const oidcToken = req.headers['x-vercel-oidc-token'] as string;
+        console.log("dispatchWebSocket: x-vercel-oidc-token present:", !!oidcToken);
+
         console.log("DISPATCH: websocket url: ", url);
         // Return the WebSocket URL with token and tableType if needed
         return res.status(200).json({
@@ -618,6 +622,13 @@ async function dispatchStripe(
     if (!pid) return res.status(400).json({ error: 'Missing x-user-id header' });
   }
 
+  /* OIDC Token Extraction */
+  const oidcToken = req.headers['x-vercel-oidc-token'] as string;
+  console.log("dispatchStripe: x-vercel-oidc-token present:", !!oidcToken);
+  if (!oidcToken) {
+    console.log("dispatchStripe: req.headers:", JSON.stringify(req.headers, null, 2));
+  }
+
   try {
     switch (action) {
       case 'refund':
@@ -647,7 +658,7 @@ async function dispatchStripe(
         // 2. Send Email
         if (refund.status === 'succeeded' || refund.status === 'pending') {
           try {
-            await import('./stripe').then(m => m.sendRefundEmail(studentId, aid || 'refund-manager', undefined, offeringIntent));
+            await import('./stripe').then(m => m.sendRefundEmail(studentId, aid || 'refund-manager', undefined, offeringIntent, undefined, oidcToken));
           } catch (emailErr) {
             console.error("[STRIPE] Refund succeeded but email failed:", emailErr);
             // Don't fail the response, just log
@@ -709,6 +720,13 @@ async function dispatchRefunds(
     if (!pid) return res.status(400).json({ error: 'Missing x-user-id header' });
   }
 
+  /* OIDC Token Extraction */
+  const oidcToken = req.headers['x-vercel-oidc-token'] as string;
+  console.log("dispatchRefunds: x-vercel-oidc-token present:", !!oidcToken);
+  if (!oidcToken) {
+    console.log("dispatchRefunds: req.headers:", JSON.stringify(req.headers, null, 2));
+  }
+
   try {
     switch (action) {
       case 'request':
@@ -735,7 +753,8 @@ async function dispatchRefunds(
           subEvent,
           reason,
           requestPid: pid, // Data from header
-          host // Data from header
+          host, // Data from header
+          oidcToken
         }));
 
         return res.status(200).json({ success: true });
@@ -751,7 +770,7 @@ async function dispatchRefunds(
           return res.status(400).json({ error: "paymentIntentIds must be an array" });
         }
 
-        const refundRequests = await import('./refunds').then(m => m.checkRefundRequests(paymentIntentIds));
+        const refundRequests = await import('./refunds').then(m => m.checkRefundRequests(paymentIntentIds, oidcToken));
         return res.status(200).json({ refundRequests });
 
       case 'list':
@@ -764,7 +783,7 @@ async function dispatchRefunds(
         const limitParam = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
         const offsetParam = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
 
-        const refundsData = await import('./refunds').then(m => m.listRefunds(limitParam, offsetParam));
+        const refundsData = await import('./refunds').then(m => m.listRefunds(limitParam, offsetParam, oidcToken));
         return res.status(200).json(refundsData);
 
       case 'process':
@@ -782,7 +801,7 @@ async function dispatchRefunds(
           return res.status(400).json({ error: "Invalid action" });
         }
 
-        const result = await import('./refunds').then(m => m.processRefund(processIntent, processAction, pid, host));
+        const result = await import('./refunds').then(m => m.processRefund(processIntent, processAction, pid, host, oidcToken));
         return res.status(200).json(result);
 
       default:

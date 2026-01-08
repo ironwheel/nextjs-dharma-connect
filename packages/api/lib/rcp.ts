@@ -18,17 +18,17 @@ if (!KM_RCP_API_KEY) {
  * @function findParticipant
  * @description Finds a participant by ID in DynamoDB.
  */
-async function findParticipant(id: string): Promise<any> {
+async function findParticipant(id: string, oidcToken?: string): Promise<any> {
     const tableCfg = tableGetConfig('students');
-    return await getOne(tableCfg.tableName, tableCfg.pk, id);
+    return await getOne(tableCfg.tableName, tableCfg.pk, id, process.env.AUTH_ROLE_ARN, oidcToken);
 }
 
-export async function rcpFind(pid: string) {
+export async function rcpFind(pid: string, oidcToken?: string) {
     if (!pid) throw new Error("Missing pid");
 
     let clientData;
     try {
-        clientData = await findParticipant(pid);
+        clientData = await findParticipant(pid, oidcToken);
     } catch (err: any) {
         throw new Error(`Participant not found: ${err.message}`);
     }
@@ -58,12 +58,12 @@ export async function rcpFind(pid: string) {
     }
 }
 
-export async function rcpCreateMembership(pid: string, cid: string, level: string) {
+export async function rcpCreateMembership(pid: string, cid: string, level: string, oidcToken?: string) {
     if (!pid || !cid || !level) throw new Error("Missing required parameters (pid, cid, level)");
 
     // Verify participant exists
     try {
-        const exists = await findParticipant(pid);
+        const exists = await findParticipant(pid, oidcToken);
         if (!exists) throw new Error("Participant not found in DB");
     } catch (err: any) {
         throw new Error(`Participant check failed: ${err.message}`);
