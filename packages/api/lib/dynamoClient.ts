@@ -18,45 +18,67 @@ import {
   BatchGetCommand,
   QueryCommand
 } from '@aws-sdk/lib-dynamodb';
-import { fromCognitoIdentityPool } from '@aws-sdk/credential-provider-cognito-identity';
+import { STSClient, AssumeRoleCommand } from '@aws-sdk/client-sts';
 
 // --- Configuration from Environment Variables ---
 // These will be read from the environment of the calling application (e.g., student-dashboard API route)
 const REGION = process.env.AWS_REGION; // No default, must be set
-const IDENTITY_POOL_ID = process.env.AWS_COGNITO_IDENTITY_POOL_ID; // No default, must be set
 
-// Cache docClientInstance per identityPoolId
+// Cache docClientInstance per roleArn (or 'default')
 const docClientInstances: Record<string, DynamoDBDocumentClient> = {};
 
 /**
+ * @async
  * @function getDocClient
  * @description Initializes and returns a singleton DynamoDBDocumentClient instance.
- * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable
- * @returns {DynamoDBDocumentClient} The initialized document client.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @returns {Promise<DynamoDBDocumentClient>} The initialized document client.
  * @throws {Error} If essential AWS configuration environment variables are not set or client fails to initialize.
  */
-function getDocClient(identityPoolIdOverride?: string) {
-  const identityPoolId = identityPoolIdOverride || IDENTITY_POOL_ID;
+async function getDocClient(roleArnOverride?: string): Promise<DynamoDBDocumentClient> {
   if (!REGION) {
     console.error("db-client: AWS_REGION environment variable is not set.");
     throw new Error("Server configuration error: Missing AWS Region.");
   }
-  if (!identityPoolId) {
-    console.error("db-client: AWS_COGNITO_IDENTITY_POOL_ID environment variable is not set.");
-    throw new Error("Server configuration error: Missing AWS Cognito Identity Pool ID.");
-  }
+
+  const cacheKey = roleArnOverride || 'default';
+
   // Return cached instance if exists
-  if (docClientInstances[identityPoolId]) {
-    return docClientInstances[identityPoolId];
+  if (docClientInstances[cacheKey]) {
+    return docClientInstances[cacheKey];
   }
+
   try {
-    const credentials = fromCognitoIdentityPool({
-      clientConfig: { region: REGION },
-      identityPoolId,
-    });
-    const ddbBaseClient = new DynamoDBClient({ region: REGION, credentials });
+    let ddbBaseClient: DynamoDBClient;
+
+    if (roleArnOverride) {
+      // Assume the specified role
+      const stsClient = new STSClient({ region: REGION });
+      const assumeRoleCommand = new AssumeRoleCommand({
+        RoleArn: roleArnOverride,
+        RoleSessionName: 'DharmaConnectSession',
+      });
+      const { Credentials } = await stsClient.send(assumeRoleCommand);
+
+      if (!Credentials || !Credentials.AccessKeyId || !Credentials.SecretAccessKey || !Credentials.SessionToken) {
+        throw new Error("Failed to obtain temporary credentials from STS.");
+      }
+
+      ddbBaseClient = new DynamoDBClient({
+        region: REGION,
+        credentials: {
+          accessKeyId: Credentials.AccessKeyId,
+          secretAccessKey: Credentials.SecretAccessKey,
+          sessionToken: Credentials.SessionToken,
+        },
+      });
+    } else {
+      // Use default credential provider chain (Vercel OIDC or local profile)
+      ddbBaseClient = new DynamoDBClient({ region: REGION });
+    }
+
     const docClientInstance = DynamoDBDocumentClient.from(ddbBaseClient);
-    docClientInstances[identityPoolId] = docClientInstance;
+    docClientInstances[cacheKey] = docClientInstance;
     return docClientInstance;
   } catch (error) {
     console.error("db-client: Failed to initialize DynamoDBDocumentClient:", error);
@@ -69,12 +91,12 @@ function getDocClient(identityPoolIdOverride?: string) {
  * @function listAll
  * @description Scan entire table and return all items.
  * @param {string} tableName - The name of the table to scan.
- * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
  * @returns {Promise<any[]>} A promise that resolves to an array of items.
  * @throws {Error} When AWS operation fails or table cannot be scanned.
  */
-export async function listAll(tableName: string, identityPoolIdOverride?: string) {
-  const client = getDocClient(identityPoolIdOverride);
+export async function listAll(tableName: string, roleArnOverride?: string) {
+  const client = await getDocClient(roleArnOverride);
   const items: any[] = [];
   let ExclusiveStartKey;
   try {
@@ -103,12 +125,12 @@ export async function listAll(tableName: string, identityPoolIdOverride?: string
  * @function countAll
  * @description Count all items in a table efficiently without loading them into memory.
  * @param {string} tableName - The name of the table to count.
- * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
  * @returns {Promise<number>} A promise that resolves to the total number of items.
  * @throws {Error} When AWS operation fails or table cannot be counted.
  */
-export async function countAll(tableName: string, identityPoolIdOverride?: string) {
-  const client = getDocClient(identityPoolIdOverride);
+export async function countAll(tableName: string, roleArnOverride?: string) {
+  const client = await getDocClient(roleArnOverride);
   let totalCount = 0;
   let ExclusiveStartKey;
   try {
@@ -141,7 +163,7 @@ export async function countAll(tableName: string, identityPoolIdOverride?: strin
  * @param {Record<string, any>} scanParams - Optional scan parameters.
  * @param {Record<string, any>} lastEvaluatedKey - Optional last evaluated key for pagination.
  * @param {number} limit - Optional limit for the number of items to return.
- * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
  * @param {string} projectionExpression - Optional projection expression.
  * @param {Record<string, string>} expressionAttributeNames - Optional expression attribute names.
  * @returns {Promise<any>} A promise that resolves to an object containing the items and the last evaluated key.
@@ -152,11 +174,11 @@ export async function listAllChunked(
   scanParams: Record<string, any> = {},
   lastEvaluatedKey?: Record<string, any>,
   limit?: number,
-  identityPoolIdOverride?: string,
+  roleArnOverride?: string,
   projectionExpression?: string,
   expressionAttributeNames?: Record<string, string>
 ) {
-  const client = getDocClient(identityPoolIdOverride);
+  const client = await getDocClient(roleArnOverride);
   const baseParams = {
     TableName: tableName,
     ...scanParams,
@@ -194,7 +216,7 @@ export async function listAllChunked(
  * @param {string} tableName - The name of the table to scan.
  * @param {string} fieldName - The name of the field to filter on.
  * @param {string} fieldValue - The value of the field to filter on.
- * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
  * @returns {Promise<any[]>} A promise that resolves to an array of matching items.
  * @throws {Error} When AWS operation fails or table cannot be filtered.
  */
@@ -202,9 +224,9 @@ export async function listAllFiltered(
   tableName: string,
   fieldName: string,
   fieldValue: string,
-  identityPoolIdOverride?: string
+  roleArnOverride?: string
 ) {
-  const client = getDocClient(identityPoolIdOverride);
+  const client = await getDocClient(roleArnOverride);
   const items: any[] = [];
   let ExclusiveStartKey;
   console.log("listAllFiltered: tableName:", tableName);
@@ -243,7 +265,7 @@ export async function listAllFiltered(
  * @param {string} tableName - The name of the table to get the item from.
  * @param {string} pkName - The name of the partition key.
  * @param {string} id - The ID of the item to get.
- * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
  * @returns {Promise<any>} A promise that resolves to the item.
  * @throws {Error} When AWS operation fails or item cannot be retrieved from the table.
  */
@@ -251,9 +273,9 @@ export async function getOne(
   tableName: string,
   pkName: string,
   id: string,
-  identityPoolIdOverride?: string
+  roleArnOverride?: string
 ) {
-  const client = getDocClient(identityPoolIdOverride);
+  const client = await getDocClient(roleArnOverride);
   try {
     const { Item } = await client.send(
       new GetCommand({
@@ -280,7 +302,7 @@ export async function getOne(
  * @param {string} pkValue - The value of the partition key.
  * @param {string} skName - The name of the sort key.
  * @param {string} skValue - The value of the sort key.
- * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
  * @returns {Promise<any>} A promise that resolves to the item.
  * @throws {Error} When AWS operation fails or item cannot be retrieved from the table.
  */
@@ -290,9 +312,9 @@ export async function getOneWithSort(
   pkValue: string,
   skName: string,
   skValue: string,
-  identityPoolIdOverride?: string
+  roleArnOverride?: string
 ) {
-  const client = getDocClient(identityPoolIdOverride);
+  const client = await getDocClient(roleArnOverride);
   try {
     const { Item } = await client.send(
       new GetCommand({
@@ -319,16 +341,16 @@ export async function getOneWithSort(
  * @description Put a single item into the table.
  * @param {string} tableName - The name of the table to put the item into.
  * @param {Record<string, any>} item - The item to put into the table.
- * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
  * @returns {Promise<void>}
  * @throws {Error} When AWS operation fails or item cannot be put into the table.
  */
 export async function putOne(
   tableName: string,
   item: Record<string, any>,
-  identityPoolIdOverride?: string
+  roleArnOverride?: string
 ) {
-  const client = getDocClient(identityPoolIdOverride);
+  const client = await getDocClient(roleArnOverride);
   try {
     await client.send(
       new PutCommand({
@@ -353,7 +375,7 @@ export async function putOne(
  * @param {Record<string, any>} item - The item to put into the table.
  * @param {string} conditionExpression - The condition expression to evaluate.
  * @param {Record<string, any>} expressionAttributeValues - Optional expression attribute values.
- * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
  * @returns {Promise<void>}
  * @throws {Error} When AWS operation fails or item cannot be put into the table.
  */
@@ -362,9 +384,9 @@ export async function putOneWithCondition(
   item: Record<string, any>,
   conditionExpression: string,
   expressionAttributeValues?: Record<string, any>,
-  identityPoolIdOverride?: string
+  roleArnOverride?: string
 ) {
-  const client = getDocClient(identityPoolIdOverride);
+  const client = await getDocClient(roleArnOverride);
   try {
     const params: any = {
       TableName: tableName,
@@ -398,7 +420,7 @@ export async function putOneWithCondition(
  * @param {string} updateExpression - The update expression.
  * @param {Record<string, any>} expressionAttributeValues - The expression attribute values.
  * @param {Record<string, string>} expressionAttributeNames - The expression attribute names.
- * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
  * @returns {Promise<void>}
  * @throws {Error} When AWS operation fails or item cannot be updated in the table.
  */
@@ -408,9 +430,9 @@ export async function updateItem(
   updateExpression: string,
   expressionAttributeValues: Record<string, any>,
   expressionAttributeNames?: Record<string, string>,
-  identityPoolIdOverride?: string
+  roleArnOverride?: string
 ) {
-  const client = getDocClient(identityPoolIdOverride);
+  const client = await getDocClient(roleArnOverride);
   try {
     const updateParams: any = {
       TableName: tableName,
@@ -447,7 +469,7 @@ export async function updateItem(
  * @param {string} updateExpression - The update expression.
  * @param {Record<string, any>} expressionAttributeValues - The expression attribute values.
  * @param {Record<string, string>} expressionAttributeNames - The expression attribute names.
- * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
  * @returns {Promise<void>}
  * @throws {Error} When AWS operation fails, item cannot be updated, or condition expression fails.
  */
@@ -457,9 +479,9 @@ export async function updateItemWithCondition(
   updateExpression: string,
   expressionAttributeValues: Record<string, any>,
   expressionAttributeNames?: Record<string, string>,
-  identityPoolIdOverride?: string
+  roleArnOverride?: string
 ) {
-  const client = getDocClient(identityPoolIdOverride);
+  const client = await getDocClient(roleArnOverride);
   try {
     const updateParams: any = {
       TableName: tableName,
@@ -499,7 +521,7 @@ export async function updateItemWithCondition(
  * @param {string} tableName - The name of the table to delete the item from.
  * @param {string} pkName - The name of the partition key.
  * @param {string} id - The ID of the item to delete.
- * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
  * @returns {Promise<void>}
  * @throws {Error} When AWS operation fails or item cannot be deleted from the table.
  */
@@ -507,9 +529,9 @@ export async function deleteOne(
   tableName: string,
   pkName: string,
   id: string,
-  identityPoolIdOverride?: string
+  roleArnOverride?: string
 ) {
-  const client = getDocClient(identityPoolIdOverride);
+  const client = await getDocClient(roleArnOverride);
   try {
     await client.send(
       new DeleteCommand({
@@ -535,7 +557,7 @@ export async function deleteOne(
  * @param {string} pkValue - The value of the partition key.
  * @param {string} skName - The name of the sort key.
  * @param {string} skValue - The value of the sort key.
- * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
  * @returns {Promise<void>}
  * @throws {Error} When AWS operation fails or item cannot be deleted from the table.
  */
@@ -545,9 +567,9 @@ export async function deleteOneWithSort(
   pkValue: string,
   skName: string,
   skValue: string,
-  identityPoolIdOverride?: string
+  roleArnOverride?: string
 ) {
-  const client = getDocClient(identityPoolIdOverride);
+  const client = await getDocClient(roleArnOverride);
   try {
     await client.send(
       new DeleteCommand({
@@ -574,7 +596,7 @@ export async function deleteOneWithSort(
  * @param {string} tableName - The name of the table to get the items from.
  * @param {string} pkName - The name of the primary key.
  * @param {string[]} ids - An array of IDs to get.
- * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
  * @returns {Promise<any[]>} A promise that resolves to an array of items.
  * @throws {Error} When AWS operation fails or items cannot be retrieved from the table.
  */
@@ -582,9 +604,9 @@ export async function batchGetItems(
   tableName: string,
   pkName: string,
   ids: string[],
-  identityPoolIdOverride?: string
+  roleArnOverride?: string
 ) {
-  const client = getDocClient(identityPoolIdOverride);
+  const client = await getDocClient(roleArnOverride);
   const items: any[] = [];
 
   // DynamoDB BatchGet has a limit of 100 items per request
@@ -631,7 +653,7 @@ export async function batchGetItems(
  * @param {string} primaryKeyValue - The value of the primary key.
  * @param {string} sortKeyName - The name of the sort key.
  * @param {string} sortKeyValue - The value the sort key should begin with.
- * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
  * @returns {Promise<any[]>} A promise that resolves to an array of items.
  * @throws {Error} When AWS operation fails or table cannot be queried.
  */
@@ -641,9 +663,9 @@ async function listAllQueryBeginsWithSortKey(
   primaryKeyValue: string,
   sortKeyName: string,
   sortKeyValue: string,
-  identityPoolIdOverride?: string
+  roleArnOverride?: string
 ) {
-  const client = getDocClient(identityPoolIdOverride);
+  const client = await getDocClient(roleArnOverride);
   const items: any[] = [];
   let ExclusiveStartKey;
 
@@ -683,7 +705,7 @@ async function listAllQueryBeginsWithSortKey(
  * @param {string} primaryKeyValues - A comma-separated string of primary key values.
  * @param {string} sortKeyName - The name of the sort key.
  * @param {string} sortKeyValue - The value the sort key should begin with.
- * @param {string} identityPoolIdOverride - Optional identity pool ID to use instead of the environment variable.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
  * @returns {Promise<Record<string, any[]>>} A promise that resolves to a record of items, where the keys are the primary key values.
  * @throws {Error} When AWS operation fails or table cannot be queried.
  */
@@ -693,7 +715,7 @@ export async function listAllQueryBeginsWithSortKeyMultiple(
   primaryKeyValues: string,
   sortKeyName: string,
   sortKeyValue: string,
-  identityPoolIdOverride?: string
+  roleArnOverride?: string
 ) {
   const primaryKeyList = primaryKeyValues.split(',');
   const results: Record<string, any[]> = {};
@@ -712,7 +734,7 @@ export async function listAllQueryBeginsWithSortKeyMultiple(
         primaryKeyValue.trim(),
         sortKeyName,
         sortKeyValue,
-        identityPoolIdOverride
+        roleArnOverride
       );
       results[primaryKeyValue.trim()] = items;
       console.log("listAllQueryBeginsWithSortKeyMultiple: results:", results);
