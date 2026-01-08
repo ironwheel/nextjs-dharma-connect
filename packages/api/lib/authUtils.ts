@@ -1064,7 +1064,7 @@ export function getPermissionsLogic(pid: string): any {
  * @returns {Promise<object>} Empty object if authorized
  * @throws {Error} Various errors as described
  */
-export async function checkAccess(pid: string, hash: string, host: string, deviceFingerprint: string, operation: string, token?: string): Promise<any> {
+export async function checkAccess(pid: string, hash: string, host: string, deviceFingerprint: string, operation: string, token?: string, oidcToken?: string): Promise<any> {
 
     // Verification action list
     const verificationActionList = [
@@ -1144,11 +1144,11 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
 
     // Does this user have access?
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN, oidcToken);
 
     let permittedHosts: PermittedHost[] = [];
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN, oidcToken);
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
     permittedHosts = data['permitted-hosts'] || [];
@@ -1160,7 +1160,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     }
 
     // Get all actions for all apps the user has access to (design improvement)
-    const allActionsList = await getAllActionsForUser(permittedHosts);
+    const allActionsList = await getAllActionsForUser(permittedHosts, oidcToken);
 
     // Add verification actions to the allowed actions list
     const allActionsWithVerification = [...allActionsList, ...verificationActionList];
@@ -1179,7 +1179,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
         console.log(`SECURITY CHECK [pid=${pid}]: NO TOKEN PROVIDED - treating as new login attempt`);
 
         // Look for any existing session for this user/device
-        const existingSession = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN);
+        const existingSession = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN, oidcToken);
 
         if (existingSession) {
             // Delete the existing session even if it's not expired
@@ -1188,7 +1188,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
             console.log(`  - Session was created: ${new Date(existingSession.createdAt || 0).toISOString()}`);
             console.log(`  - Session TTL: ${existingSession.ttl} (expires: ${new Date((existingSession.ttl || 0) * 1000).toISOString()})`);
 
-            await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN);
+            await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN, oidcToken);
         } else {
             console.log(`SECURITY CHECK [pid=${pid}]: No existing session found - proceeding to verification flow`);
         }
@@ -1208,7 +1208,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
 
     // Check for existing session which is only created after email verification
     // Sessions records use a primary key of pid-deviceFingerprint
-    const session = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN);
+    const session = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN, oidcToken);
 
     // If session found, generate fresh access token if the session isn't expired
     if (session) {
@@ -1233,12 +1233,12 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
             console.log(`SESSION EXPIRED [pid=${pid}]: Deleting session and requiring re-verification`);
             console.log(`  - Reason: TTL (${sessionTTL}) <= current time (${currentTimeSeconds})`);
             console.log(`  - Session was valid for: ${sessionAgeSeconds} seconds instead of expected ${SESSION_DURATION_SECONDS || 'unknown'} seconds`);
-            await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, session.id, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN);
+            await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, session.id, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN, oidcToken);
         } else {
             // Session is valid, generate fresh access token with all actions
             console.log(`SESSION VALID [pid=${pid}]: Refreshing access token`);
             console.log(`  - ${timeUntilExpirySeconds} seconds remaining on session`);
-            const allActionsList = await getAllActionsForUser(permittedHosts);
+            const allActionsList = await getAllActionsForUser(permittedHosts, oidcToken);
             return {
                 status: 'authenticated',
                 accessToken: createToken(pid, deviceFingerprint, allActionsList)

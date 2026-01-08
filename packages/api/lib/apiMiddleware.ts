@@ -74,8 +74,9 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
       // CORS middleware will automatically respond to OPTIONS preflight.
       if (req.method !== 'OPTIONS') {
         // Each operation is made up of an HTTP method, a susbsystem, and a resource/action
+        const oidcToken = req.headers['x-vercel-oidc-token'] as string;
         // console.log("API MIDDLEWARE: COOKIES:", req.cookies);
-        const checkResult = await checkAccess(req.headers['x-user-id'] as string, req.headers['x-verification-hash'] as string, req.headers['x-host'] as string, req.headers['x-device-fingerprint'] as string, operation, req.cookies['token']);
+        const checkResult = await checkAccess(req.headers['x-user-id'] as string, req.headers['x-verification-hash'] as string, req.headers['x-host'] as string, req.headers['x-device-fingerprint'] as string, operation, req.cookies['token'], oidcToken);
         console.log("checkResult:", checkResult.status);
         if ((checkResult.status === 'authenticated' || checkResult.status === 'needs-verification' || checkResult.status === 'expired-auth-flow') && checkResult.accessToken) {
           // We have a new access token to set in cookie
