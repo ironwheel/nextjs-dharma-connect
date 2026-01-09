@@ -40,6 +40,7 @@ interface Event {
         inPerson?: boolean;
     };
     subEvents?: Record<string, unknown>;
+    list?: boolean;
 }
 
 interface Stage {
@@ -49,6 +50,7 @@ interface Stage {
     parentStages?: string[];
     qaStepCheckZoomLink?: boolean;
     qaStepCheckRegLink?: boolean;
+    listSupport?: boolean;
 }
 
 interface InheritedFields {
@@ -336,7 +338,12 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
     useEffect(() => {
         const selectedEvent = events.find(ev => ev.aid === eventCode)
         if (selectedEvent) {
-            const subEvNames = selectedEvent.subEvents ? Object.keys(selectedEvent.subEvents).sort() : []
+            let subEvNames: string[] = []
+            if (selectedEvent.list) {
+                subEvNames = ['list']
+            } else {
+                subEvNames = selectedEvent.subEvents ? Object.keys(selectedEvent.subEvents).sort() : []
+            }
             setSubEvents(subEvNames)
 
             // Check if this event is in-person
@@ -777,6 +784,13 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                         .map(st => {
                             // Check if this stage is already used in existing work orders
                             const isStageUsed = existingWorkOrders.some(wo => wo.stage === st.stage)
+
+                            // Check list support
+                            const selectedEvent = events.find(ev => ev.aid === eventCode)
+                            if (selectedEvent?.list && !st.listSupport) {
+                                return null
+                            }
+
                             return (
                                 <option
                                     key={st.stage}
