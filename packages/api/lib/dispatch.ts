@@ -365,7 +365,7 @@ async function dispatchAuth(
         if (!key) {
           return res.status(400).json({ error: 'Missing required parameter: key' });
         }
-        const configValue = await getConfigValue(pid, host, key);
+        const configValue = await getConfigValue(pid, host, key, oidcToken);
         return res.status(200).json({ value: configValue });
       default:
         return res.status(404).json({ error: `Unknown auth action: ${action}` });
