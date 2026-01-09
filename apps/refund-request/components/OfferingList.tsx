@@ -47,12 +47,15 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
         const lookbackDate = new Date();
         lookbackDate.setMonth(lookbackDate.getMonth() - 12);
 
+        const futureLimitDate = new Date();
+        futureLimitDate.setMonth(futureLimitDate.getMonth() + 12);
+
         Object.entries(student.programs).forEach(([progId, progData]: [string, any]) => {
             if (progData.offeringHistory) {
                 Object.entries(progData.offeringHistory).forEach(([eventId, offData]: [string, any]) => {
                     const offeringDate = offData.offeringTime ? new Date(offData.offeringTime) : null;
 
-                    if (offeringDate && offeringDate >= lookbackDate) {
+                    if (offeringDate && offeringDate >= lookbackDate && offeringDate <= futureLimitDate) {
                         const refundItems: any[] = [];
 
                         // Handle Installments Pattern
