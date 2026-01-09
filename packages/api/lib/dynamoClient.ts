@@ -30,7 +30,11 @@ function getAwsRegion() {
 
 
 // Cache docClientInstance per roleArn (or 'default')
-const docClientInstances: Record<string, DynamoDBDocumentClient> = {};
+interface CachedClient {
+  client: DynamoDBDocumentClient;
+  expiration: number | null; // Timestamp in ms
+}
+const docClientInstances: Record<string, CachedClient> = {};
 
 /**
  * @async
@@ -50,8 +54,18 @@ async function getDocClient(roleArnOverride?: string, oidcToken?: string): Promi
   const cacheKey = roleArnOverride || 'default';
 
   // Return cached instance if exists
-  if (docClientInstances[cacheKey]) {
-    return docClientInstances[cacheKey];
+  // Return cached instance if exists and valid
+  const cached = docClientInstances[cacheKey];
+  if (cached) {
+    const now = Date.now();
+    const EXPIRATION_BUFFER_MS = 5 * 60 * 1000; // 5 minutes buffer
+
+    // If expiration is null (e.g. default credentials), assume valid always (or handled by AWS SDK default chain)
+    // If expiration is set, check if it is still valid with buffer
+    if (cached.expiration === null || cached.expiration > (now + EXPIRATION_BUFFER_MS)) {
+      return cached.client;
+    }
+    console.log(`db-client: Cached client for ${cacheKey} expired or about to expire (TTL: ${new Date(cached.expiration).toISOString()}). Re-creating.`);
   }
 
   try {
@@ -73,6 +87,7 @@ async function getDocClient(roleArnOverride?: string, oidcToken?: string): Promi
     }
 
     let ddbBaseClient: DynamoDBClient;
+    let expiration: number | null = null;
 
     if (roleArnOverride) {
       // Assume the specified role (Auth Role) using the Base Credentials (Guest Role)
@@ -98,6 +113,9 @@ async function getDocClient(roleArnOverride?: string, oidcToken?: string): Promi
           sessionToken: Credentials.SessionToken,
         },
       });
+      if (Credentials.Expiration) {
+        expiration = Credentials.Expiration.getTime();
+      }
     } else {
       // Use default credential provider chain or explicit OIDC
       ddbBaseClient = new DynamoDBClient({
@@ -107,7 +125,7 @@ async function getDocClient(roleArnOverride?: string, oidcToken?: string): Promi
     }
 
     const docClientInstance = DynamoDBDocumentClient.from(ddbBaseClient);
-    docClientInstances[cacheKey] = docClientInstance;
+    docClientInstances[cacheKey] = { client: docClientInstance, expiration };
     return docClientInstance;
   } catch (error) {
     console.error("db-client: Failed to initialize DynamoDBDocumentClient:", error);
