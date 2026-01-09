@@ -354,7 +354,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             if (loadedSubEventRef.current && subEvNames.includes(loadedSubEventRef.current)) {
                 setSubEvent(loadedSubEventRef.current)
                 loadedSubEventRef.current = null
-            } else if (!id && subEvNames.length === 1) {
+            } else if (subEvNames.length === 1) {
+                // Always select if there is only one option (e.g. list events)
                 setSubEvent(subEvNames[0])
             } else if (!id) {
                 setSubEvent('')
