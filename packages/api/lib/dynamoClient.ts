@@ -33,6 +33,7 @@ function getAwsRegion() {
 interface CachedClient {
   client: DynamoDBDocumentClient;
   expiration: number | null; // Timestamp in ms
+  token?: string; // The specific OIDC token used to create this client
 }
 const docClientInstances: Record<string, CachedClient> = {};
 
@@ -55,17 +56,25 @@ async function getDocClient(roleArnOverride?: string, oidcToken?: string): Promi
 
   // Return cached instance if exists
   // Return cached instance if exists and valid
+  // Return cached instance if exists and valid
   const cached = docClientInstances[cacheKey];
   if (cached) {
     const now = Date.now();
     const EXPIRATION_BUFFER_MS = 5 * 60 * 1000; // 5 minutes buffer
 
-    // If expiration is null (e.g. default credentials), assume valid always (or handled by AWS SDK default chain)
-    // If expiration is set, check if it is still valid with buffer
-    if (cached.expiration === null || cached.expiration > (now + EXPIRATION_BUFFER_MS)) {
-      return cached.client;
+    // Check if the provided OIDC token matches the one used to create the cached client
+    const tokenMismatch = oidcToken && cached.token !== oidcToken;
+
+    if (!tokenMismatch) {
+      // If expiration is null (e.g. default credentials), assume valid always (or handled by AWS SDK default chain)
+      // If expiration is set, check if it is still valid with buffer
+      if (cached.expiration === null || cached.expiration > (now + EXPIRATION_BUFFER_MS)) {
+        return cached.client;
+      }
+      console.log(`db-client: Cached client for ${cacheKey} expired or about to expire (TTL: ${new Date(cached.expiration).toISOString()}). Re-creating.`);
+    } else {
+      console.log(`db-client: OIDC token changed for ${cacheKey}. Re-creating client.`);
     }
-    console.log(`db-client: Cached client for ${cacheKey} expired or about to expire (TTL: ${new Date(cached.expiration).toISOString()}). Re-creating.`);
   }
 
   try {
@@ -125,7 +134,7 @@ async function getDocClient(roleArnOverride?: string, oidcToken?: string): Promi
     }
 
     const docClientInstance = DynamoDBDocumentClient.from(ddbBaseClient);
-    docClientInstances[cacheKey] = { client: docClientInstance, expiration };
+    docClientInstances[cacheKey] = { client: docClientInstance, expiration, token: oidcToken };
     return docClientInstance;
   } catch (error) {
     console.error("db-client: Failed to initialize DynamoDBDocumentClient:", error);
