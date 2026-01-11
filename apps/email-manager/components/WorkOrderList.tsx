@@ -160,14 +160,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         })
     }
 
-    const isWorkOrderCompleted = (workOrder: WorkOrder) => {
-        return workOrder.steps && workOrder.steps.every(step => {
-            const status = typeof step.status === 'string' ? step.status :
-                (step.status && typeof step.status === 'object' && 'S' in step.status) ?
-                    (step.status as { S: string }).S : 'ready'
-            return status === 'complete'
-        })
-    }
+
 
     const loadParticipantName = useCallback(async (pid: string) => {
         if (!pid || participantNames[pid]) return
