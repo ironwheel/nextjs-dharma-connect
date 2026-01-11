@@ -726,9 +726,9 @@ a {
 }
 
 .status-item.version-info {
-    background: rgba(59, 130, 246, 0.3);
-    border-color: rgba(59, 130, 246, 0.6);
-    color: #60a5fa;
+    background: rgba(255, 193, 7, 0.3);
+    border-color: rgba(255, 193, 7, 0.6);
+    color: #ffc107;
     font-weight: 600;
 }
 
@@ -797,6 +797,12 @@ a {
 
 .modal-content .table tbody tr {
     border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Custom placeholder visibility */
+.custom-placeholder::placeholder {
+    color: rgba(255, 255, 255, 0.7) !important;
+    opacity: 1; /* Firefox */
 }
 
 .modal-content .table tbody tr:nth-child(even) {

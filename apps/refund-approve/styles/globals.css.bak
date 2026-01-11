@@ -726,9 +726,9 @@ a {
 }
 
 .status-item.version-info {
-    background: rgba(59, 130, 246, 0.3);
-    border-color: rgba(59, 130, 246, 0.6);
-    color: #60a5fa;
+    background: rgba(255, 193, 7, 0.3);
+    border-color: rgba(255, 193, 7, 0.6);
+    color: #ffc107;
     font-weight: 600;
 }
 

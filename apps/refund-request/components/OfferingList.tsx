@@ -22,7 +22,9 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
     const [loadingStripe, setLoadingStripe] = useState(false);
     const [reason, setReason] = useState('');
     const [refundRequests, setRefundRequests] = useState<Record<string, { approvalState: string, approverName?: string }>>({});
+
     const [userEventAccess, setUserEventAccess] = useState<string[]>([]);
+    const [relatedSubevents, setRelatedSubevents] = useState<string[]>([]);
 
     // Refund Logic State
     const [selectedRefundItems, setSelectedRefundItems] = useState<Set<string>>(new Set());
@@ -53,7 +55,23 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
         Object.entries(student.programs).forEach(([progId, progData]: [string, any]) => {
             if (progData.offeringHistory) {
                 Object.entries(progData.offeringHistory).forEach(([eventId, offData]: [string, any]) => {
-                    const offeringDate = offData.offeringTime ? new Date(offData.offeringTime) : null;
+                    let offeringDate = offData.offeringTime ? new Date(offData.offeringTime) : null;
+                    let offeringDateStr = offData.offeringTime;
+
+                    // Fallback: if no top-level time, look at installments
+                    if (!offeringDate && offData.installments) {
+                        let maxTime = 0;
+                        Object.values(offData.installments).forEach((inst: any) => {
+                            if (inst.offeringTime) {
+                                const t = new Date(inst.offeringTime).getTime();
+                                if (t > maxTime) maxTime = t;
+                            }
+                        });
+                        if (maxTime > 0) {
+                            offeringDate = new Date(maxTime);
+                            offeringDateStr = offeringDate.toISOString();
+                        }
+                    }
 
                     if (offeringDate && offeringDate >= lookbackDate && offeringDate <= futureLimitDate) {
                         const refundItems: any[] = [];
@@ -85,6 +103,7 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
                             programId: progId,
                             eventId: eventId,
                             ...offData,
+                            offeringTime: offeringDateStr, // Ensure time is present for sorting
                             refundItems // Attach normalized refund items
                         });
                     }
@@ -218,7 +237,51 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
         setStripeDetailsMap({});
         setLoadingStripe(true);
         setShowRefundModal(true);
+
         setReason(''); // Reset reason
+        setRelatedSubevents([]);
+
+        // Find Related Subevents (Series)
+        const related: string[] = [];
+        const candidateIntent = offering.offeringIntent; // The intent being refunded
+        // Note: offering.refundItems might have multiple intents (installments), 
+        // but typically "series" applies to the main intent shared across subevents.
+        // If we are refunding specific items, we should check those.
+        // For simplicity, let's check the main offeringIntent if present, or all intents in refundItems?
+        // The requirement says "where one stripe payment intent is fanned out". 
+        // Let's gather all intents involved in this candidate offering.
+        const candidateIntents = new Set(offering.refundItems?.map((ri: any) => ri.offeringIntent) || []);
+        if (offering.offeringIntent) candidateIntents.add(offering.offeringIntent);
+
+        if (candidateIntents.size > 0 && student.programs) {
+            Object.entries(student.programs).forEach(([progId, progData]: [string, any]) => {
+                if (progData.offeringHistory) {
+                    Object.entries(progData.offeringHistory).forEach(([subId, subData]: [string, any]) => {
+                        // Skip the current offering/subevent
+                        if (progId === offering.programId && subId === offering.eventId) return;
+
+                        let match = false;
+                        if (candidateIntents.has(subData.offeringIntent)) match = true;
+
+                        if (!match && subData.installments) {
+                            Object.values(subData.installments).forEach((inst: any) => {
+                                if (candidateIntents.has(inst.offeringIntent)) match = true;
+                            });
+                        }
+
+                        if (match) {
+                            // Format: "EventName - SubEventName" or just SubEventName if same event?
+                            // Let's look up event name from eventsData if possible, or just use IDs.
+                            // eventsData is available in scope.
+                            const eName = eventsData[progId]?.name || progId;
+                            const sName = ['event', 'retreat'].includes(subId.toLowerCase()) ? '' : subId;
+                            related.push(sName ? `${eName} - ${sName}` : eName);
+                        }
+                    });
+                }
+            });
+        }
+        setRelatedSubevents(Array.from(new Set(related))); // Dedupe strings
 
         // Default selection: all items not already requested
         const initialUsage = new Set<string>();
@@ -423,33 +486,53 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
                                         <td>{off.offeringTime || '-'}</td>
                                         <td>
                                             {(() => {
-                                                const request = refundRequests[off.offeringIntent];
-                                                if (request) {
-                                                    if (request.approvalState === 'COMPLETE') {
-                                                        return <Badge bg="success">Refunded by {request.approverName || 'Admin'}</Badge>;
-                                                    }
-                                                    if (request.approvalState === 'DENY' || request.approvalState === 'DENIED') {
-                                                        return <Badge bg="danger">Denied by {request.approverName || 'Admin'}</Badge>;
-                                                    }
-                                                    if (request.approvalState === 'ERROR') {
-                                                        return <Badge bg="danger">Error</Badge>;
-                                                    }
-                                                    // Default or PENDING
-                                                    return <Button variant="secondary" size="sm" disabled>Request Pending</Button>;
+                                                const items = off.refundItems || [];
+
+                                                // If no items but we have a top-level intent (legacy fallback)
+                                                if (items.length === 0 && off.offeringIntent) {
+                                                    items.push({ offeringIntent: off.offeringIntent });
                                                 }
 
-                                                if (off.offeringIntent) {
+                                                if (items.length === 0) return null;
+
+                                                const statuses = items.map((i: any) => refundRequests[i.offeringIntent]).filter(Boolean);
+
+                                                // Check for unrequested items
+                                                const hasUnrequested = items.some((i: any) => !refundRequests[i.offeringIntent]);
+
+                                                // Check processing
+                                                const isProcessing = processing && items.some((i: any) => processing === i.offeringIntent);
+
+                                                if (hasUnrequested) {
                                                     return (
                                                         <Button
                                                             variant="warning"
                                                             size="sm"
-                                                            disabled={processing === off.offeringIntent}
+                                                            disabled={!!isProcessing}
                                                             onClick={() => initiateRefund(off)}
                                                         >
-                                                            {processing === off.offeringIntent ? 'Processing...' : 'Request Refund'}
+                                                            {isProcessing ? 'Processing...' : 'Request Refund'}
                                                         </Button>
                                                     );
                                                 }
+
+                                                // If we are here, ALL items have a status.
+
+                                                const hasPending = statuses.some((s: any) => s.approvalState === 'PENDING');
+                                                if (hasPending) return <Button variant="secondary" size="sm" disabled>Request Pending</Button>;
+
+                                                const hasError = statuses.some((s: any) => s.approvalState === 'ERROR');
+                                                if (hasError) return <Badge bg="danger">Error</Badge>;
+
+                                                const requests = statuses.map((s: any) => s);
+
+                                                // If any denied?
+                                                const denied = requests.find((r: any) => r.approvalState === 'DENY' || r.approvalState === 'DENIED');
+                                                if (denied) return <Badge bg="danger">Denied by {denied.approverName || 'Admin'}</Badge>;
+
+                                                // All complete?
+                                                const complete = requests.find((r: any) => r.approvalState === 'COMPLETE');
+                                                if (complete) return <Badge bg="success">Refunded by {complete.approverName || 'Admin'}</Badge>;
 
                                                 return null;
                                             })()}
@@ -475,6 +558,20 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
                                 <div className="mb-2"><strong>Email:</strong> {student.email}</div>
                                 <div className="mb-2"><strong>Event:</strong> {refundCandidate.eventName}</div>
                                 <div className="mb-2"><strong>Subevent:</strong> {refundCandidate.eventId}</div>
+
+                                {relatedSubevents.length > 0 && (
+                                    <div className="mb-3 p-2 border border-info rounded bg-info bg-opacity-10">
+                                        <strong>Related Subevents (Series):</strong>
+                                        <ul className="mb-0 ps-3 mt-1">
+                                            {relatedSubevents.map((rs, idx) => (
+                                                <li key={idx} className="small">{rs}</li>
+                                            ))}
+                                        </ul>
+                                        <div className="text-muted small mt-1 fst-italic">
+                                            Requesting a refund for this item will also affect these related events.
+                                        </div>
+                                    </div>
+                                )}
 
                                 {loadingStripe ? (
                                     <div className="mb-2 text-info">
@@ -575,7 +672,7 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
                                     value={reason}
                                     onChange={(e) => setReason(e.target.value)}
                                     placeholder="Enter reason for refund request (min 10 chars)..."
-                                    className="bg-secondary text-white border-secondary bg-opacity-25"
+                                    className="bg-secondary text-white border-secondary bg-opacity-25 custom-placeholder"
                                 />
                             </Form.Group>
 

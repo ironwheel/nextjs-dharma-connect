@@ -309,6 +309,7 @@ export async function listRefunds(limit: number = 20, offset: number = 0, oidcTo
         let approverName = r.approverPid;
         let eventName = r.eventCode;
         let isInstallment = false;
+        let isSeries = false;
 
         // Resolve Student
         if (r.pid) {
@@ -338,6 +339,30 @@ export async function listRefunds(limit: number = 20, offset: number = 0, oidcTo
                                 break;
                             }
                         }
+                    }
+
+                    // Check for Series (Multiple occurrences of same stripePaymentIntent)
+                    let intentCount = 0;
+                    if (s.programs) {
+                        for (const pData of Object.values(s.programs) as any[]) {
+                            if (pData.offeringHistory) {
+                                for (const subData of Object.values(pData.offeringHistory) as any[]) {
+                                    if (subData.offeringIntent === r.stripePaymentIntent) {
+                                        intentCount++;
+                                    }
+                                    if (subData.installments) {
+                                        for (const inst of Object.values(subData.installments) as any[]) {
+                                            if (inst.offeringIntent === r.stripePaymentIntent) {
+                                                intentCount++;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (intentCount > 1) {
+                        isSeries = true;
                     }
                 }
             } catch (e) { console.error(`Failed to resolve student ${r.pid}`, e); }
@@ -406,7 +431,8 @@ export async function listRefunds(limit: number = 20, offset: number = 0, oidcTo
             requesterName,
             approverName,
             eventName,
-            isInstallment
+            isInstallment,
+            isSeries
         };
     }));
 
@@ -494,47 +520,61 @@ export async function processRefund(
         const studentPid = refundRequest.pid;
 
         try {
-            // First, fetch the student record to determine if this is an installment
-            // and which installment key it corresponds to.
+            // First, fetch the student record to find ALL occurrences of this payment intent
             const student = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, studentPid, undefined, oidcToken);
 
-            let updatePath = 'programs.#eventCode.offeringHistory.#subEvent.offeringRefund';
-            let expressionAttributeNames: any = {
-                '#eventCode': eventCode,
-                '#subEvent': subEvent
-            };
+            if (student && student.programs) {
+                const updateActions: string[] = [];
+                const expressionAttributeNames: Record<string, string> = {};
+                let pathCounter = 0;
 
-            // Attempt to find specific installment
-            let foundInstallment = false;
-            if (student && student.programs && student.programs[eventCode] &&
-                student.programs[eventCode].offeringHistory &&
-                student.programs[eventCode].offeringHistory[subEvent]) {
-
-                const offData = student.programs[eventCode].offeringHistory[subEvent];
-                if (offData.installments) {
-                    for (const [key, instData] of Object.entries(offData.installments)) {
-                        if ((instData as any).offeringIntent === stripePaymentIntent) {
-                            // Found the specific installment!
-                            updatePath = `programs.#eventCode.offeringHistory.#subEvent.installments.#instKey.offeringRefund`;
-                            expressionAttributeNames['#instKey'] = key;
-                            foundInstallment = true;
-                            break;
+                // Scan all programs/subevents
+                for (const [pId, pData] of Object.entries(student.programs) as [string, any][]) {
+                    if (pData.offeringHistory) {
+                        for (const [subId, subData] of Object.entries(pData.offeringHistory) as [string, any][]) {
+                            // Check direct offeringIntent
+                            if (subData.offeringIntent === stripePaymentIntent) {
+                                const pKey = `#p${pathCounter}`;
+                                const subKey = `#s${pathCounter}`;
+                                expressionAttributeNames[pKey] = pId;
+                                expressionAttributeNames[subKey] = subId;
+                                updateActions.push(`programs.${pKey}.offeringHistory.${subKey}.offeringRefund = :trueVal`);
+                                pathCounter++;
+                            }
+                            // Check installments
+                            if (subData.installments) {
+                                for (const [instId, instData] of Object.entries(subData.installments) as [string, any][]) {
+                                    if (instData.offeringIntent === stripePaymentIntent) {
+                                        const pKey = `#p${pathCounter}`;
+                                        const subKey = `#s${pathCounter}`;
+                                        const instKey = `#i${pathCounter}`;
+                                        expressionAttributeNames[pKey] = pId;
+                                        expressionAttributeNames[subKey] = subId;
+                                        expressionAttributeNames[instKey] = instId;
+                                        updateActions.push(`programs.${pKey}.offeringHistory.${subKey}.installments.${instKey}.offeringRefund = :trueVal`);
+                                        pathCounter++;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
+
+                if (updateActions.length > 0) {
+                    const updateExpr = `SET ${updateActions.join(', ')}`;
+                    await updateItem(
+                        studentsTableCfg.tableName,
+                        { [studentsTableCfg.pk]: studentPid },
+                        updateExpr,
+                        { ':trueVal': true },
+                        expressionAttributeNames,
+                        undefined,
+                        oidcToken
+                    );
+                } else {
+                    console.warn(`Payment intent ${stripePaymentIntent} not found in student record during refund process.`);
+                }
             }
-
-            const updateExpr = `SET ${updatePath} = :trueVal`;
-
-            await updateItem(
-                studentsTableCfg.tableName,
-                { [studentsTableCfg.pk]: studentPid },
-                updateExpr,
-                { ':trueVal': true },
-                expressionAttributeNames,
-                undefined,
-                oidcToken
-            );
         } catch (dbErr) {
             console.error('Failed to update student record offeringRefund:', dbErr);
             // Non-fatal, but logged. 

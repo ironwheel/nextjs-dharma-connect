@@ -4,12 +4,14 @@ import { useRouter } from 'next/router';
 import Head from 'next/head';
 import StudentSearch from '../components/StudentSearch';
 import OfferingList from '../components/OfferingList';
+import { VersionBadge, getTableItem } from 'sharedFrontend';
 
 export default function Home() {
     const router = useRouter();
     const { pid, hash } = router.query;
     const [selectedStudent, setSelectedStudent] = useState<any>(null);
     const [authorized, setAuthorized] = useState(false);
+    const [currentUserName, setCurrentUserName] = useState<string>('Unknown');
 
     useEffect(() => {
         if (!router.isReady) return;
@@ -19,6 +21,16 @@ export default function Home() {
             return;
         }
         setAuthorized(true);
+
+        // Fetch user name
+        getTableItem('students', pid as string, pid as string, hash as string)
+            .then((student: any) => {
+                if (student) {
+                    setCurrentUserName(`${student.first} ${student.last}`);
+                }
+            })
+            .catch(err => console.error('Error fetching user info', err));
+
     }, [router.isReady, pid, hash, router]);
 
     if (!authorized) return null; // Or loading spinner
@@ -31,7 +43,19 @@ export default function Home() {
             </Head>
             <Navbar bg="dark" variant="dark" className="mb-4 border-bottom border-secondary">
                 <Container>
-                    <Navbar.Brand>Refund Requests</Navbar.Brand>
+                    <div className="d-flex align-items-center">
+                        {currentUserName && (
+                            <span className="status-item user-info" style={{ marginLeft: 0, marginRight: '10px' }}>
+                                {currentUserName}
+                            </span>
+                        )}
+                        {pid && hash && (
+                            <span className="status-item version-info" style={{ marginLeft: 0, marginRight: '10px' }}>
+                                <VersionBadge pid={pid as string} hash={hash as string} />
+                            </span>
+                        )}
+                        <Navbar.Brand>Refund Requests</Navbar.Brand>
+                    </div>
                 </Container>
             </Navbar>
             <Container className="p-4">

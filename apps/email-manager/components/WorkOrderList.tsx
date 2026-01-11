@@ -151,6 +151,15 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
 
 
 
+    const isWorkOrderIdle = (workOrder: WorkOrder) => {
+        return !workOrder.steps || !workOrder.steps.some(step => {
+            const status = typeof step.status === 'string' ? step.status :
+                (step.status && typeof step.status === 'object' && 'S' in step.status) ?
+                    (step.status as { S: string }).S : 'ready'
+            return status === 'working' || status === 'sleeping'
+        })
+    }
+
     const isWorkOrderCompleted = (workOrder: WorkOrder) => {
         return workOrder.steps && workOrder.steps.every(step => {
             const status = typeof step.status === 'string' ? step.status :
@@ -1007,19 +1016,19 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                                                     >
                                                         {workOrder.locked ? 'Locked' : 'Edit'}
                                                     </Button>
-                                                    {!workOrder.archived && isWorkOrderCompleted(workOrder) && (
+                                                    {!workOrder.archived && (
                                                         <Button
                                                             variant="warning"
                                                             size="sm"
                                                             onClick={(e) => {
                                                                 e.stopPropagation()
-                                                                if (confirm('Are you sure you want to archive this completed work order?')) {
+                                                                if (confirm('Are you sure you want to archive this work order?')) {
                                                                     archiveWorkOrder(workOrder.id)
                                                                 }
                                                             }}
-                                                            disabled={!writePermission}
+                                                            disabled={!writePermission || !isWorkOrderIdle(workOrder)}
                                                             style={{ marginLeft: 8 }}
-                                                            title="Archive completed work order"
+                                                            title={isWorkOrderIdle(workOrder) ? "Archive work order" : "Cannot archive while active"}
                                                         >
                                                             📁
                                                         </Button>
