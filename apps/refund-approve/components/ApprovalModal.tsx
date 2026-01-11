@@ -20,6 +20,7 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({ show, onHide, refund, cre
     const [showConfirmDeny, setShowConfirmDeny] = useState(false);
     const [showConfirmApprove, setShowConfirmApprove] = useState(false);
     const [requesterName, setRequesterName] = useState<string | null>(null);
+    const [relatedSubevents, setRelatedSubevents] = useState<string[]>([]);
 
     useEffect(() => {
         if (show && refund && refund.stripePaymentIntent) {
@@ -52,6 +53,50 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({ show, onHide, refund, cre
                 .catch(err => console.error("Failed to fetch requester details", err));
         }
     }, [show, refund?.requesterPid, creds]);
+
+    // Fetch student and check for related subevents
+    useEffect(() => {
+        if (show && refund && refund.pid && refund.stripePaymentIntent && creds) {
+            setRelatedSubevents([]);
+            getTableItemOrNull('students', refund.pid, creds.pid, creds.hash)
+                .then(student => {
+                    if (student && student.programs) {
+                        const related: string[] = [];
+                        const intent = refund.stripePaymentIntent;
+
+                        Object.entries(student.programs).forEach(([progId, progData]: [string, any]) => {
+                            if (progData.offeringHistory) {
+                                Object.entries(progData.offeringHistory).forEach(([subId, subData]: [string, any]) => {
+                                    // Skip the current offering/subevent
+                                    if (progId === refund.eventCode && subId === refund.subEvent) return;
+
+                                    let match = false;
+                                    if (subData.offeringIntent === intent) match = true;
+
+                                    if (!match && subData.installments) {
+                                        Object.values(subData.installments).forEach((inst: any) => {
+                                            if (inst.offeringIntent === intent) match = true;
+                                        });
+                                    }
+
+                                    if (match) {
+                                        // We don't have eventsData easily available here for full names unless we fetch ALL events.
+                                        // For now, use IDs or basic formatting.
+                                        // If we want names, we'd need to fetch event definitions. 
+                                        // Given this is an admin/approval view, IDs might be acceptable or "eventCode - subEvent".
+                                        // Let's rely on IDs and standard formatting.
+                                        const sName = ['event', 'retreat'].includes(subId.toLowerCase()) ? '' : subId;
+                                        related.push(sName ? `${progId} - ${sName}` : progId);
+                                    }
+                                });
+                            }
+                        });
+                        setRelatedSubevents(Array.from(new Set(related)));
+                    }
+                })
+                .catch(err => console.error("Failed to fetch student details for series check", err));
+        }
+    }, [show, refund, creds]);
 
     const handleProcess = async (action: 'APPROVE' | 'DENY') => {
         setProcessing(true);
@@ -87,6 +132,20 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({ show, onHide, refund, cre
                     <p><strong>Student:</strong> {refund.studentName || refund.pid}</p>
                     <p><strong>Reason:</strong> {refund.reason}</p>
                     <p><strong>Requested By:</strong> {requesterName || refund.requesterName || refund.requesterPid || 'Unknown'}</p>
+
+                    {relatedSubevents.length > 0 && (
+                        <div className="mt-3 p-2 border border-info rounded bg-info bg-opacity-10">
+                            <strong>Related Subevents (Series):</strong>
+                            <ul className="mb-0 ps-3 mt-1">
+                                {relatedSubevents.map((rs, idx) => (
+                                    <li key={idx} className="small">{rs}</li>
+                                ))}
+                            </ul>
+                            <div className="text-muted small mt-1 fst-italic">
+                                Approving this refund will also update the status of these related events.
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 <hr className="border-secondary" />

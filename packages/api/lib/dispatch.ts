@@ -64,7 +64,10 @@ async function dispatchTable(
       return item;
     };
     const maskList = (items: any[]) => items.map(mask);
-    const oidcToken = req.headers['x-vercel-oidc-token'] as string;
+    let oidcToken = req.headers['x-vercel-oidc-token'] as string;
+    if (!oidcToken && process.env.NODE_ENV === 'development') {
+      oidcToken = process.env.VERCEL_OIDC_TOKEN!;
+    }
 
 
     // LIST
@@ -308,7 +311,10 @@ async function dispatchAuth(
   const host = req.headers['x-host'] as string;
   const deviceFingerprint = req.headers['x-device-fingerprint'] as string;
   const clientIp = req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || null;
-  const oidcToken = req.headers['x-vercel-oidc-token'] as string;
+  let oidcToken = req.headers['x-vercel-oidc-token'] as string;
+  if (!oidcToken && process.env.NODE_ENV === 'development') {
+    oidcToken = process.env.VERCEL_OIDC_TOKEN!;
+  }
 
 
   // Validate required parameters
@@ -422,7 +428,10 @@ async function dispatchWebSocket(
           url += '&tableType=work-orders';
         }
         // Extract token from request headers for logging/auth context if needed
-        const oidcToken = req.headers['x-vercel-oidc-token'] as string;
+        let oidcToken = req.headers['x-vercel-oidc-token'] as string;
+        if (!oidcToken && process.env.NODE_ENV === 'development') {
+          oidcToken = process.env.VERCEL_OIDC_TOKEN!;
+        }
 
 
         console.log("DISPATCH: websocket url: ", url);
@@ -470,7 +479,10 @@ async function dispatchSQS(
   const hash = req.headers['x-verification-hash'] as string;
   const host = req.headers['x-host'] as string;
   const deviceFingerprint = req.headers['x-device-fingerprint'] as string;
-  const oidcToken = req.headers['x-vercel-oidc-token'] as string;
+  let oidcToken = req.headers['x-vercel-oidc-token'] as string;
+  if (!oidcToken && process.env.NODE_ENV === 'development') {
+    oidcToken = process.env.VERCEL_OIDC_TOKEN!;
+  }
 
 
   // Validate required parameters
@@ -614,7 +626,10 @@ async function dispatchStripe(
   }
 
   /* OIDC Token Extraction */
-  const oidcToken = req.headers['x-vercel-oidc-token'] as string;
+  let oidcToken = req.headers['x-vercel-oidc-token'] as string;
+  if (!oidcToken && process.env.NODE_ENV === 'development') {
+    oidcToken = process.env.VERCEL_OIDC_TOKEN!;
+  }
 
 
   try {
@@ -709,7 +724,10 @@ async function dispatchRefunds(
   }
 
   /* OIDC Token Extraction */
-  const oidcToken = req.headers['x-vercel-oidc-token'] as string;
+  let oidcToken = req.headers['x-vercel-oidc-token'] as string;
+  if (!oidcToken && process.env.NODE_ENV === 'development') {
+    oidcToken = process.env.VERCEL_OIDC_TOKEN!;
+  }
 
 
   try {

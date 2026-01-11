@@ -144,6 +144,9 @@ const RefundList: React.FC = () => {
                                     ? `$${(r.refundAmount / 100).toFixed(2)}`
                                     : (r.isInstallment ? 'Installment Offering' : 'Full Offering')
                                 }
+                                {r.isSeries && (
+                                    <span className="ms-2 text-info small fst-italic">(series)</span>
+                                )}
                             </td>
                             <td>
                                 <Badge bg={
