@@ -367,7 +367,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             setSubEvent('')
             setInPerson(false)
         }
-    }, [eventCode, events, id])
+    }, [eventCode, events, id, subEvent])
 
     // Load existing work orders when eventCode or subEvent changes
     useEffect(() => {
