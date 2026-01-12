@@ -207,7 +207,11 @@ def reconcile_transactions(profile, student_table_name, tx_table_name, dry_run):
             if amount is None: amount = 0
             amount = Decimal(amount)
             
-            ts_str = tx.get('timestamp') # "2025-10-05T12:33:18.798Z"
+            ts_str = tx.get('emailReceipt') 
+            if not ts_str:
+                print(f"  [MISSING EMAIL RECEIPT] PI {tx['transaction']} | Status is correctly REFUNDED")
+                ts_str = tx.get('timestamp') 
+
             year = 'Unknown'
             if ts_str:
                 try:
