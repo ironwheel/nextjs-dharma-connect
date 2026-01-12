@@ -343,18 +343,17 @@ export async function listRefunds(limit: number = 20, offset: number = 0, oidcTo
 
                     // Check for Series (Multiple occurrences of same stripePaymentIntent)
                     let intentCount = 0;
-                    if (s.programs) {
-                        for (const pData of Object.values(s.programs) as any[]) {
-                            if (pData.offeringHistory) {
-                                for (const subData of Object.values(pData.offeringHistory) as any[]) {
-                                    if (subData.offeringIntent === r.stripePaymentIntent) {
-                                        intentCount++;
-                                    }
-                                    if (subData.installments) {
-                                        for (const inst of Object.values(subData.installments) as any[]) {
-                                            if (inst.offeringIntent === r.stripePaymentIntent) {
-                                                intentCount++;
-                                            }
+                    if (s.programs && r.eventCode && s.programs[r.eventCode]) {
+                        const pData = s.programs[r.eventCode];
+                        if (pData.offeringHistory) {
+                            for (const subData of Object.values(pData.offeringHistory) as any[]) {
+                                if (subData.offeringIntent === r.stripePaymentIntent && r.stripePaymentIntent !== 'installments') {
+                                    intentCount++;
+                                }
+                                if (subData.installments) {
+                                    for (const inst of Object.values(subData.installments) as any[]) {
+                                        if (inst.offeringIntent === r.stripePaymentIntent && r.stripePaymentIntent !== 'installments') {
+                                            intentCount++;
                                         }
                                     }
                                 }
@@ -528,32 +527,34 @@ export async function processRefund(
                 const expressionAttributeNames: Record<string, string> = {};
                 let pathCounter = 0;
 
-                // Scan all programs/subevents
-                for (const [pId, pData] of Object.entries(student.programs) as [string, any][]) {
-                    if (pData.offeringHistory) {
-                        for (const [subId, subData] of Object.entries(pData.offeringHistory) as [string, any][]) {
-                            // Check direct offeringIntent
-                            if (subData.offeringIntent === stripePaymentIntent) {
-                                const pKey = `#p${pathCounter}`;
-                                const subKey = `#s${pathCounter}`;
-                                expressionAttributeNames[pKey] = pId;
-                                expressionAttributeNames[subKey] = subId;
-                                updateActions.push(`programs.${pKey}.offeringHistory.${subKey}.offeringRefund = :trueVal`);
-                                pathCounter++;
-                            }
-                            // Check installments
-                            if (subData.installments) {
-                                for (const [instId, instData] of Object.entries(subData.installments) as [string, any][]) {
-                                    if (instData.offeringIntent === stripePaymentIntent) {
-                                        const pKey = `#p${pathCounter}`;
-                                        const subKey = `#s${pathCounter}`;
-                                        const instKey = `#i${pathCounter}`;
-                                        expressionAttributeNames[pKey] = pId;
-                                        expressionAttributeNames[subKey] = subId;
-                                        expressionAttributeNames[instKey] = instId;
-                                        updateActions.push(`programs.${pKey}.offeringHistory.${subKey}.installments.${instKey}.offeringRefund = :trueVal`);
-                                        pathCounter++;
-                                    }
+                // Scoped update logic
+                if (student.programs[eventCode] && student.programs[eventCode].offeringHistory) {
+                    const pId = eventCode;
+                    const pData = student.programs[eventCode];
+
+                    for (const [subId, subData] of Object.entries(pData.offeringHistory) as [string, any][]) {
+                        // Check direct offeringIntent
+                        if (subData.offeringIntent === stripePaymentIntent && stripePaymentIntent !== 'installments') {
+                            const pKey = `#p${pathCounter}`;
+                            const subKey = `#s${pathCounter}`;
+                            expressionAttributeNames[pKey] = pId;
+                            expressionAttributeNames[subKey] = subId;
+                            updateActions.push(`programs.${pKey}.offeringHistory.${subKey}.offeringRefund = :trueVal`);
+                            pathCounter++;
+                        }
+
+                        // Check installments
+                        if (subData.installments) {
+                            for (const [instId, instData] of Object.entries(subData.installments) as [string, any][]) {
+                                if (instData.offeringIntent === stripePaymentIntent && stripePaymentIntent !== 'installments') {
+                                    const pKey = `#p${pathCounter}`;
+                                    const subKey = `#s${pathCounter}`;
+                                    const instKey = `#i${pathCounter}`;
+                                    expressionAttributeNames[pKey] = pId;
+                                    expressionAttributeNames[subKey] = subId;
+                                    expressionAttributeNames[instKey] = instId;
+                                    updateActions.push(`programs.${pKey}.offeringHistory.${subKey}.installments.${instKey}.offeringRefund = :trueVal`);
+                                    pathCounter++;
                                 }
                             }
                         }
