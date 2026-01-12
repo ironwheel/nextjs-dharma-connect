@@ -160,6 +160,7 @@ def reconcile_transactions(profile, student_table_name, tx_table_name, dry_run):
                         else:
                             stats_sync['marked_refunded'] += 1
                     else:
+                        print(f"  [ALREADY REFUNDED] PI {pi_id} | Status is correctly REFUNDED")
                         stats_sync['already_refunded'] += 1
 
         start_key = response.get('LastEvaluatedKey', None)
@@ -262,7 +263,7 @@ def reconcile_transactions(profile, student_table_name, tx_table_name, dry_run):
 
 def main():
     parser = argparse.ArgumentParser(description='Reconcile transactions.')
-    parser.add_argument('--profile', required=True, help='AWS CLI profile')
+    parser.add_argument('--profile', required=False, help='AWS CLI profile')
     parser.add_argument('--dry-run', action='store_true', help='Dry run mode')
     # Allow args override but default to env
     
