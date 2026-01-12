@@ -55,6 +55,7 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({ show, onHide, refund, cre
     }, [show, refund?.requesterPid, creds]);
 
     // Fetch student and check for related subevents
+    // Fetch student and check for related subevents
     useEffect(() => {
         if (show && refund && refund.pid && refund.stripePaymentIntent && creds) {
             setRelatedSubevents([]);
@@ -64,33 +65,28 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({ show, onHide, refund, cre
                         const related: string[] = [];
                         const intent = refund.stripePaymentIntent;
 
-                        Object.entries(student.programs).forEach(([progId, progData]: [string, any]) => {
-                            if (progData.offeringHistory) {
-                                Object.entries(progData.offeringHistory).forEach(([subId, subData]: [string, any]) => {
-                                    // Skip the current offering/subevent
-                                    if (progId === refund.eventCode && subId === refund.subEvent) return;
+                        // Scoped search to the specific event/program
+                        if (student.programs[refund.eventCode] && student.programs[refund.eventCode].offeringHistory) {
+                            const progData = student.programs[refund.eventCode];
+                            Object.entries(progData.offeringHistory).forEach(([subId, subData]: [string, any]) => {
+                                // Skip the current offering/subevent
+                                if (subId === refund.subEvent) return;
 
-                                    let match = false;
-                                    if (subData.offeringIntent === intent) match = true;
+                                let match = false;
+                                if (subData.offeringIntent === intent && intent !== 'installments') match = true;
 
-                                    if (!match && subData.installments) {
-                                        Object.values(subData.installments).forEach((inst: any) => {
-                                            if (inst.offeringIntent === intent) match = true;
-                                        });
-                                    }
+                                if (!match && subData.installments) {
+                                    Object.values(subData.installments).forEach((inst: any) => {
+                                        if (inst.offeringIntent === intent && intent !== 'installments') match = true;
+                                    });
+                                }
 
-                                    if (match) {
-                                        // We don't have eventsData easily available here for full names unless we fetch ALL events.
-                                        // For now, use IDs or basic formatting.
-                                        // If we want names, we'd need to fetch event definitions. 
-                                        // Given this is an admin/approval view, IDs might be acceptable or "eventCode - subEvent".
-                                        // Let's rely on IDs and standard formatting.
-                                        const sName = ['event', 'retreat'].includes(subId.toLowerCase()) ? '' : subId;
-                                        related.push(sName ? `${progId} - ${sName}` : progId);
-                                    }
-                                });
-                            }
-                        });
+                                if (match) {
+                                    const sName = ['event', 'retreat'].includes(subId.toLowerCase()) ? '' : subId;
+                                    related.push(sName ? `${refund.eventCode} - ${sName}` : refund.eventCode);
+                                }
+                            });
+                        }
                         setRelatedSubevents(Array.from(new Set(related)));
                     }
                 })

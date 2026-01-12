@@ -253,33 +253,34 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
         const candidateIntents = new Set(offering.refundItems?.map((ri: any) => ri.offeringIntent) || []);
         if (offering.offeringIntent) candidateIntents.add(offering.offeringIntent);
 
-        if (candidateIntents.size > 0 && student.programs) {
-            Object.entries(student.programs).forEach(([progId, progData]: [string, any]) => {
-                if (progData.offeringHistory) {
-                    Object.entries(progData.offeringHistory).forEach(([subId, subData]: [string, any]) => {
-                        // Skip the current offering/subevent
-                        if (progId === offering.programId && subId === offering.eventId) return;
+        // Remove "installments" from candidate intents
+        candidateIntents.delete("installments");
 
-                        let match = false;
-                        if (candidateIntents.has(subData.offeringIntent)) match = true;
+        if (candidateIntents.size > 0 && student.programs && student.programs[offering.programId]) {
+            const progData = student.programs[offering.programId];
+            if (progData.offeringHistory) {
+                Object.entries(progData.offeringHistory).forEach(([subId, subData]: [string, any]) => {
+                    // Skip the current offering/subevent
+                    if (subId === offering.eventId) return;
 
-                        if (!match && subData.installments) {
-                            Object.values(subData.installments).forEach((inst: any) => {
-                                if (candidateIntents.has(inst.offeringIntent)) match = true;
-                            });
-                        }
+                    let match = false;
+                    // Check direct offeringIntent
+                    if (candidateIntents.has(subData.offeringIntent)) match = true;
 
-                        if (match) {
-                            // Format: "EventName - SubEventName" or just SubEventName if same event?
-                            // Let's look up event name from eventsData if possible, or just use IDs.
-                            // eventsData is available in scope.
-                            const eName = eventsData[progId]?.name || progId;
-                            const sName = ['event', 'retreat'].includes(subId.toLowerCase()) ? '' : subId;
-                            related.push(sName ? `${eName} - ${sName}` : eName);
-                        }
-                    });
-                }
-            });
+                    // Check installments
+                    if (!match && subData.installments) {
+                        Object.values(subData.installments).forEach((inst: any) => {
+                            if (candidateIntents.has(inst.offeringIntent)) match = true;
+                        });
+                    }
+
+                    if (match) {
+                        const eName = eventsData[offering.programId]?.name || offering.programId;
+                        const sName = ['event', 'retreat'].includes(subId.toLowerCase()) ? '' : subId;
+                        related.push(sName ? `${eName} - ${sName}` : eName);
+                    }
+                });
+            }
         }
         setRelatedSubevents(Array.from(new Set(related))); // Dedupe strings
 
