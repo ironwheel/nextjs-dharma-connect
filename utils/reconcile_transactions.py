@@ -83,6 +83,8 @@ def reconcile_transactions(profile, student_table_name, tx_table_name, dry_run):
     done = False
     start_key = None
 
+    processed_pis = set()
+
     while not done:
         if start_key:
             scan_kwargs['ExclusiveStartKey'] = start_key
@@ -104,6 +106,10 @@ def reconcile_transactions(profile, student_table_name, tx_table_name, dry_run):
                 # Basic validation
                 if not isinstance(pi_id, str) or not pi_id.startswith('pi_'):
                     continue
+                
+                if pi_id in processed_pis:
+                    continue
+                processed_pis.add(pi_id)
                 
                 stats_sync['scanned_intents'] += 1
                 
