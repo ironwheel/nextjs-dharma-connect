@@ -83,6 +83,15 @@ class TestStep:
                 raise Exception(f"Event {work_order.eventCode} not found")
             await self._update_progress(work_order, f"Loaded event data for {work_order.eventCode}")
             
+            # QA Check: Registration Link Availability
+            # If the work order requires a registration link, ensure the event is marked as ready
+            if getattr(work_order, 'regLinkPresent', False):
+                sub_events = event_data.get('subEvents', {})
+                sub_event_config = sub_events.get(work_order.subEvent, {})
+                if not sub_event_config.get('regLinkAvailable', False):
+                    raise ValueError("Registration form not ready")
+
+            
             # Validate that S3 HTML paths are available
             if not work_order.s3HTMLPaths:
                 raise Exception("No S3 HTML paths found. Prepare step must be completed first.")
