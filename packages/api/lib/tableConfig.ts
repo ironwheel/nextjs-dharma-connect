@@ -38,8 +38,8 @@ export const tables: TableConfig[] = [
   { resource: 'mantra-config', envVar: 'DYNAMODB_TABLE_MANTRA_CONFIG', pk: 'id', sk: '', ops: ['get', 'put', 'list', 'update'] },
   { resource: 'sd-prompts-cache', envVar: 'DYNAMODB_TABLE_PROMPTS_CACHE', pk: 'eventCode', sk: 'promptKey', ops: ['get', 'list', 'query'] },
   { resource: 'refunds', envVar: 'DYNAMODB_TABLE_REFUNDS', pk: 'stripePaymentIntent', sk: '', ops: ['get', 'list', 'put'] },
-  // Version records for deployments (git SHA keyed)
   { resource: 'versions', envVar: 'DYNAMODB_TABLE_VERSIONS', pk: 'gitSHA', sk: '', ops: ['get', 'list', 'put'] },
+  { resource: 'transactions', envVar: 'DYNAMODB_TABLE_TRANSACTIONS', pk: 'transaction', sk: '', ops: ['get', 'update'] },
 ];
 
 /**
