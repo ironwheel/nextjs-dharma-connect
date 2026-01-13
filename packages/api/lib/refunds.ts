@@ -483,6 +483,45 @@ export async function processRefund(
     // 3. Handle APPROVE
     if (action === 'APPROVE') {
         let refundResult;
+
+        // 0. Update Transaction Status (DynamoDB) - BEFORE Stripe Refund
+        // As per requirement: Check if transaction exists and status is COMPLETED.
+        // Then set status = REFUNDED and refundedAt = timestamp.
+        const transactionsTableCfg = tableGetConfig('transactions');
+        try {
+            const txRecord = await getOne(transactionsTableCfg.tableName, transactionsTableCfg.pk, stripePaymentIntent, undefined, oidcToken);
+            if (!txRecord) {
+                const msg = `Transaction record not found for intent ${stripePaymentIntent}`;
+                // If the user wants this to be a BLOCKER, we throw error.
+                throw new Error(msg);
+            }
+            if (txRecord.status !== 'COMPLETED') {
+                const msg = `Transaction status is '${txRecord.status}', expected 'COMPLETED' for intent ${stripePaymentIntent}`;
+                throw new Error(msg);
+            }
+
+            // Update Transaction
+            await updateItem(
+                transactionsTableCfg.tableName,
+                { [transactionsTableCfg.pk]: stripePaymentIntent },
+                'SET #status = :status, #refundedAt = :refundedAt',
+                {
+                    ':status': 'REFUNDED',
+                    ':refundedAt': timestamp
+                },
+                {
+                    '#status': 'status',
+                    '#refundedAt': 'refundedAt'
+                },
+                undefined,
+                oidcToken
+            );
+
+        } catch (txErr: any) {
+            console.error('Failed to update transaction status:', txErr);
+            throw txErr; // Re-throw to block refund process as per implied requirement
+        }
+
         try {
             // A. Stripe Refund
             // Pass refundAmount if it exists in the request
