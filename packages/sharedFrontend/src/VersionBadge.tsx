@@ -186,7 +186,7 @@ const VersionBadge: React.FC<VersionBadgeProps> = ({ pid, hash, gitShaOverride, 
         dialogClassName="version-modal-dialog"
         contentClassName="bg-slate-900 text-slate-100 border border-slate-700"
       >
-        <Modal.Header closeButton>
+        <Modal.Header closeButton closeVariant="white">
           <Modal.Title>
             <span className="text-sm font-semibold tracking-wide text-slate-200">
               Version Notes
@@ -224,11 +224,10 @@ const VersionBadge: React.FC<VersionBadgeProps> = ({ pid, hash, gitShaOverride, 
             return (
               <div
                 key={record.gitSHA}
-                className={`version-notes-card mb-3 rounded-md border px-4 py-3 ${
-                  isCurrent
+                className={`version-notes-card mb-3 rounded-md border px-4 py-3 ${isCurrent
                     ? 'border-blue-400/80 bg-slate-800/80'
                     : 'border-slate-700 bg-slate-900'
-                }`}
+                  }`}
               >
                 <div className="mb-1 flex items-baseline justify-between gap-3">
                   <div className="text-sm font-semibold">

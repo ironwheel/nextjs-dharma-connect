@@ -19,6 +19,8 @@ import { VersionBadge } from 'sharedFrontend';
 // Import custom DataTable component
 import { DataTable, Column } from '../components/DataTable';
 import { CustomDropdown } from '../components/CustomDropdown';
+import { ConfirmLoadModal } from '../components/ConfirmLoadModal';
+import { EventSelection } from '../components/EventSelection';
 // Types
 interface Transaction {
     transaction: string;
@@ -103,12 +105,14 @@ const Home = () => {
     // Data State
     const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [cacheItems, setCacheItems] = useState<any[]>([]);
+    const [rawLoaded, setRawLoaded] = useState(false);
+    const [dataSource, setDataSource] = useState<'cache' | 'raw'>('cache');
 
     const [loadingTransactions, setLoadingTransactions] = useState(false);
 
     // Filter State
-    const [eventListSearchTerm, setEventListSearchTerm] = useState('');
-    const [eventDropdownOpen, setEventDropdownOpen] = useState(false);
+
 
 
 
@@ -140,179 +144,52 @@ const Home = () => {
         }
     }, [router.query]);
 
-    // Helper functions for Event Selector
-    const formatSubEventDisplay = (event: Event, subEventKey: string, subEventData: any) => {
-        const date = subEventData.date || '';
-        const hasMultipleSubEvents = Object.keys(event.subEvents || {}).length > 1;
+    // -------------------------------------------------------------------------
+    // CONFIRMATION MODAL LOGIC
+    // -------------------------------------------------------------------------
+    const [showLoadModal, setShowLoadModal] = useState(false);
+    const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
 
-        if (date && hasMultipleSubEvents) {
-            return `${date} ${event.name} (${subEventKey})`;
-        } else if (date) {
-            return `${date} ${event.name}`;
+    const triggerLoadAction = (action: () => void) => {
+        if (rawLoaded) {
+            // Already loaded, just do it
+            action();
         } else {
-            return event.name;
+            // Prompt user
+            setPendingAction(() => action);
+            setShowLoadModal(true);
         }
     };
 
-    const getAllSubEvents = (events: Event[]): SubEventItem[] => {
-        const subEvents: SubEventItem[] = [];
-        if (!Array.isArray(events)) return subEvents;
-
-        events.forEach(event => {
-            if (event.hide) return;
-            if (event.list === true) return;
-
-            const subEventKeys = Object.keys(event.subEvents || {});
-
-            if (subEventKeys.length === 0) {
-                subEvents.push({
-                    event,
-                    subEventKey: '',
-                    subEventData: {},
-                    date: '',
-                    displayText: event.name,
-                    eventKey: `${event.aid}`
-                });
-            } else {
-                subEventKeys.forEach(subEventKey => {
-                    const subEventData = (event.subEvents || {})[subEventKey];
-                    const date = subEventData?.date || '';
-                    const displayText = formatSubEventDisplay(event, subEventKey, subEventData);
-                    subEvents.push({
-                        event,
-                        subEventKey,
-                        subEventData,
-                        date,
-                        displayText,
-                        eventKey: `${event.aid}:${subEventKey}`
-                    });
-                });
-            }
-        });
-        return subEvents;
-    };
-
-    const sortSubEventsByDate = (subEvents: SubEventItem[]): SubEventItem[] => {
-        return [...subEvents].sort((a, b) => {
-            if (a.date && b.date) {
-                return b.date.localeCompare(a.date); // Newest first
-            } else if (a.date) {
-                return -1;
-            } else if (b.date) {
-                return 1;
-            } else {
-                return a.displayText.localeCompare(b.displayText);
-            }
-        });
-    };
-
-    // EventSelection Component
-    const EventSelection = () => {
-        const handleEventSelection = (eventKey: string) => {
-            setSelectedEventKey(eventKey);
-            // Derive Aid
-            const aid = eventKey.includes(':') ? eventKey.split(':').shift() || '' : eventKey;
-            setSelectedEventAid(aid);
-
-            setEventDropdownOpen(false);
-            setEventListSearchTerm('');
-        };
-
-        const allSubEvents = getAllSubEvents(events);
-        const sortedSubEvents = sortSubEventsByDate(allSubEvents);
-
-        // Logic: Add "All Events" at top 
-        const allItems = [
-            { displayText: 'All Events', eventKey: 'all', event: { aid: 'all', name: 'All Events' } as Event },
-            ...sortedSubEvents
-        ];
-
-        const filteredItems = eventListSearchTerm.trim() === ''
-            ? allItems
-            : allItems.filter(item => {
-                const searchLower = eventListSearchTerm.toLowerCase();
-                return item.displayText.toLowerCase().includes(searchLower) ||
-                    (item.event && item.event.aid.toLowerCase().includes(searchLower));
-            });
-
-        // Find current display text
-        let currentText = "Select Event";
-        if (selectedEventKey === 'all') {
-            currentText = "All Events";
-        } else {
-            const found = sortedSubEvents.find(i => i.eventKey === selectedEventKey);
-            if (found) currentText = found.displayText;
-            else {
-                // Fallback
-                const foundByAid = sortedSubEvents.find(i => i.event.aid === selectedEventAid);
-                if (foundByAid) currentText = foundByAid.displayText;
-            }
+    const confirmLoadAction = () => {
+        if (pendingAction) {
+            // Trigger the loading action.
+            // We DO NOT close the modal here. The modal becomes the progress indicator.
+            pendingAction();
+            // pendAction -> setDataSource('raw') -> useEffect -> fetchRawTransactions -> loadingTransactions=true
         }
-
-        return (
-            <div className="modern-dropdown" ref={dropdownRef}>
-                <div
-                    className="dropdown-trigger"
-                    onClick={() => setEventDropdownOpen(!eventDropdownOpen)}
-                    style={{ minWidth: '350px', maxWidth: '800px', width: 'auto', justifyContent: 'space-between' }}
-                >
-                    <span className="dropdown-title" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentText}</span>
-                    <svg
-                        className={`dropdown-arrow ${eventDropdownOpen ? 'rotated' : ''}`}
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                    >
-                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                    </svg>
-                </div>
-
-                <div className={`dropdown-menu custom-dropdown-menu ${eventDropdownOpen ? 'open' : ''}`}>
-                    <div className="p-2 sticky-top bg-black border-bottom border-secondary">
-                        <div className="search-container">
-                            <input
-                                type="text"
-                                className="search-input w-100"
-                                placeholder="Search events..."
-                                value={eventListSearchTerm}
-                                onChange={(e) => setEventListSearchTerm(e.target.value)}
-                                onClick={(e) => e.stopPropagation()}
-                            />
-                        </div>
-                    </div>
-
-                    <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-                        {filteredItems.map(item => (
-                            <button
-                                key={item.eventKey}
-                                className="dropdown-item"
-                                onClick={() => handleEventSelection(item.eventKey)}
-                            >
-                                {item.displayText}
-                            </button>
-                        ))}
-                        {filteredItems.length === 0 && (
-                            <div className="p-3 text-center text-muted">No events found</div>
-                        )}
-                    </div>
-                </div>
-            </div>
-        );
+        // Don't clear pendingAction yet, wait for finish
     };
 
-    // Close dropdown on click outside
-    const dropdownRef = useRef<HTMLDivElement>(null);
+    const cancelLoadAction = () => {
+        if (loadingTransactions) return; // Prevent cancelling mid-load if critical? Or allow it? 
+        // User asked to "leave it up until load completes".
+
+        setShowLoadModal(false);
+        setPendingAction(null);
+    };
+
+    // Close modal when loading finishes (if it was open)
     useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-                setEventDropdownOpen(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => {
-            document.removeEventListener('mousedown', handleClickOutside);
-        };
-    }, []);
+        if (!loadingTransactions && showLoadModal && rawLoaded) {
+            setShowLoadModal(false);
+            setPendingAction(null);
+        }
+    }, [loadingTransactions, rawLoaded, showLoadModal]);
+
+    // Modal Component
+    // Components extracted to separate files
+
 
     // Initial Load - Fetch Events & Config
     useEffect(() => {
@@ -364,6 +241,15 @@ const Home = () => {
                         if (filteredViews.length > 0) {
                             setSelectedViewName(prev => {
                                 if (prev && filteredViews.find(v => v.name === prev)) return prev;
+
+                                // Prioritize "Completed" view or any view with status='COMPLETED'
+                                const completedView = filteredViews.find(v => {
+                                    const s = v.conditions?.find(c => c.name === 'transactionStatus');
+                                    return s?.statusValue === 'COMPLETED';
+                                });
+
+                                if (completedView) return completedView.name;
+
                                 return filteredViews[0].name;
                             });
                         }
@@ -427,96 +313,252 @@ const Home = () => {
         if (storedMonth) setSelectedMonth(storedMonth);
     }, [pid, hash]);
 
-    // Fetch All Transactions ONCE
+    // Load Data (Cache + Config)
     useEffect(() => {
         if (!pid || !hash) return;
 
-        const fetchAllTransactions = async () => {
-            // Only fetch if empty
-            if (allTransactions.length > 0) return;
-
-            setLoadingTransactions(true);
-            setTxnLoadedCount(0);
+        const fetchData = async () => {
             try {
-                // Get Total Count first
-                const countRes = await getTableCount('transactions', pid as string, hash as string);
-                const total = 'count' in countRes ? countRes.count : 0;
-                setTxnTotalCount(total);
+                setLoadingTransactions(true);
 
-                const onProgress = (count: number, chunk: number, totalChunks: number) => {
-                    setTxnLoadedCount(count);
-                };
-
-                const allTxns = await getAllTableItems('transactions', pid as string, hash as string, onProgress);
-
-                if (Array.isArray(allTxns)) {
-                    setAllTransactions(allTxns as Transaction[]);
+                // 1. Fetch Cache
+                const cacheData = await getAllTableItems('transactions-cache', pid, hash);
+                if (Array.isArray(cacheData)) {
+                    setCacheItems(cacheData);
                 }
+
+                // 2. Fetch Events
+                const eventsData = await getAllTableItems('events', pid, hash);
+                if (!Array.isArray(eventsData) && (eventsData as any).redirected) {
+                    router.push('/login');
+                    return;
+                }
+                if (Array.isArray(eventsData)) {
+                    const filteredEvents = (eventsData as Event[]).filter(e => e.list !== true);
+                    setEvents(filteredEvents.sort((a, b) => b.name.localeCompare(a.name)));
+                }
+
+                // 3. Fetch View Config
+                const profile = await authGetConfigValue(pid, hash, 'offeringViewsProfile');
+                setOfferingViewsProfile(profile || 'default');
+
+                const viewsData = await getAllTableItems('views', pid, hash);
+                const viewsProfileData = await getAllTableItems('views-profiles', pid, hash);
+
+                if (viewsData && viewsProfileData) {
+                    const pName = profile || 'default';
+                    const profileRec = (viewsProfileData as any[]).find(p => p.profile === pName);
+                    if (profileRec && profileRec.views) {
+                        const filteredViews = (viewsData as any[]).filter(v => profileRec.views.includes(v.name));
+                        setViews(filteredViews);
+                        if (filteredViews.length > 0) {
+                            const defaultView = filteredViews.find(v => v.name === 'Refunded All') || filteredViews[0];
+                            setSelectedViewName(defaultView.name);
+                        }
+                    } else {
+                        setViews(viewsData as View[]);
+                    }
+                }
+
+                // 4. Get Total TX Count (for progress bar later)
+                const countResp = await getTableCount('transactions', pid, hash);
+                if (countResp && (countResp as any).count) {
+                    setTxnTotalCount((countResp as any).count);
+                }
+
+                setLoadingTransactions(false);
             } catch (err) {
-                console.error("Error fetching transactions:", err);
-                toast.error("Failed to load transactions.");
-            } finally {
+                console.error("Error loading data", err);
+                toast.error("Failed to load initial data");
                 setLoadingTransactions(false);
             }
         };
 
-        fetchAllTransactions();
+        fetchData();
     }, [pid, hash]);
 
-    // Filter Transactions locally
+    // Helper: Fetch Raw Transactions (Lazy)
+    const fetchRawTransactions = useCallback(async () => {
+        if (rawLoaded || loadingTransactions || !pid || !hash) return;
+        setLoadingTransactions(true);
+        const onProgress = (loaded: number, chunk: number, total: number) => {
+            setTxnLoadedCount(loaded);
+        };
+        try {
+            const txs = await getAllTableItems('transactions', pid, hash, onProgress);
+            if (Array.isArray(txs)) {
+                setAllTransactions(txs);
+                setRawLoaded(true);
+            }
+        } catch (e) {
+            console.error(e);
+            toast.error("Failed to load transactions");
+        } finally {
+            setLoadingTransactions(false);
+        }
+    }, [pid, hash, rawLoaded, loadingTransactions]);
+
+    // Determine Display Data
     useEffect(() => {
-        if (!allTransactions.length) {
-            setTransactions([]);
-            return;
+        const isYearAll = selectedYear === 'all';
+        const isMonthAll = selectedMonth === 'all';
+
+        console.log("--- Display Data Effect ---");
+        console.log(`DataSource: ${dataSource}, RawLoaded: ${rawLoaded}`);
+        console.log(`Filters - Year: ${selectedYear}, Month: ${selectedMonth}, Event: ${selectedEventAid}, View: ${selectedViewName}`);
+
+        // Debug View Object
+        const debugView = views.find(v => v.name === selectedViewName);
+        if (debugView) {
+            console.log(`DebugViewObject: Name=${debugView.name}, Conditions=${JSON.stringify(debugView.conditions)}`);
+        } else {
+            console.log(`DebugViewObject: Not Found`);
         }
 
-        let filtered = [...allTransactions];
+        console.log(`Counts - AllTxns: ${allTransactions.length}, CacheItems: ${cacheItems.length}`);
 
-        // 1. Filter by Event
-        if (selectedEventAid && selectedEventAid !== 'all') {
-            filtered = filtered.filter((t: Transaction) => t.aid === selectedEventAid);
-        }
 
-        // 2. Filter by Date (Year/Month)
-        if (selectedYear !== 'all') {
-            const year = parseInt(selectedYear);
-            let startDate: Date;
-            let endDate: Date;
+        // Auto-switch back to cache if everything is reset? 
+        // Maybe too aggressive. Let's stick to explicit mode.
 
-            if (selectedMonth !== 'all') {
-                const month = parseInt(selectedMonth);
-                startDate = new Date(year, month, 1);
-                endDate = new Date(year, month + 1, 0, 23, 59, 59, 999);
+        if (dataSource === 'raw') {
+            // ---------------------
+            // SHOW RAW TRANSACTIONS
+            // ---------------------
+            if (!rawLoaded) {
+                // If we are here, it means we entered RAW mode.
+                // fetchRawTransactions checks rawLoaded internally, but we can verify.
+                fetchRawTransactions();
+            }
+
+            if (!allTransactions.length) {
+                setTransactions([]);
+                return;
+            }
+
+            let filtered = [...allTransactions];
+
+            // Event Filter
+            if (selectedEventAid && selectedEventAid !== 'all') {
+                filtered = filtered.filter((t: Transaction) => t.aid === selectedEventAid);
+            }
+            console.log(`After Event Filter: ${filtered.length}`);
+
+            // Date Filter
+            const y = parseInt(selectedYear);
+            const m = parseInt(selectedMonth);
+
+            if (!isYearAll) {
+                if (!isMonthAll) {
+                    // Specific Month
+                    const startDate = new Date(y, m, 1);
+                    const endDate = new Date(y, m + 1, 0, 23, 59, 59, 999);
+                    filtered = filtered.filter(t => {
+                        const d = new Date(t.timestamp);
+                        return d >= startDate && d <= endDate;
+                    });
+                } else {
+                    // Specific Year (All Months)
+                    const startDate = new Date(y, 0, 1);
+                    const endDate = new Date(y, 11, 31, 23, 59, 59, 999);
+                    filtered = filtered.filter(t => {
+                        const d = new Date(t.timestamp);
+                        return d >= startDate && d <= endDate;
+                    });
+                }
+            }
+            console.log(`After Date Filter: ${filtered.length}`);
+
+            // View Filter
+            const currentView = views.find(v => v.name === selectedViewName);
+
+            // STRICT FILTERING: All views on this dashboard require step === 'confirmCardPayment'
+            filtered = filtered.filter(t => t.step === 'confirmCardPayment');
+            console.log(`After Step Filter (confirmCardPayment): ${filtered.length}`);
+
+            // Apply Status Filter from View
+            if (currentView?.conditions) {
+                const statusCond = currentView.conditions.find(c => c.name === 'transactionStatus');
+                if (statusCond?.statusValue) {
+                    console.log(`Applying Status Filter: ${statusCond.statusValue}`);
+                    filtered = filtered.filter(t => t.status === statusCond.statusValue);
+                    console.log(`After Status Filter (${statusCond.statusValue}): ${filtered.length}`);
+                } else {
+                    console.log("Status Condition found but no statusValue?");
+                }
             } else {
-                startDate = new Date(year, 0, 1);
-                endDate = new Date(year, 11, 31, 23, 59, 59, 999);
+                console.log("No conditions found for this view. Checking for Name-based fallback...");
+                // FALLBACK: If data integrity is poor, we infer from name.
+                // This is critical for local dev vs production data mismatches.
+                if (currentView?.name === 'Refunded') {
+                    console.log("Applying Fallback Filter: REFUNDED");
+                    filtered = filtered.filter(t => t.status === 'REFUNDED');
+                    console.log(`After Fallback Status Filter (REFUNDED): ${filtered.length}`);
+                } else if (currentView?.name === 'Completed') {
+                    console.log("Applying Fallback Filter: COMPLETED");
+                    filtered = filtered.filter(t => t.status === 'COMPLETED');
+                    console.log(`After Fallback Status Filter (COMPLETED): ${filtered.length}`);
+                }
             }
+            setTransactions(filtered);
 
-            filtered = filtered.filter((t: Transaction) => {
-                const d = new Date(t.timestamp);
-                return d >= startDate && d <= endDate;
-            });
-        } else if (selectedMonth !== 'all') {
-            // Year is 'all' but Month is selected -> Filter by month across ANY year
-            const monthToCheck = parseInt(selectedMonth);
-            filtered = filtered.filter((t: Transaction) => {
-                const d = new Date(t.timestamp);
-                return d.getMonth() === monthToCheck;
-            });
-        }
+        } else {
+            // ---------------------
+            // SHOW AGGREGATE CACHE
+            // ---------------------
+            // If year/month are selected, we just filter the cache items accordingly.
+            console.log("Processing Cache Logic...");
 
-        // 3. Filter by View Conditions
-        const currentView = views.find(v => v.name === selectedViewName);
-        if (currentView && currentView.conditions) {
-            const statusCond = currentView.conditions.find(c => c.name === 'transactionStatus');
-            if (statusCond && statusCond.statusValue) {
-                filtered = filtered.filter((t: Transaction) => t.status === statusCond.statusValue);
+            let filteredCache: any[] = [];
+            if (isYearAll && isMonthAll) {
+                // Show YEARS
+                filteredCache = cacheItems.filter(i => i.type === 'YEAR');
+                filteredCache.sort((a, b) => b.year - a.year);
+            } else if (!isYearAll && isMonthAll) {
+                // Show MONTHS for selected Year
+                const yVal = parseInt(selectedYear);
+                filteredCache = cacheItems.filter(i => i.type === 'MONTH' && i.year === yVal);
+                filteredCache.sort((a, b) => b.month - a.month);
+            } else if (!isYearAll && !isMonthAll) {
+                // Specific Month (Single Row)
+                const yVal = parseInt(selectedYear);
+                const mVal = parseInt(selectedMonth);
+                filteredCache = cacheItems.filter(i => i.type === 'MONTH' && i.year === yVal && i.month === mVal);
+            } else {
+                // Specific Month, All Years (unlikely UX but supported)
+                const mVal = parseInt(selectedMonth);
+                filteredCache = cacheItems.filter(i => i.type === 'MONTH' && i.month === mVal);
+                filteredCache.sort((a, b) => b.year - a.year);
             }
+            console.log(`Filtered Cache Items: ${filteredCache.length}`);
+
+            // Map to Transaction Interface
+            setTransactions(filteredCache.map(c => ({
+                transaction: c.id,
+                aid: 'AGGREGATE',
+                cart: '',
+                currency: c.currency || 'usd',
+                email: '',
+                emailReceipt: '',
+                id: c.id,
+                kmFee: c.kmFee, // In Dollars
+                name: c.type === 'YEAR' ? `${c.year} Summary` : `${months.find(m => m.value === c.month.toString())?.label} ${c.year}`,
+                payer: 'aggregate',
+                payerData: {
+                    amount: c.amount,
+                    fee: c.stripeFee,
+                    net: c.net
+                },
+                status: 'COMPLETED',
+                summary: '',
+                timestamp: c.updatedAt,
+                total: c.amount,
+                isAggregate: true,
+                displayDate: c.type === 'YEAR' ? c.year.toString() : `${c.year}-${(c.month + 1).toString().padStart(2, '0')}`
+            } as Transaction)));
         }
+    }, [selectedYear, selectedMonth, selectedEventAid, selectedViewName, cacheItems, allTransactions, rawLoaded, views, dataSource]);
 
-        setTransactions(filtered);
-
-    }, [allTransactions, selectedEventAid, selectedYear, selectedMonth, selectedViewName, views]);
 
 
 
@@ -525,11 +567,29 @@ const Home = () => {
         const total = { count: 0, amount: 0, stripeFee: 0, kmFee: 0, net: 0 };
         transactions.forEach(t => {
             total.count += 1;
-            total.amount += (t.payerData?.amount || 0);
-            total.stripeFee += (t.payerData?.fee || 0);
-            total.kmFee += ((t.kmFee || 0) * 100); // kmFee is in dollars, convert to cents
+            const amount = (t.payerData?.amount || 0);
+            const fee = (t.payerData?.fee || 0);
+
+            if (t.status === 'REFUNDED') {
+                // For Refunded:
+                // Amount = Amount (Positive to show magnitude, or negative?)
+                // Net = -(Amount + Fee)
+                // KM Fee = 0
+
+                // User likely wants to see the Refund Amount as positive in the column, but Net as negative.
+                // Let's assume aggregation follows row logic.
+                total.amount += amount;
+                total.stripeFee += fee;
+                // KM Fee skipped
+                total.net += -(amount + fee);
+            } else {
+                const km = ((t.kmFee || 0) * 100);
+                total.amount += amount;
+                total.stripeFee += fee;
+                total.kmFee += km;
+                total.net += (amount - (fee + km));
+            }
         });
-        total.net = total.amount - (total.stripeFee + total.kmFee);
         return total;
     };
 
@@ -639,12 +699,11 @@ const Home = () => {
         return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(val / 100);
     };
 
-    // Columns Definition
     const getColumns = (): Column[] => {
         const currentView = views.find(v => v.name === selectedViewName);
         if (!currentView || !currentView.columnDefs) return [];
 
-        return currentView.columnDefs.map(def => {
+        const cols = currentView.columnDefs.map(def => {
             const col: Column = {
                 headerName: def.headerName,
                 field: def.name,
@@ -654,28 +713,57 @@ const Home = () => {
                 return {
                     field: 'rowIndex',
                     headerName: '#',
-                    pinned: 'left',
+                    pinned: 'left' as const,
                     width: 75
                 };
             }
 
             // Custom Render logic
             if (def.name === 'Date' || def.stringName === 'timestamp') {
-                col.render = (row: Transaction) => formatDate(row.timestamp);
+                col.valueGetter = (row: Transaction) => row.timestamp;
+                col.render = (row: Transaction) => {
+                    if ((row as any).isAggregate) return (row as any).displayDate;
+                    return formatDate(row.timestamp);
+                }
                 col.width = 200; // Fixed width for Date to align with Totals
-            } else if (def.name === 'Refund Date' || def.stringName === 'refundedAt') {
+            } else if (def.name === 'Refund Date' || def.name === 'Refunded Date' || def.stringName === 'refundedAt') {
+                col.valueGetter = (row: Transaction) => row.refundedAt;
                 col.render = (row: Transaction) => formatDate(row.refundedAt);
                 col.width = 200;
             } else if (def.name === 'Amount' || def.numberName === 'amount') {
+                col.valueGetter = (row: Transaction) => row.payerData?.amount || 0;
                 col.render = (row: Transaction) => formatCurrency(row.payerData?.amount || 0, row.currency);
             } else if (def.name === 'Stripe Fee' || def.numberName === 'fee') {
+                col.valueGetter = (row: Transaction) => row.payerData?.fee || 0;
                 col.render = (row: Transaction) => formatCurrency(row.payerData?.fee || 0, row.currency);
             } else if (def.name === 'KM Fee' || def.numberName === 'kmFee') {
-                col.render = (row: Transaction) => formatCurrency((row.kmFee || 0) * 100, row.currency);
+                col.valueGetter = (row: Transaction) => {
+                    if (row.status === 'REFUNDED') return 0;
+                    return (row.kmFee || 0) * 100;
+                };
+                col.render = (row: Transaction) => {
+                    // For Refunded, user requested KM Fee not be shown
+                    if (row.status === 'REFUNDED') return formatCurrency(0, row.currency);
+                    return formatCurrency((row.kmFee || 0) * 100, row.currency);
+                };
             } else if (def.name === 'Net') {
+                col.valueGetter = (row: Transaction) => {
+                    const amount = row.payerData?.amount || 0;
+                    const fee = row.payerData?.fee || 0;
+                    if (row.status === 'REFUNDED') return -(amount + fee);
+
+                    const km = (row.kmFee || 0) * 100;
+                    return amount - (fee + km);
+                };
                 col.render = (row: Transaction) => {
                     const amount = row.payerData?.amount || 0;
                     const fee = row.payerData?.fee || 0;
+
+                    if (row.status === 'REFUNDED') {
+                        // Net = -(Amount + Fee) because Fee is sunk cost
+                        return formatCurrency(-(amount + fee), row.currency);
+                    }
+
                     const km = (row.kmFee || 0) * 100;
                     return formatCurrency(amount - (fee + km), row.currency);
                 };
@@ -683,6 +771,8 @@ const Home = () => {
 
             return col;
         });
+
+        return cols;
     };
 
     const columns = getColumns();
@@ -690,13 +780,43 @@ const Home = () => {
 
     return (
         <Container fluid className="p-0">
+            <ConfirmLoadModal
+                show={showLoadModal}
+                loading={loadingTransactions}
+                loadedCount={txnLoadedCount}
+                totalCount={txnTotalCount}
+                onCancel={cancelLoadAction}
+                onConfirm={confirmLoadAction}
+            />
             <ToastContainer />
             {/* Header: Dropdowns & Actions */}
             <nav className="modern-navbar" style={{ backgroundColor: '#1f2937', padding: '1rem' }}>
                 <div className="d-flex align-items-center justify-content-between w-100 flex-wrap gap-2">
                     <div className="d-flex align-items-center gap-2">
                         <div className="event-selector">
-                            <EventSelection />
+                            <EventSelection
+                                events={events}
+                                selectedEventKey={selectedEventKey}
+                                selectedEventAid={selectedEventAid}
+                                onSelect={(eventKey) => {
+                                    const selectEvent = () => {
+                                        setSelectedEventKey(eventKey);
+                                        // Derive Aid
+                                        const aid = eventKey.includes(':') ? eventKey.split(':').shift() || '' : eventKey;
+                                        setSelectedEventAid(aid);
+                                    };
+
+                                    if (eventKey === 'all') {
+                                        selectEvent();
+                                    } else {
+                                        const action = () => {
+                                            selectEvent();
+                                            setDataSource('raw');
+                                        };
+                                        triggerLoadAction(action);
+                                    }
+                                }}
+                            />
                         </div>
 
                         {/* Year Dropdown */}
@@ -732,10 +852,40 @@ const Home = () => {
                         {/* View Dropdown */}
                         {views.length > 0 && (
                             <CustomDropdown
-                                value={selectedViewName || ''}
-                                options={views.map(v => ({ value: v.name, label: v.name }))}
-                                onChange={(val) => setSelectedViewName(val)}
                                 placeholder="Select View"
+                                options={views.map(v => ({ value: v.name, label: v.name }))} // View names as labels
+                                value={selectedViewName || ''}
+                                onChange={(key) => {
+                                    if (key === selectedViewName) return;
+
+                                    const nextView = views.find(v => v.name === key);
+                                    if (!nextView) return;
+
+                                    // Determine if this view is supported by Cache
+                                    const statusCond = nextView.conditions?.find(c => c.name === 'transactionStatus');
+                                    // Cache supports Status=COMPLETED (or view name 'Completed')
+                                    const isCacheSafe = nextView.name === 'Completed' || statusCond?.statusValue === 'COMPLETED';
+
+                                    if (isCacheSafe) {
+                                        // Safe switch
+                                        setSelectedViewName(key);
+                                        // Attempt to restore cache mode if safe
+                                        const isYearAll = selectedYear === 'all';
+                                        const isMonthAll = selectedMonth === 'all';
+                                        const isEventAll = selectedEventAid === 'all';
+                                        if (isYearAll && isMonthAll && isEventAll) {
+                                            setDataSource('cache');
+                                        }
+                                    } else {
+                                        // Requires Raw Data
+                                        // Trigger Modal
+                                        const action = () => {
+                                            setSelectedViewName(key);
+                                            setDataSource('raw');
+                                        };
+                                        triggerLoadAction(action);
+                                    }
+                                }}
                                 width="180px"
                             />
                         )}
@@ -743,18 +893,9 @@ const Home = () => {
 
                     <div className="d-flex align-items-center gap-2">
                         {/* Version Badge - Moved to far right */}
-                        <div className="d-flex align-items-center px-3 py-2" style={{
-                            background: 'rgba(59, 130, 246, 0.3)',
-                            border: '1px solid rgba(59, 130, 246, 0.6)',
-                            borderRadius: '0.5rem',
-                            color: '#60a5fa',
-                            fontSize: '0.9rem',
-                            fontWeight: 600,
-                            height: '40px',
-                            whiteSpace: 'nowrap'
-                        }}>
-                            v0.1.0
-                        </div>
+                        <span className="status-item version-info" style={{ marginLeft: 0, marginRight: '10px' }}>
+                            <VersionBadge pid={pid as string} hash={hash as string} />
+                        </span>
                     </div>
                 </div>
             </nav>
@@ -773,15 +914,12 @@ const Home = () => {
                                         <span className="visually-hidden">Loading...</span>
                                     </Spinner>
                                 </div>
-                                <h5 className="mb-2" style={{ color: 'white', fontWeight: 'bold' }}>Fetching Transactions...</h5>
-                                <div className="w-50 mx-auto">
-                                    <ProgressBar
-                                        now={(txnLoadedCount / (txnTotalCount || 1)) * 100}
-                                        label={`${txnLoadedCount} / ${txnTotalCount || '...'}`}
-                                        animated
-                                        variant="success"
-                                    />
-                                </div>
+                                <h5 className="mb-2" style={{ color: 'white', fontWeight: 'bold' }}>
+                                    {dataSource === 'raw' ? 'Loading Transactions...' : 'Loading Dashboard...'}
+                                </h5>
+                                {dataSource === 'raw' && (
+                                    <div style={{ height: '20px' }}></div> // Spacer
+                                )}
                             </div>
                         ) : (
                             <DataTable
@@ -790,6 +928,27 @@ const Home = () => {
                                 pid={pid as string}
                                 hash={hash as string}
                                 canViewStudentHistory={false}
+                                onRowClick={(row) => {
+                                    const item = row as any;
+                                    if (item.isAggregate) {
+                                        if (item.displayDate && item.displayDate.length === 4) {
+                                            // Year Clicked -> Filter by Year (Stay in Cache)
+                                            setSelectedYear(item.displayDate);
+                                            setSelectedMonth('all');
+                                        } else if (item.displayDate && item.displayDate.length === 7) {
+                                            // Month Clicked -> Trigger Raw Load
+                                            const [y, mStr] = item.displayDate.split('-');
+                                            const m = parseInt(mStr) - 1; // 0-indexed
+
+                                            const action = () => {
+                                                setSelectedYear(y);
+                                                setSelectedMonth(m.toString());
+                                                setDataSource('raw');
+                                            };
+                                            triggerLoadAction(action);
+                                        }
+                                    }
+                                }}
                             />
                         )}
                     </Col>

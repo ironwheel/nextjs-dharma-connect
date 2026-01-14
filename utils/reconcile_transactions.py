@@ -149,11 +149,12 @@ def reconcile_transactions(profile, student_table_name, tx_table_name, dry_run):
                         print(f"  [SYNC REFUND] PI {pi_id} | Student=Refunded | Tx={status} -> REFUNDED")
                         if not dry_run:
                             try:
+                                now_iso = datetime.utcnow().isoformat() + 'Z'
                                 resp = tx_table.update_item(
                                     Key={'transaction': pi_id},
-                                    UpdateExpression="SET #s = :r",
-                                    ExpressionAttributeNames={'#s': 'status'},
-                                    ExpressionAttributeValues={':r': 'REFUNDED'},
+                                    UpdateExpression="SET #s = :r, #ra = :ts",
+                                    ExpressionAttributeNames={'#s': 'status', '#ra': 'refundedAt'},
+                                    ExpressionAttributeValues={':r': 'REFUNDED', ':ts': now_iso},
                                     ReturnValues="UPDATED_NEW"
                                 )
                                 print(f"    > Update Response Code: {resp['ResponseMetadata']['HTTPStatusCode']}")

@@ -13,6 +13,7 @@ export interface Column {
     pinned?: 'left' | 'right';
     writeEnabled?: boolean; // Added for new logic
     render?: (row: any) => React.ReactNode;
+    valueGetter?: (row: any) => any;
 }
 
 export interface DataTableProps {
@@ -36,6 +37,7 @@ export interface DataTableProps {
     pid?: string;
     hash?: string;
     recordCountLabel?: string;
+    onRowClick?: (row: any) => void;
 
 }
 
@@ -60,6 +62,7 @@ export const DataTable: React.FC<DataTableProps> = ({
     pid,
     hash,
     recordCountLabel,
+    onRowClick,
 
 }) => {
     // Default sort by Date (timestamp) descending
@@ -86,9 +89,19 @@ export const DataTable: React.FC<DataTableProps> = ({
 
     // Sort data
     const sortedData = useMemo(() => {
+        const sortCol = columns.find(c => c.field === sortConfig.field);
+
         return [...data].sort((a, b) => {
-            const aValue = a[sortConfig.field];
-            const bValue = b[sortConfig.field];
+            let aValue;
+            let bValue;
+
+            if (sortCol?.valueGetter) {
+                aValue = sortCol.valueGetter(a);
+                bValue = sortCol.valueGetter(b);
+            } else {
+                aValue = a[sortConfig.field];
+                bValue = b[sortConfig.field];
+            }
 
             if (aValue === bValue) return 0;
             if (aValue === null || aValue === undefined) return 1;
@@ -97,15 +110,15 @@ export const DataTable: React.FC<DataTableProps> = ({
             const comparison = aValue < bValue ? -1 : 1;
             return sortConfig.direction === 'asc' ? comparison : -comparison;
         });
-    }, [data, sortConfig]);
+    }, [data, sortConfig, columns]);
 
     // Handle column sorting
     const handleSort = (field: string) => {
         setSortConfig(current => {
             if (current.field === field) {
                 return current.direction === 'asc'
-                    ? { field, direction: 'asc' } // Changed to keep asc if already asc, or toggle
-                    : { field, direction: 'desc' };
+                    ? { field, direction: 'desc' } // Correctly toggle to desc
+                    : { field, direction: 'asc' }; // Correctly toggle to asc
             }
             return { field, direction: 'asc' };
         });
@@ -301,7 +314,11 @@ export const DataTable: React.FC<DataTableProps> = ({
                         </thead>
                         <tbody>
                             {sortedData?.map((row, rowIndex) => (
-                                <tr key={row.transaction || row.id || rowIndex}>
+                                <tr
+                                    key={row.transaction || row.id || rowIndex}
+                                    onClick={() => onRowClick && onRowClick(row)}
+                                    style={{ cursor: onRowClick ? 'pointer' : 'default' }}
+                                >
                                     {visibleColumns.map((col, colIndex) => (
                                         <td
                                             key={col.field}
