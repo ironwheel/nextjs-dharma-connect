@@ -13,7 +13,8 @@ import {
     putTableItem,
     VersionBadge,
     getVimeoShowcaseVideos,
-    enableVimeoVideoPlayback
+    enableVimeoVideoPlayback,
+    authGetConfigValue
 } from 'sharedFrontend';
 
 // Types
@@ -24,6 +25,7 @@ interface Event {
     embeddedEmails?: any;
     subEvents?: { [key: string]: SubEvent };
     list?: boolean;
+    category?: string;
     [key: string]: any;
 }
 
@@ -193,7 +195,7 @@ const EventCodeAutocomplete = ({ value, onChange, placeholder, label, id }: {
         const newValue = e.target.value;
         setInputValue(newValue);
         onChange(newValue);
-        
+
         // Validate if value is in the list (only if not empty)
         if (newValue.trim()) {
             setIsValid(eventCodes.includes(newValue));
@@ -263,7 +265,7 @@ const PoolNameAutocomplete = ({ value, onChange, placeholder, label, id, exclude
         const newValue = e.target.value;
         setInputValue(newValue);
         onChange(newValue);
-        
+
         // Validate if value is in the list (only if not empty)
         if (newValue.trim()) {
             setIsValid(poolNames.includes(newValue));
@@ -384,7 +386,7 @@ const SubeventAutocomplete = ({ value, onChange, placeholder, label, id, eventAi
         const newValue = e.target.value;
         setInputValue(newValue);
         onChange(newValue);
-        
+
         // Validate if value is in the list (only if not empty)
         if (newValue.trim()) {
             setIsValid(validOptions.includes(newValue));
@@ -455,6 +457,9 @@ const Home = () => {
     const [filteredOfferings, setFilteredOfferings] = useState<OfferingConfig[]>([]);
     const [filteredPromptGroups, setFilteredPromptGroups] = useState<PromptGroup[]>([]);
     const [filteredViews, setFilteredViews] = useState<View[]>([]);
+
+    // Config data
+    const [eventCategories, setEventCategories] = useState<string[]>([]);
 
     // Modal states
     const [showEventModal, setShowEventModal] = useState(false);
@@ -635,40 +640,53 @@ const Home = () => {
         }
     };
 
+    const fetchCategories = async () => {
+        try {
+            const categories = await authGetConfigValue(pid as string, hash as string, 'eventCategoryList');
+            if (categories && categories.redirected) {
+                return [];
+            }
+            return Array.isArray(categories) ? categories : [];
+        } catch (error) {
+            console.error('Error fetching categories:', error);
+            return [];
+        }
+    };
+
     // Group prompts by aid and enrich with event data
     const groupPromptsByAid = () => {
         const groups: { [aid: string]: Prompt[] } = {};
-        
+
         // Group prompts by aid
         allPrompts.forEach(prompt => {
             // Extract aid from the prompt field (format: aid-promptName)
             const parts = prompt.prompt.split('-');
             const aid = parts[0];
-            
+
             if (!groups[aid]) {
                 groups[aid] = [];
             }
             groups[aid].push({ ...prompt, aid });
         });
-        
+
         // Convert to array and enrich with event data
         const groupsArray: PromptGroup[] = Object.keys(groups).map(aid => {
             const event = allEvents.find(e => e.aid === aid);
             const earliestDate = event ? getEarliestEventDate(event) : null;
-            
+
             return {
                 aid,
                 prompts: groups[aid],
                 eventName: event?.name,
-                eventDate: earliestDate 
+                eventDate: earliestDate
                     ? earliestDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
                     : undefined
             };
         });
-        
+
         // Sort alphabetically by aid
         groupsArray.sort((a, b) => a.aid.localeCompare(b.aid));
-        
+
         promptGroups = groupsArray;
         return groupsArray;
     };
@@ -678,7 +696,7 @@ const Home = () => {
         if (!event.subEvents || Object.keys(event.subEvents).length === 0) {
             return null;
         }
-        
+
         const dates = Object.values(event.subEvents)
             .map(subEvent => subEvent.date)
             .filter(date => date)
@@ -689,9 +707,9 @@ const Home = () => {
                 const [year, month, day] = dateStr.split('-').map(Number);
                 return new Date(year, month - 1, day);
             });
-        
+
         if (dates.length === 0) return null;
-        
+
         // Return the EARLIEST date (minimum)
         return new Date(Math.min(...dates.map(d => d.getTime())));
     };
@@ -705,21 +723,21 @@ const Home = () => {
                 event.name.toLowerCase().includes(searchLower)
             )
             : [...allEvents];
-        
+
         // Sort by earliest date, descending (most recent earliest-date first)
         // Events without dates go to the end
         filtered.sort((a, b) => {
             const dateA = getEarliestEventDate(a);
             const dateB = getEarliestEventDate(b);
-            
+
             if (!dateA && !dateB) return 0;
             if (!dateA) return 1; // Events without dates go to bottom
             if (!dateB) return -1; // Events without dates go to bottom
-            
+
             // Most recent earliest-date first (descending)
             return dateB.getTime() - dateA.getTime();
         });
-        
+
         setFilteredEvents(filtered);
     };
 
@@ -828,6 +846,7 @@ const Home = () => {
             setEventFormData({
                 aid: '',
                 name: '',
+                category: '',
                 config: {
                     pool: '',
                     needAcceptance: false,
@@ -839,7 +858,7 @@ const Home = () => {
                 subEvents: {},
                 embeddedEmails: {}
             });
-            
+
             // Fetch views-profiles 'default' record to get available keys
             // If this fails due to permissions, we'll continue without it
             try {
@@ -854,7 +873,7 @@ const Home = () => {
                 // Continue without views profile keys - user can still manually enter dashboardViews
                 setViewsProfileKeys([]);
             }
-            
+
             setShowEventModal(true);
         } else if (currentResource === 'pools') {
             setIsNewPool(true);
@@ -895,7 +914,7 @@ const Home = () => {
         setIsNewEvent(false);
         setSelectedEvent(event);
         setEventFormData({ ...event });
-        
+
         // Fetch views-profiles 'default' record to get available keys
         // If this fails due to permissions, we'll continue without it
         try {
@@ -910,17 +929,17 @@ const Home = () => {
             // Continue without views profile keys - user can still manually enter dashboardViews
             setViewsProfileKeys([]);
         }
-        
+
         setShowEventModal(true);
     };
 
     const handleDuplicateEvent = (event: Event) => {
         // Deep copy the event
         const duplicatedEvent = JSON.parse(JSON.stringify(event));
-        
+
         // Get current year
         const currentYear = new Date().getFullYear().toString();
-        
+
         // Process aid field - look for YYYYMMDD pattern starting with 202X
         let newAid = duplicatedEvent.aid;
         const aidMatch = newAid.match(/(202\d)(\d{4})/);
@@ -932,25 +951,25 @@ const Home = () => {
             newAid = newAid.replace(/202\d/g, currentYear);
         }
         duplicatedEvent.aid = newAid;
-        
+
         // Process name field - replace any 202X with current year
         duplicatedEvent.name = duplicatedEvent.name.replace(/202\d/g, currentYear);
-        
+
         // Process subEvents
         if (duplicatedEvent.subEvents) {
             Object.keys(duplicatedEvent.subEvents).forEach(key => {
                 const subEvent = duplicatedEvent.subEvents[key];
-                
+
                 // Remove fields
                 delete subEvent.embeddedEmails;
                 delete subEvent.embeddedVideoList;
                 delete subEvent.timeString;
                 delete subEvent.zoomLink;
-                
+
                 // Blank out date and rcpLevel (set to empty/undefined, not delete)
                 subEvent.date = '';
                 subEvent.rcpLevel = undefined;
-                
+
                 // Set boolean flags to false
                 subEvent.eventComplete = false;
                 subEvent.eventOnDeck = false;
@@ -958,10 +977,10 @@ const Home = () => {
                 subEvent.mediaNotify = false;
             });
         }
-        
+
         // Remove top-level embeddedEmails
         delete duplicatedEvent.embeddedEmails;
-        
+
         setIsNewEvent(true);
         setSelectedEvent(null);
         setEventFormData(duplicatedEvent);
@@ -1000,19 +1019,19 @@ const Home = () => {
     const handleDuplicateView = (view: View) => {
         // Deep copy the view
         const duplicatedView = JSON.parse(JSON.stringify(view));
-        
+
         // Generate a unique name
         let newName = `${duplicatedView.name}-copy`;
         let counter = 1;
-        
+
         // Check if name already exists, increment counter until we find a unique name
         while (allViews.some(v => v.name === newName)) {
             newName = `${duplicatedView.name}-copy-${counter}`;
             counter++;
         }
-        
+
         duplicatedView.name = newName;
-        
+
         setIsNewView(true);
         setSelectedView(null);
         setViewFormData(duplicatedView);
@@ -1033,15 +1052,15 @@ const Home = () => {
     const handleDuplicatePrompts = (promptGroup: PromptGroup) => {
         setIsDuplicatingPrompts(true);
         setSelectedPromptGroup(promptGroup);
-        
+
         // Get current year
         const currentYear = new Date().getFullYear().toString();
-        
+
         // Process aid using same logic as event duplication
         let newAid = promptGroup.aid;
         let yearTransformationPattern: RegExp | null = null;
         let oldYear: string | null = null;
-        
+
         const aidMatch = newAid.match(/(202\d)(\d{4})/);
         if (aidMatch) {
             oldYear = aidMatch[1]; // e.g., "2024"
@@ -1055,17 +1074,17 @@ const Home = () => {
                 yearTransformationPattern = new RegExp(oldYear, 'g');
             }
         }
-        
+
         // Deep copy prompts and apply transformations
         let duplicatedPrompts: Prompt[] = JSON.parse(JSON.stringify(promptGroup.prompts));
-        
+
         // Remove emailSubjectReg and emailSubjectRegConfirm prompts
         duplicatedPrompts = duplicatedPrompts.filter(prompt => {
             const promptParts = prompt.prompt.split('-');
             const promptName = promptParts.slice(1).join('-');
             return promptName !== 'emailSubjectReg' && promptName !== 'emailSubjectRegConfirm';
         });
-        
+
         // Apply year transformation to text fields if a pattern was detected
         if (yearTransformationPattern && oldYear) {
             duplicatedPrompts = duplicatedPrompts.map(prompt => ({
@@ -1073,7 +1092,7 @@ const Home = () => {
                 text: prompt.text ? prompt.text.replace(yearTransformationPattern!, currentYear) : prompt.text
             }));
         }
-        
+
         setPromptsEditAid(newAid);
         setPromptsEditData(duplicatedPrompts);
         setPromptsFindText('');
@@ -1102,7 +1121,7 @@ const Home = () => {
         });
 
         setPromptsEditData(updatedPrompts);
-        
+
         if (replacementCount > 0) {
             toast.success(`Replaced ${replacementCount} occurrence(s) of "${promptsFindText}"`);
         } else {
@@ -1134,25 +1153,25 @@ const Home = () => {
                 // Extract promptName from original prompt field
                 const originalParts = prompt.prompt.split('-');
                 const promptName = originalParts.slice(1).join('-'); // Everything after first dash
-                
+
                 // Create new prompt object with updated prompt field
                 const updatedPrompt = {
                     ...prompt,
                     prompt: `${promptsEditAid}-${promptName}`,
                     aid: promptsEditAid
                 };
-                
+
                 await putTableItem('prompts', updatedPrompt.prompt, updatedPrompt, pid as string, hash as string);
             }
 
             toast.success(`Prompts ${isDuplicatingPrompts ? 'duplicated' : 'saved'} successfully`);
-            
+
             // Refresh prompts
             const prompts = await fetchPrompts();
             allPrompts = Array.isArray(prompts) ? prompts : [];
             groupPromptsByAid();
             filterPromptGroups(searchTerm);
-            
+
             // Close progress modal and edit modal
             setShowSavingPromptsModal(false);
             setShowPromptsModal(false);
@@ -1214,10 +1233,10 @@ const Home = () => {
             for (const promptName of promptNames) {
                 for (const language of languages) {
                     // Pre-seed text for supplicationTitle, otherwise use empty string
-                    const text = promptName === 'supplicationTitle' 
+                    const text = promptName === 'supplicationTitle'
                         ? (supplicationTitleTexts[language] || '')
                         : '';
-                    
+
                     promptsToCreate.push({
                         prompt: `${createPromptsAid}-${promptName}`,
                         language: language,
@@ -1233,19 +1252,19 @@ const Home = () => {
             }
 
             toast.success(`Created ${promptsToCreate.length} prompts for ${createPromptsAid} successfully`);
-            
+
             // Refresh prompts
             const prompts = await fetchPrompts();
             allPrompts = Array.isArray(prompts) ? prompts : [];
             groupPromptsByAid();
             filterPromptGroups(searchTerm);
-            
+
             // Reset form and close create modal
             const createdAid = createPromptsAid;
             setCreatePromptsAid('');
             setCreatePromptsTemplate('basicSupplication');
             setShowCreatePromptsModal(false);
-            
+
             // Find the newly created prompt group and open edit modal
             const newGroup = promptGroups.find(g => g.aid === createdAid);
             if (newGroup) {
@@ -1272,14 +1291,14 @@ const Home = () => {
                     toast.error(`An event with the code "${eventFormData.aid}" already exists. Please use a different event code.`);
                     return;
                 }
-                
+
                 // Check if name already exists
                 const existingEventWithName = allEvents.find(e => e.name === eventFormData.name);
                 if (existingEventWithName) {
                     toast.error(`An event with the name "${eventFormData.name}" already exists. Please use a different name.`);
                     return;
                 }
-                
+
                 // Check for subevent date conflicts
                 if (eventFormData.subEvents) {
                     for (const [subEventKey, subEvent] of Object.entries(eventFormData.subEvents)) {
@@ -1324,20 +1343,20 @@ const Home = () => {
                     delete configToSave.dashboardViews;
                 }
             }
-            
+
             const eventToSave = {
                 ...eventFormData,
                 config: configToSave
             };
-            
+
             await putTableItem('events', eventFormData.aid, eventToSave, pid as string, hash as string);
             toast.success('Event saved successfully');
-            
+
             // Refresh events list
             const events = await fetchEvents();
             allEvents = Array.isArray(events) ? events : [];
             filterEvents(searchTerm);
-            
+
             setShowEventModal(false);
         } catch (error) {
             console.error('Error saving event:', error);
@@ -1354,12 +1373,12 @@ const Home = () => {
 
             await putTableItem('pools', poolFormData.name, poolFormData, pid as string, hash as string);
             toast.success('Pool saved successfully');
-            
+
             // Refresh pools list
             const pools = await fetchPools();
             allPools = Array.isArray(pools) ? pools : [];
             filterPools(searchTerm);
-            
+
             setShowPoolModal(false);
         } catch (error) {
             console.error('Error saving pool:', error);
@@ -1376,12 +1395,12 @@ const Home = () => {
 
             await putTableItem('scripts', scriptFormData.name, scriptFormData, pid as string, hash as string);
             toast.success('Script saved successfully');
-            
+
             // Refresh scripts list
             const scripts = await fetchScripts();
             allScripts = Array.isArray(scripts) ? scripts : [];
             filterScripts(searchTerm);
-            
+
             setShowScriptModal(false);
         } catch (error) {
             console.error('Error saving script:', error);
@@ -1398,12 +1417,12 @@ const Home = () => {
 
             await putTableItem('offering-config', offeringFormData.oid, offeringFormData, pid as string, hash as string);
             toast.success('Offering saved successfully');
-            
+
             // Refresh offerings list
             const offerings = await fetchOfferings();
             allOfferings = Array.isArray(offerings) ? offerings : [];
             filterOfferings(searchTerm);
-            
+
             setShowOfferingModal(false);
         } catch (error) {
             console.error('Error saving offering:', error);
@@ -1413,15 +1432,15 @@ const Home = () => {
 
     const handleDeleteEvent = async () => {
         if (!selectedEvent) return;
-        
+
         try {
             await deleteTableItem('events', selectedEvent.aid, pid as string, hash as string);
             toast.success('Event deleted successfully');
-            
+
             // Close modals
             setShowDeleteEventConfirm(false);
             setShowEventModal(false);
-            
+
             // Refresh events list
             const events = await fetchEvents();
             allEvents = Array.isArray(events) ? events : [];
@@ -1434,15 +1453,15 @@ const Home = () => {
 
     const handleDeletePool = async () => {
         if (!selectedPool) return;
-        
+
         try {
             await deleteTableItem('pools', selectedPool.name, pid as string, hash as string);
             toast.success('Pool deleted successfully');
-            
+
             // Close modals
             setShowDeletePoolConfirm(false);
             setShowPoolModal(false);
-            
+
             // Refresh pools list
             const pools = await fetchPools();
             allPools = Array.isArray(pools) ? pools : [];
@@ -1455,15 +1474,15 @@ const Home = () => {
 
     const handleDeleteScript = async () => {
         if (!selectedScript) return;
-        
+
         try {
             await deleteTableItem('scripts', selectedScript.name, pid as string, hash as string);
             toast.success('Script deleted successfully');
-            
+
             // Close modals
             setShowDeleteScriptConfirm(false);
             setShowScriptModal(false);
-            
+
             // Refresh scripts list
             const scripts = await fetchScripts();
             allScripts = Array.isArray(scripts) ? scripts : [];
@@ -1476,15 +1495,15 @@ const Home = () => {
 
     const handleDeleteOffering = async () => {
         if (!selectedOffering) return;
-        
+
         try {
             await deleteTableItem('offering-config', selectedOffering.oid, pid as string, hash as string);
             toast.success('Offering deleted successfully');
-            
+
             // Close modals
             setShowDeleteOfferingConfirm(false);
             setShowOfferingModal(false);
-            
+
             // Refresh offerings list
             const offerings = await fetchOfferings();
             allOfferings = Array.isArray(offerings) ? offerings : [];
@@ -1514,10 +1533,10 @@ const Home = () => {
     const handleEditSubEvent = (key: string, subEvent: SubEvent) => {
         setIsNewSubEvent(false);
         setSelectedSubEventKey(key);
-        setSubEventFormData({ 
+        setSubEventFormData({
             ...subEvent,
-            embeddedShowcaseList: subEvent.embeddedShowcaseList && subEvent.embeddedShowcaseList.length > 0 
-                ? subEvent.embeddedShowcaseList 
+            embeddedShowcaseList: subEvent.embeddedShowcaseList && subEvent.embeddedShowcaseList.length > 0
+                ? subEvent.embeddedShowcaseList
                 : ['']
         });
         setPerLanguageShowcases(false);
@@ -1539,7 +1558,7 @@ const Home = () => {
         if (isNewSubEvent) {
             const key = prompt('Enter subevent key (e.g., "weekend1", "retreat"):');
             if (!key) return;
-            
+
             setEventFormData(prev => ({
                 ...prev,
                 subEvents: {
@@ -1664,7 +1683,7 @@ const Home = () => {
 
             // Enable each video for playback
             toast.info(`Enabling ${videoIds.length} video(s) for playback...`);
-            
+
             for (const videoId of videoIds) {
                 try {
                     await enableVimeoVideoPlayback(videoId, pid as string, hash as string);
@@ -1731,10 +1750,10 @@ const Home = () => {
         try {
             await putTableItem('views', viewFormData.name, viewFormData, pid as string, hash as string);
             toast.success('View saved successfully');
-            
+
             // Close modal
             setShowViewsModal(false);
-            
+
             // Refresh views list
             const views = await fetchViews();
             allViews = Array.isArray(views) ? views : [];
@@ -1747,15 +1766,15 @@ const Home = () => {
 
     const handleDeleteView = async () => {
         if (!selectedView) return;
-        
+
         try {
             await deleteTableItem('views', selectedView.name, pid as string, hash as string);
             toast.success('View deleted successfully');
-            
+
             // Close modals
             setShowDeleteViewConfirm(false);
             setShowViewsModal(false);
-            
+
             // Refresh views list
             const views = await fetchViews();
             allViews = Array.isArray(views) ? views : [];
@@ -1830,11 +1849,11 @@ const Home = () => {
         setViewFormData(prev => {
             const newViewConditions = [...(prev.viewConditions || [])];
             const currentCondition = { ...newViewConditions[index] };
-            
+
             // If changing the condition type (name field), reset to appropriate structure
             if (field === 'name') {
                 const newCondition: any = { name: value };
-                
+
                 // Preserve boolValue if it exists and is valid for the new type
                 const boolValueTypes = ['currentAIDBool', 'currentAIDMapBool', 'baseBool', 'practiceBool', 'offering', 'deposit', 'spokenLanguage', 'writtenLanguage'];
                 if (boolValueTypes.includes(value) && typeof currentCondition.boolValue !== 'undefined') {
@@ -1842,7 +1861,7 @@ const Home = () => {
                 } else if (boolValueTypes.includes(value)) {
                     newCondition.boolValue = true; // Default to true
                 }
-                
+
                 // Preserve relevant fields based on new type
                 if (['currentAIDBool', 'baseBool', 'practiceBool'].includes(value)) {
                     // These need boolName - preserve if switching from similar type
@@ -1868,7 +1887,7 @@ const Home = () => {
                         newCondition.stringValue = '';
                     }
                 }
-                
+
                 newViewConditions[index] = newCondition;
             } else {
                 // Normal field update
@@ -1877,7 +1896,7 @@ const Home = () => {
                     [field]: value
                 };
             }
-            
+
             return {
                 ...prev,
                 viewConditions: newViewConditions
@@ -1904,16 +1923,16 @@ const Home = () => {
                     textarea.style.border = '1px solid #555';
                 }
             };
-            
+
             applyDarkTheme();
-            
+
             // Reapply styles after short delays to catch any style resets from re-renders
             const timeouts = [
                 setTimeout(applyDarkTheme, 50),
                 setTimeout(applyDarkTheme, 150),
                 setTimeout(applyDarkTheme, 300)
             ];
-            
+
             // Set up an interval to check and reapply styles periodically while modal is open
             const intervalId = setInterval(() => {
                 if (textarea && showEventModal) {
@@ -1923,7 +1942,7 @@ const Home = () => {
                     }
                 }
             }, 200);
-            
+
             return () => {
                 timeouts.forEach(clearTimeout);
                 clearInterval(intervalId);
@@ -1965,6 +1984,10 @@ const Home = () => {
                 allOfferings = offeringsArray;
                 allPrompts = promptsArray;
                 allViews = viewsArray;
+
+                // Load categories
+                const categories = await fetchCategories();
+                setEventCategories(categories);
 
                 // Group prompts by aid after events are loaded
                 groupPromptsByAid();
@@ -2144,10 +2167,10 @@ const Home = () => {
                         </h4>
                         {filteredEvents.map(event => {
                             const earliestDate = getEarliestEventDate(event);
-                            const dateDisplay = earliestDate 
+                            const dateDisplay = earliestDate
                                 ? earliestDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
                                 : 'No date';
-                            
+
                             return (
                                 <div key={event.aid} className="event-item">
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
@@ -2316,8 +2339,8 @@ const Home = () => {
                                             onChange={(e) => setEventFormData({ ...eventFormData, aid: e.target.value })}
                                             disabled={!isNewEvent}
                                             placeholder="e.g., vt2025"
-                                            style={{ 
-                                                backgroundColor: '#2b2b2b', 
+                                            style={{
+                                                backgroundColor: '#2b2b2b',
                                                 color: !isNewEvent ? '#aaa' : 'white',
                                                 border: '1px solid #555',
                                                 cursor: !isNewEvent ? 'not-allowed' : 'text'
@@ -2335,6 +2358,26 @@ const Home = () => {
                                             placeholder={eventFormData.list ? "e.g., Mailing List" : "e.g., Vermont In-Person Retreats 2025"}
                                             style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
                                         />
+                                    </Form.Group>
+                                </Col>
+                            </Row>
+                            <Row>
+                                <Col md={6}>
+                                    <Form.Group className="mb-3">
+                                        <Form.Label>Category</Form.Label>
+                                        <Form.Control
+                                            type="text"
+                                            list="event-category-list"
+                                            value={eventFormData.category || ''}
+                                            onChange={(e) => setEventFormData({ ...eventFormData, category: e.target.value })}
+                                            placeholder="Select or enter a category"
+                                            style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                                        />
+                                        <datalist id="event-category-list">
+                                            {eventCategories.map(cat => (
+                                                <option key={cat} value={cat} />
+                                            ))}
+                                        </datalist>
                                     </Form.Group>
                                 </Col>
                             </Row>
@@ -2452,7 +2495,7 @@ const Home = () => {
                                     </Col>
                                 </Row>
                             )}
-                            
+
                             {/* Dashboard Views Section */}
                             <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid #555' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
@@ -2507,8 +2550,8 @@ const Home = () => {
                                                         type="text"
                                                         value={profileKey}
                                                         disabled
-                                                        style={{ 
-                                                            backgroundColor: '#1a1a1a', 
+                                                        style={{
+                                                            backgroundColor: '#1a1a1a',
                                                             color: '#aaa',
                                                             border: '1px solid #555',
                                                             cursor: 'not-allowed'
@@ -2653,10 +2696,10 @@ const Home = () => {
                                                     // Invalid JSON, don't update
                                                 }
                                             }}
-                                            style={{ 
+                                            style={{
                                                 fontFamily: 'monospace',
-                                                backgroundColor: '#2b2b2b', 
-                                                color: 'white', 
+                                                backgroundColor: '#2b2b2b',
+                                                color: 'white',
                                                 border: '1px solid #555'
                                             }}
                                         />
@@ -3040,16 +3083,16 @@ const Home = () => {
                                                     {(type === 'oath' ||
                                                         type === 'attended' ||
                                                         type === 'join') && (
-                                                        <Form.Group className="mb-2">
-                                                            <EventCodeAutocomplete
-                                                                value={attr.aid || ''}
-                                                                onChange={(value) => handleUpdatePoolAttribute(index, 'aid', value)}
-                                                                placeholder={`Program / event code (aid) - checks programs[aid].${type}`}
-                                                                label="Program AID (aid)"
-                                                                id={`${type}-aid-${index}`}
-                                                            />
-                                                        </Form.Group>
-                                                    )}
+                                                            <Form.Group className="mb-2">
+                                                                <EventCodeAutocomplete
+                                                                    value={attr.aid || ''}
+                                                                    onChange={(value) => handleUpdatePoolAttribute(index, 'aid', value)}
+                                                                    placeholder={`Program / event code (aid) - checks programs[aid].${type}`}
+                                                                    label="Program AID (aid)"
+                                                                    id={`${type}-aid-${index}`}
+                                                                />
+                                                            </Form.Group>
+                                                        )}
                                                     {(type === 'joinwhich' || type === 'offeringwhich') && (
                                                         <>
                                                             <Form.Group className="mb-2">
@@ -3090,16 +3133,16 @@ const Home = () => {
                                                         type === 'currenteventnotjoin' ||
                                                         type === 'eligible' ||
                                                         type === 'true') && (
-                                                        <div style={{ fontSize: '0.85rem', color: '#aaa', marginTop: '0.5rem' }}>
-                                                            {type === 'currenteventaccepted' && 'No parameters. Checks programs[currentAid].accepted AND not withdrawn.'}
-                                                            {type === 'currenteventtest' && 'No parameters. Checks programs[currentAid].test flag.'}
-                                                            {type === 'currenteventjoin' && 'No parameters. Checks programs[currentAid].join flag.'}
-                                                            {type === 'currenteventmanualinclude' && 'No parameters. Checks programs[currentAid].manualInclude flag.'}
-                                                            {type === 'currenteventnotjoin' && 'No parameters. Returns true if programs[currentAid].join is falsy.'}
-                                                            {type === 'eligible' && 'No parameters. Checks programs[currentAid].eligible flag.'}
-                                                            {type === 'true' && 'No parameters. Always returns true (pass-through condition).'}
-                                                        </div>
-                                                    )}
+                                                            <div style={{ fontSize: '0.85rem', color: '#aaa', marginTop: '0.5rem' }}>
+                                                                {type === 'currenteventaccepted' && 'No parameters. Checks programs[currentAid].accepted AND not withdrawn.'}
+                                                                {type === 'currenteventtest' && 'No parameters. Checks programs[currentAid].test flag.'}
+                                                                {type === 'currenteventjoin' && 'No parameters. Checks programs[currentAid].join flag.'}
+                                                                {type === 'currenteventmanualinclude' && 'No parameters. Checks programs[currentAid].manualInclude flag.'}
+                                                                {type === 'currenteventnotjoin' && 'No parameters. Returns true if programs[currentAid].join is falsy.'}
+                                                                {type === 'eligible' && 'No parameters. Checks programs[currentAid].eligible flag.'}
+                                                                {type === 'true' && 'No parameters. Always returns true (pass-through condition).'}
+                                                            </div>
+                                                        )}
                                                 </Col>
                                                 <Col md={2} style={{ display: 'flex', alignItems: 'end' }}>
                                                     <Button
@@ -3224,16 +3267,16 @@ const Home = () => {
                                 style={{ marginBottom: '1rem' }}
                             />
                             <Form.Text className="text-muted" style={{ fontSize: '0.85rem', display: 'block', marginBottom: '1rem' }}>
-                                {perLanguageShowcases 
+                                {perLanguageShowcases
                                     ? 'Each showcase contains all videos for one language. Videos will be indexed by position in showcase.'
                                     : 'Each showcase contains multiple languages for one day of teaching. Videos will be grouped by language.'}
                             </Form.Text>
                             {subEventFormData.embeddedShowcaseList && subEventFormData.embeddedShowcaseList.length > 0 ? (
                                 subEventFormData.embeddedShowcaseList.map((showcaseId, index) => (
-                                    <div key={index} style={{ 
-                                        display: 'flex', 
-                                        gap: '0.5rem', 
-                                        alignItems: 'center', 
+                                    <div key={index} style={{
+                                        display: 'flex',
+                                        gap: '0.5rem',
+                                        alignItems: 'center',
                                         marginBottom: '0.5rem',
                                         padding: '0.5rem',
                                         backgroundColor: '#2b2b2b',
@@ -3425,9 +3468,9 @@ const Home = () => {
                             <h5 style={{ color: '#ffc107', marginBottom: '1rem' }}>Script Steps</h5>
                             <Form.Group className="mb-3">
                                 <Form.Label>Select Steps (in order)</Form.Label>
-                                <div style={{ 
-                                    border: '1px solid #555', 
-                                    borderRadius: '4px', 
+                                <div style={{
+                                    border: '1px solid #555',
+                                    borderRadius: '4px',
                                     padding: '10px',
                                     backgroundColor: '#2b2b2b',
                                     maxHeight: '400px',
@@ -3436,9 +3479,9 @@ const Home = () => {
                                     {AVAILABLE_SCRIPT_STEPS.map(step => {
                                         const isSelected = scriptFormData.steps?.includes(step);
                                         const stepIndex = scriptFormData.steps?.indexOf(step);
-                                        
+
                                         return (
-                                            <div key={step} style={{ 
+                                            <div key={step} style={{
                                                 marginBottom: '8px',
                                                 display: 'flex',
                                                 alignItems: 'center',
@@ -3480,8 +3523,8 @@ const Home = () => {
                                                             const newSteps = [...scriptFormData.steps];
                                                             const currentIndex = newSteps.indexOf(step);
                                                             if (currentIndex > 0) {
-                                                                [newSteps[currentIndex - 1], newSteps[currentIndex]] = 
-                                                                [newSteps[currentIndex], newSteps[currentIndex - 1]];
+                                                                [newSteps[currentIndex - 1], newSteps[currentIndex]] =
+                                                                    [newSteps[currentIndex], newSteps[currentIndex - 1]];
                                                                 setScriptFormData({ ...scriptFormData, steps: newSteps });
                                                             }
                                                         }}
@@ -3498,8 +3541,8 @@ const Home = () => {
                                                             const newSteps = [...scriptFormData.steps];
                                                             const currentIndex = newSteps.indexOf(step);
                                                             if (currentIndex < newSteps.length - 1) {
-                                                                [newSteps[currentIndex], newSteps[currentIndex + 1]] = 
-                                                                [newSteps[currentIndex + 1], newSteps[currentIndex]];
+                                                                [newSteps[currentIndex], newSteps[currentIndex + 1]] =
+                                                                    [newSteps[currentIndex + 1], newSteps[currentIndex]];
                                                                 setScriptFormData({ ...scriptFormData, steps: newSteps });
                                                             }
                                                         }}
@@ -3582,8 +3625,8 @@ const Home = () => {
                                     onChange={(e) => setOfferingFormData({ ...offeringFormData, oid: e.target.value })}
                                     disabled={!isNewOffering}
                                     placeholder="e.g., OFFERING-4x-108-gnd-east"
-                                    style={{ 
-                                        backgroundColor: '#2b2b2b', 
+                                    style={{
+                                        backgroundColor: '#2b2b2b',
                                         color: !isNewOffering ? '#aaa' : 'white',
                                         border: '1px solid #555',
                                         cursor: !isNewOffering ? 'not-allowed' : 'text'
@@ -3729,8 +3772,8 @@ const Home = () => {
                                     onChange={(e) => setViewFormData({ ...viewFormData, name: e.target.value })}
                                     disabled={!isNewView}
                                     placeholder="e.g., joined-vermont"
-                                    style={{ 
-                                        backgroundColor: '#2b2b2b', 
+                                    style={{
+                                        backgroundColor: '#2b2b2b',
                                         color: !isNewView ? '#aaa' : 'white',
                                         border: '1px solid #555',
                                         cursor: !isNewView ? 'not-allowed' : 'text'
@@ -3750,7 +3793,7 @@ const Home = () => {
                                 viewFormData.columnDefs.map((colDef, index) => {
                                     const colName = colDef.name || ''
                                     const isPredefined = ['rowIndex', 'name', 'email', 'accepted', 'withdrawn', 'installmentsTotal', 'installmentsReceived', 'installmentsDue', 'installmentsLF', 'spokenLanguage'].includes(colName)
-                                    
+
                                     return (
                                         <div key={index} className="subevent-item mb-3">
                                             <Row>
@@ -4149,7 +4192,7 @@ const Home = () => {
                                                             <option value="false">false</option>
                                                         </Form.Select>
                                                         <Form.Text className="text-muted" style={{ fontSize: '0.75rem' }}>
-                                                            {condition.name === 'offering' 
+                                                            {condition.name === 'offering'
                                                                 ? 'Filter by whether student has made an offering'
                                                                 : 'Filter by whether student has made a deposit'}
                                                         </Form.Text>
@@ -4255,8 +4298,8 @@ const Home = () => {
                                             value={promptsEditAid}
                                             onChange={(e) => setPromptsEditAid(e.target.value)}
                                             disabled={!isDuplicatingPrompts}
-                                            style={{ 
-                                                backgroundColor: '#2b2b2b', 
+                                            style={{
+                                                backgroundColor: '#2b2b2b',
                                                 color: !isDuplicatingPrompts ? '#aaa' : 'white',
                                                 border: '1px solid #555',
                                                 cursor: !isDuplicatingPrompts ? 'not-allowed' : 'text'
@@ -4300,8 +4343,8 @@ const Home = () => {
                                     </Form.Group>
                                 </Col>
                                 <Col md={2} style={{ display: 'flex', alignItems: 'end' }}>
-                                    <Button 
-                                        variant="primary" 
+                                    <Button
+                                        variant="primary"
                                         onClick={handleReplaceAllInPrompts}
                                         style={{ marginBottom: '1rem', width: '100%' }}
                                     >
@@ -4332,7 +4375,7 @@ const Home = () => {
                                             const promptName = promptParts.slice(1).join('-');
                                             // Dynamically show current aid + promptName
                                             const displayPrompt = `${promptsEditAid}-${promptName}`;
-                                            
+
                                             return (
                                                 <tr key={`${prompt.prompt}-${prompt.language}`} style={{ borderBottom: '1px solid #333' }}>
                                                     <td style={{ padding: '0.75rem', color: 'white', fontSize: '0.85rem' }}>
@@ -4351,9 +4394,9 @@ const Home = () => {
                                                                 newData[index] = { ...newData[index], text: e.target.value };
                                                                 setPromptsEditData(newData);
                                                             }}
-                                                            style={{ 
-                                                                backgroundColor: '#2b2b2b', 
-                                                                color: 'white', 
+                                                            style={{
+                                                                backgroundColor: '#2b2b2b',
+                                                                color: 'white',
                                                                 border: '1px solid #555',
                                                                 fontSize: '0.9rem',
                                                                 width: '100%'
@@ -4419,7 +4462,7 @@ const Home = () => {
             </Modal>
 
             {/* Saving Prompts Progress Modal */}
-            <Modal show={showSavingPromptsModal} onHide={() => {}} backdrop="static" keyboard={false}>
+            <Modal show={showSavingPromptsModal} onHide={() => { }} backdrop="static" keyboard={false}>
                 <Modal.Body style={{ textAlign: 'center', padding: '2rem' }}>
                     <Spinner animation="border" variant="warning" style={{ marginBottom: '1rem' }} />
                     <div style={{ color: 'white', fontSize: '1.1rem' }}>
