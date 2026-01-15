@@ -642,11 +642,30 @@ const Home = () => {
 
     const fetchCategories = async () => {
         try {
+            // 1. Try authGetConfigValue first as requested
             const categories = await authGetConfigValue(pid as string, hash as string, 'eventCategoryList');
+
             if (categories && categories.redirected) {
                 return [];
             }
-            return Array.isArray(categories) ? categories : [];
+
+            if (Array.isArray(categories) && categories.length > 0) {
+                return categories;
+            }
+
+            // 2. Fallback: Try fetching directly from config table using the key 'eventCategoryList'
+            // This handles cases where the data is in the config table but not exposed via the auth/host config path
+            const configItem = await getTableItemOrNull('config', 'eventCategoryList', pid as string, hash as string);
+
+            if (configItem) {
+                if (Array.isArray(configItem.value)) return configItem.value;
+                if (Array.isArray(configItem.list)) return configItem.list;
+                if (Array.isArray(configItem.categories)) return configItem.categories;
+                // Check if the item itself has a property with the same name as the key
+                if (Array.isArray(configItem.eventCategoryList)) return configItem.eventCategoryList;
+            }
+
+            return [];
         } catch (error) {
             console.error('Error fetching categories:', error);
             return [];
