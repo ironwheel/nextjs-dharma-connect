@@ -38,7 +38,8 @@ export interface DataTableProps {
     hash?: string;
     recordCountLabel?: string;
     onRowClick?: (row: any) => void;
-
+    defaultSortField?: string;
+    defaultSortDirection?: 'asc' | 'desc';
 }
 
 export const DataTable: React.FC<DataTableProps> = ({
@@ -60,13 +61,13 @@ export const DataTable: React.FC<DataTableProps> = ({
     canRefreshCache,
     onRefreshCache,
     pid,
-    hash,
     recordCountLabel,
     onRowClick,
-
+    defaultSortField = 'timestamp',
+    defaultSortDirection = 'desc'
 }) => {
     // Default sort by Date (timestamp) descending
-    const [sortConfig, setSortConfig] = useState<{ field: string; direction: 'asc' | 'desc' }>({ field: 'timestamp', direction: 'desc' });
+    const [sortConfig, setSortConfig] = useState<{ field: string; direction: 'asc' | 'desc' }>({ field: defaultSortField, direction: defaultSortDirection });
 
     const [editingCell, setEditingCell] = useState<{ rowIndex: number; field: string } | null>(null);
     const [editValue, setEditValue] = useState('');

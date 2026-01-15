@@ -110,6 +110,12 @@ const SMTP_PASSWORD = process.env.SMTP_PASSWORD;
 const EMAIL_FROM = process.env.AUTH_EMAIL_FROM;
 const EMAIL_REPLY_TO = process.env.AUTH_EMAIL_REPLY_TO;
 
+// Auditor Email Configuration
+const AUDITORS_SMTP_USERNAME = process.env.AUDITORS_SMTP_USERNAME;
+const AUDITORS_SMTP_PASSWORD = process.env.AUDITORS_SMTP_PASSWORD;
+const AUDITORS_EMAIL_FROM = process.env.AUDITORS_EMAIL_FROM;
+const AUDITORS_EMAIL_REPLY_TO = process.env.AUDITORS_EMAIL_REPLY_TO;
+
 // External API Configuration from Env Vars (Strict)
 const TELIZE_RAPIDAPI_KEY = process.env.TELIZE_RAPIDAPI_KEY;
 const TELIZE_API_HOST = process.env.TELIZE_API_HOST;
@@ -233,9 +239,23 @@ async function getPromptsForAid(aid: string, oidcToken?: string): Promise<Array<
  * @returns {Promise<object>} A promise that resolves to the participant's data (specific fields for auth).
  * @throws {Error} If participant not found or database query fails or table name not configured.
  */
-async function findParticipantForAuth(id: string, oidcToken?: string): Promise<any> {
+async function findParticipantForAuth(id: string, oidcToken?: string): Promise<{ participant: any, auditor: boolean } | null> {
     const tableCfg = tableGetConfig('students');
-    return await getOne(tableCfg.tableName, tableCfg.pk, id, undefined, oidcToken);
+    const student = await getOne(tableCfg.tableName, tableCfg.pk, id, undefined, oidcToken);
+
+    if (student) {
+        return { participant: student, auditor: false };
+    }
+
+    // Fallback to auditors table
+    const auditorsTableCfg = tableGetConfig('auditors');
+    const auditorRecord = await getOne(auditorsTableCfg.tableName, auditorsTableCfg.pk, id, undefined, oidcToken);
+
+    if (auditorRecord) {
+        return { participant: auditorRecord, auditor: true };
+    }
+
+    return null;
 }
 
 /**
@@ -485,15 +505,21 @@ export async function linkEmailSend(pid: string, hash: string, host: string, lin
     hasPermission = permittedHosts.includes(linkHost);
     if (!hasPermission) throw new Error('AUTH_TARGETUSER_ACCESS_NOT_ALLOWED_LINK_HOST_NOT_PERMITTED');
 
-    // Check necessary configs at the start
-    if (!SMTP_USERNAME || !SMTP_PASSWORD) throw new Error("SMTP credentials not configured for email sending.");
-    if (!EMAIL_FROM || !EMAIL_REPLY_TO) throw new Error("Sender email addresses not configured for email sending.");
-
     // Find participant data internally for the target user
-    const participantData = await findParticipantForAuth(targetUserPid, oidcToken);
-    if (!participantData) {
+    const result = await findParticipantForAuth(targetUserPid, oidcToken);
+    if (!result) {
         throw new Error('AUTH_PID_NOT_FOUND');
     }
+    const { participant: participantData, auditor } = result;
+
+    // Use auditor credentials if applicable, otherwise default
+    const smtpUser = auditor ? AUDITORS_SMTP_USERNAME : SMTP_USERNAME;
+    const smtpPass = auditor ? AUDITORS_SMTP_PASSWORD : SMTP_PASSWORD;
+    const emailFrom = auditor ? AUDITORS_EMAIL_FROM : EMAIL_FROM;
+    const emailReplyTo = auditor ? AUDITORS_EMAIL_REPLY_TO : EMAIL_REPLY_TO;
+
+    if (!smtpUser || !smtpPass) throw new Error("SMTP credentials not configured for email sending.");
+    if (!emailFrom || !emailReplyTo) throw new Error("Sender email addresses not configured for email sending.");
 
     const language = participantData.writtenLangPref || 'English';
     const localPrompts = await getPromptsForAid('link', oidcToken);
@@ -514,16 +540,16 @@ export async function linkEmailSend(pid: string, hash: string, host: string, lin
     const transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
-            user: SMTP_USERNAME,
-            pass: SMTP_PASSWORD
+            user: smtpUser,
+            pass: smtpPass
         },
         // Ensure proper encoding to avoid quoted-printable encoding issues
         encoding: 'utf8'
     });
 
     const mailOptions = {
-        from: EMAIL_FROM,
-        replyTo: EMAIL_REPLY_TO,
+        from: emailFrom,
+        replyTo: emailReplyTo,
         to: participantData.email,
         subject: getLinkPrompt('subject-' + linkHost, language),
         html: emailBody
@@ -612,15 +638,22 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
     // User has access to this HOST - send the verification email   
 
     // Check necessary configs at the start
-    if (!SMTP_USERNAME || !SMTP_PASSWORD) throw new Error("SMTP credentials not configured for email sending.");
-    if (!TELIZE_RAPIDAPI_KEY || !TELIZE_API_HOST) throw new Error("Geolocation API Key or Host not configured for email sending.");
-    if (!EMAIL_FROM || !EMAIL_REPLY_TO) throw new Error("Sender email addresses not configured for email sending.");
-
+    // Use auditor credentials if applicable, otherwise default
     // Find participant data internally
-    const participantData = await findParticipantForAuth(pid, oidcToken);
-    if (!participantData) {
+    const result = await findParticipantForAuth(pid, oidcToken);
+    if (!result) {
         throw new Error('AUTH_PID_NOT_FOUND');
     }
+    const { participant: participantData, auditor } = result;
+
+    const smtpUser = auditor ? AUDITORS_SMTP_USERNAME : SMTP_USERNAME;
+    const smtpPass = auditor ? AUDITORS_SMTP_PASSWORD : SMTP_PASSWORD;
+    const emailFrom = auditor ? AUDITORS_EMAIL_FROM : EMAIL_FROM;
+    const emailReplyTo = auditor ? AUDITORS_EMAIL_REPLY_TO : EMAIL_REPLY_TO;
+
+    if (!smtpUser || !smtpPass) throw new Error("SMTP credentials not configured for email sending.");
+    if (!emailFrom || !emailReplyTo) throw new Error("Sender email addresses not configured for email sending.");
+
 
     const language = participantData.writtenLangPref || 'English';
     const localPrompts = await getPromptsForAid('confirm', oidcToken);
@@ -678,16 +711,16 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
     const transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
-            user: SMTP_USERNAME,
-            pass: SMTP_PASSWORD
+            user: smtpUser,
+            pass: smtpPass
         },
         // Ensure proper encoding to avoid quoted-printable encoding issues
         encoding: 'utf8'
     });
 
     const mailOptions = {
-        from: EMAIL_FROM,
-        replyTo: EMAIL_REPLY_TO,
+        from: emailFrom,
+        replyTo: emailReplyTo,
         to: participantData.email,
         subject: getConfirmPrompt('subject', language),
         html: emailBody

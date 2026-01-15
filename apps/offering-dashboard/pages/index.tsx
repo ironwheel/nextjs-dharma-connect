@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from 'next/router';
-import { Container, Row, Col, Form, Button, Spinner, ProgressBar } from "react-bootstrap";
+import { Container, Row, Col, Form, Button, Spinner, ProgressBar, ButtonGroup, ToggleButton } from "react-bootstrap";
 import { ToastContainer, toast } from 'react-toastify';
 import { isMobile } from 'react-device-detect';
 import 'react-toastify/dist/ReactToastify.css';
@@ -12,7 +12,8 @@ import {
     authGetViews,
     authGetConfigValue,
     authGetViewsProfiles,
-    getTableCount
+    getTableCount,
+    getTableItem // Added
 } from 'sharedFrontend';
 import { VersionBadge } from 'sharedFrontend';
 
@@ -102,12 +103,19 @@ const Home = () => {
     const [views, setViews] = useState<View[]>([]);
     const [selectedViewName, setSelectedViewName] = useState<string | null>(null);
 
+    // View Mode State
+    const [viewMode, setViewMode] = useState<'events' | 'categories'>('categories');
+    const [selectedCategory, setSelectedCategory] = useState<string>('All Categories');
+    const [eventCategoryList, setEventCategoryList] = useState<string[]>([]);
+
     // Data State
     const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [cacheItems, setCacheItems] = useState<any[]>([]);
     const [rawLoaded, setRawLoaded] = useState(false);
     const [dataSource, setDataSource] = useState<'cache' | 'raw'>('cache');
+    // derived mapping aid -> category
+    const [aidToCategoryMap, setAidToCategoryMap] = useState<Record<string, string>>({});
 
     const [loadingTransactions, setLoadingTransactions] = useState(false);
 
@@ -205,12 +213,43 @@ const Home = () => {
                     // Sort events by name descending
                     const sortedEvents = filteredEvents.sort((a, b) => b.name.localeCompare(a.name));
                     setEvents(sortedEvents);
+
+                    // Build Aid -> Category Map
+                    const map: Record<string, string> = {};
+                    filteredEvents.forEach(e => {
+                        map[e.aid] = (e.category && e.category.trim() !== "") ? e.category : "Uncategorized";
+                    });
+                    setAidToCategoryMap(map);
                 }
 
                 // 3. Fetch offeringViewsProfile config
                 const profileConfig = await authGetConfigValue(pid as string, hash as string, 'offeringViewsProfile');
                 if (profileConfig) {
                     setOfferingViewsProfile(profileConfig);
+                }
+
+                // 4. Fetch Event Category List
+                // 4. Fetch Event Category List
+                const configItem = await getTableItem('config', 'eventCategoryList', pid as string, hash as string);
+
+                let catList: any[] = [];
+                // Check if configItem exists and has a value property (assuming standard config table structure)
+                // If the item itself is the value (depending on how getTableItem returns data - based on apiActions it returns api.get response)
+                // api.get returns JSON.parse(text).
+                // If the DynamoDB item is { key: 'eventCategoryList', value: [...] }, then configItem.value is the list.
+                if (configItem && configItem.value) {
+                    catList = configItem.value;
+                } else if (Array.isArray(configItem)) {
+                    // Fallback to check if configItem itself is the array (unlikely for DDB item but safe)
+                    catList = configItem;
+                }
+
+                if (Array.isArray(catList) && catList.length > 0) {
+                    // Sort categories and add Uncategorized to the end
+                    const sorted = [...catList].sort();
+                    setEventCategoryList([...sorted, 'Uncategorized']);
+                } else {
+                    setEventCategoryList(['Uncategorized']);
                 }
             } catch (err) {
                 console.error("Error initializing dashboard:", err);
@@ -439,8 +478,18 @@ const Home = () => {
             let filtered = [...allTransactions];
 
             // Event Filter
-            if (selectedEventAid && selectedEventAid !== 'all') {
-                filtered = filtered.filter((t: Transaction) => t.aid === selectedEventAid);
+            if (viewMode === 'events') {
+                if (selectedEventAid && selectedEventAid !== 'all') {
+                    filtered = filtered.filter((t: Transaction) => t.aid === selectedEventAid);
+                }
+            } else {
+                // Category Filter
+                if (selectedCategory !== 'All Categories') {
+                    filtered = filtered.filter((t: Transaction) => {
+                        const cat = aidToCategoryMap[t.aid] || 'Uncategorized';
+                        return cat === selectedCategory;
+                    });
+                }
             }
             console.log(`After Event Filter: ${filtered.length}`);
 
@@ -510,24 +559,58 @@ const Home = () => {
             console.log("Processing Cache Logic...");
 
             let filteredCache: any[] = [];
+
+            // Base Cache Filter (Year/Month)
+            // But we also need to respect ViewMode (Category vs Events)
+
+            // NOTE: The existing cache logic for "Events" mode only supports "All Events" (Global Aggregates).
+            // If a specific event is selected, we usually switch to RAW mode automatically?
+            // The prompt said: "When set to All Events, the date-based aggregation cache is used... As soon as an event is selected... the view can change to raw."
+
+            // So if viewMode == 'events' and selectedEventAid != 'all', we shouldn't be here in cache mode unless the user forced it?
+            // But cache doesn't support per-event aggregates (yet).
+
+            // However, for Categories, we DO have per-category aggregates.
+
+            if (viewMode === 'categories') {
+                if (selectedCategory === 'All Categories') {
+                    // Global Aggregates (same as All Events)
+                    filteredCache = cacheItems.filter(i => i.type === 'YEAR' || i.type === 'MONTH');
+                } else {
+                    // Category Aggregates
+                    filteredCache = cacheItems.filter(i => (i.type === 'CATEGORY_YEAR' || i.type === 'CATEGORY_MONTH') && i.category === selectedCategory);
+                }
+            } else {
+                // Events Mode
+                // Only show global aggregates if 'all' is selected.
+                if (selectedEventAid === 'all') {
+                    filteredCache = cacheItems.filter(i => i.type === 'YEAR' || i.type === 'MONTH');
+                } else {
+                    // If in events mode and specific event is selected, cache is empty/invalid? 
+                    // Or user forced cache mode?
+                    filteredCache = [];
+                }
+            }
+
+            // Apply Date Filters on the selected set
             if (isYearAll && isMonthAll) {
                 // Show YEARS
-                filteredCache = cacheItems.filter(i => i.type === 'YEAR');
+                filteredCache = filteredCache.filter(i => i.type === 'YEAR' || i.type === 'CATEGORY_YEAR');
                 filteredCache.sort((a, b) => b.year - a.year);
             } else if (!isYearAll && isMonthAll) {
                 // Show MONTHS for selected Year
                 const yVal = parseInt(selectedYear);
-                filteredCache = cacheItems.filter(i => i.type === 'MONTH' && i.year === yVal);
+                filteredCache = filteredCache.filter(i => (i.type === 'MONTH' || i.type === 'CATEGORY_MONTH') && i.year === yVal);
                 filteredCache.sort((a, b) => b.month - a.month);
             } else if (!isYearAll && !isMonthAll) {
                 // Specific Month (Single Row)
                 const yVal = parseInt(selectedYear);
                 const mVal = parseInt(selectedMonth);
-                filteredCache = cacheItems.filter(i => i.type === 'MONTH' && i.year === yVal && i.month === mVal);
+                filteredCache = filteredCache.filter(i => (i.type === 'MONTH' || i.type === 'CATEGORY_MONTH') && i.year === yVal && i.month === mVal);
             } else {
-                // Specific Month, All Years (unlikely UX but supported)
+                // Specific Month, All Years
                 const mVal = parseInt(selectedMonth);
-                filteredCache = cacheItems.filter(i => i.type === 'MONTH' && i.month === mVal);
+                filteredCache = filteredCache.filter(i => (i.type === 'MONTH' || i.type === 'CATEGORY_MONTH') && i.month === mVal);
                 filteredCache.sort((a, b) => b.year - a.year);
             }
             console.log(`Filtered Cache Items: ${filteredCache.length}`);
@@ -542,7 +625,7 @@ const Home = () => {
                 emailReceipt: '',
                 id: c.id,
                 kmFee: c.kmFee, // In Dollars
-                name: c.type === 'YEAR' ? `${c.year} Summary` : `${months.find(m => m.value === c.month.toString())?.label} ${c.year}`,
+                name: (c.type === 'YEAR' || c.type === 'CATEGORY_YEAR') ? `${c.year} Summary` : `${months.find(m => m.value === c.month.toString())?.label} ${c.year}`,
                 payer: 'aggregate',
                 payerData: {
                     amount: c.amount,
@@ -554,10 +637,10 @@ const Home = () => {
                 timestamp: c.updatedAt,
                 total: c.amount,
                 isAggregate: true,
-                displayDate: c.type === 'YEAR' ? c.year.toString() : `${c.year}-${(c.month + 1).toString().padStart(2, '0')}`
+                displayDate: (c.type === 'YEAR' || c.type === 'CATEGORY_YEAR') ? c.year.toString() : `${c.year}-${(c.month + 1).toString().padStart(2, '0')}`
             } as Transaction)));
         }
-    }, [selectedYear, selectedMonth, selectedEventAid, selectedViewName, cacheItems, allTransactions, rawLoaded, views, dataSource]);
+    }, [selectedYear, selectedMonth, selectedEventAid, selectedViewName, cacheItems, allTransactions, rawLoaded, views, dataSource, viewMode, selectedCategory]);
 
 
 
@@ -604,7 +687,7 @@ const Home = () => {
         const currentColumns = getColumns().filter(c => !c.hide);
 
         return (
-            <div className="mb-3 p-3" style={{ backgroundColor: '#1f2937', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.2)' }}>
+            <div className="mb-3 px-3">
                 <h6 className="text-white mb-2" style={{ fontWeight: 600 }}>Totals</h6>
                 <div className="table-responsive">
                     <table className="table table-dark table-sm mb-0 frozen-table" style={{ backgroundColor: 'transparent', minWidth: '1000px', width: '100%' }}>
@@ -638,7 +721,7 @@ const Home = () => {
                                 {currentColumns.map(col => {
                                     let content: React.ReactNode = '';
                                     const style: React.CSSProperties = {
-                                        backgroundColor: 'transparent',
+                                        backgroundColor: 'rgba(59, 130, 246, 0.15)',
                                         color: 'white',
                                         fontWeight: 'bold',
                                         width: col.width,
@@ -707,6 +790,7 @@ const Home = () => {
             const col: Column = {
                 headerName: def.headerName,
                 field: def.name,
+                width: 300 // Default Width
             };
 
             if (def.name === 'rowIndex') {
@@ -720,7 +804,12 @@ const Home = () => {
 
             // Custom Render logic
             if (def.name === 'Date' || def.stringName === 'timestamp') {
-                col.valueGetter = (row: Transaction) => row.timestamp;
+                col.valueGetter = (row: Transaction) => {
+                    if ((row as any).isAggregate) {
+                        return (row as any).displayDate;
+                    }
+                    return row.timestamp;
+                };
                 col.render = (row: Transaction) => {
                     if ((row as any).isAggregate) return (row as any).displayDate;
                     return formatDate(row.timestamp);
@@ -733,9 +822,11 @@ const Home = () => {
             } else if (def.name === 'Amount' || def.numberName === 'amount') {
                 col.valueGetter = (row: Transaction) => row.payerData?.amount || 0;
                 col.render = (row: Transaction) => formatCurrency(row.payerData?.amount || 0, row.currency);
+                col.width = 150;
             } else if (def.name === 'Stripe Fee' || def.numberName === 'fee') {
                 col.valueGetter = (row: Transaction) => row.payerData?.fee || 0;
                 col.render = (row: Transaction) => formatCurrency(row.payerData?.fee || 0, row.currency);
+                col.width = 150;
             } else if (def.name === 'KM Fee' || def.numberName === 'kmFee') {
                 col.valueGetter = (row: Transaction) => {
                     if (row.status === 'REFUNDED') return 0;
@@ -746,6 +837,7 @@ const Home = () => {
                     if (row.status === 'REFUNDED') return formatCurrency(0, row.currency);
                     return formatCurrency((row.kmFee || 0) * 100, row.currency);
                 };
+                col.width = 150;
             } else if (def.name === 'Net') {
                 col.valueGetter = (row: Transaction) => {
                     const amount = row.payerData?.amount || 0;
@@ -767,6 +859,7 @@ const Home = () => {
                     const km = (row.kmFee || 0) * 100;
                     return formatCurrency(amount - (fee + km), row.currency);
                 };
+                col.width = 150;
             }
 
             return col;
@@ -793,31 +886,83 @@ const Home = () => {
             <nav className="modern-navbar" style={{ backgroundColor: '#1f2937', padding: '1rem' }}>
                 <div className="d-flex align-items-center justify-content-between w-100 flex-wrap gap-2">
                     <div className="d-flex align-items-center gap-2">
-                        <div className="event-selector">
-                            <EventSelection
-                                events={events}
-                                selectedEventKey={selectedEventKey}
-                                selectedEventAid={selectedEventAid}
-                                onSelect={(eventKey) => {
-                                    const selectEvent = () => {
-                                        setSelectedEventKey(eventKey);
-                                        // Derive Aid
-                                        const aid = eventKey.includes(':') ? eventKey.split(':').shift() || '' : eventKey;
-                                        setSelectedEventAid(aid);
-                                    };
 
-                                    if (eventKey === 'all') {
-                                        selectEvent();
-                                    } else {
-                                        const action = () => {
-                                            selectEvent();
-                                            setDataSource('raw');
-                                        };
-                                        triggerLoadAction(action);
-                                    }
+                        {/* View Mode Toggle */}
+                        <div className="btn-group" role="group" style={{ marginRight: '10px' }}>
+                            <input
+                                type="radio"
+                                className="btn-check"
+                                name="viewmode"
+                                id="mode-categories"
+                                autoComplete="off"
+                                checked={viewMode === 'categories'}
+                                onChange={() => {
+                                    setViewMode('categories');
+                                    // Reset filters when switching? 
+                                    // User said: "Switching to raw mode only happens when event categories are active... if the user is simply changing... reverted to All Categories... cached aggregates should always be used."
+                                    // Safer to reset to defaults or keep?
+                                    // Keeping date selection is desired.
+                                    setDataSource('cache');
                                 }}
                             />
+                            <label className="btn btn-outline-secondary btn-sm" htmlFor="mode-categories">Categories</label>
+
+                            <input
+                                type="radio"
+                                className="btn-check"
+                                name="viewmode"
+                                id="mode-events"
+                                autoComplete="off"
+                                checked={viewMode === 'events'}
+                                onChange={() => {
+                                    setViewMode('events');
+                                    setDataSource('cache');
+                                }}
+                            />
+                            <label className="btn btn-outline-secondary btn-sm" htmlFor="mode-events">Events</label>
                         </div>
+
+                        {viewMode === 'categories' ? (
+                            <CustomDropdown
+                                value={selectedCategory}
+                                options={[
+                                    { value: 'All Categories', label: 'All Categories' },
+                                    ...eventCategoryList.map(c => ({ value: c, label: c }))
+                                ]}
+                                onChange={(val) => {
+                                    setSelectedCategory(val);
+                                    // Switch back to cache if user changes category
+                                    setDataSource('cache');
+                                }}
+                                width="200px"
+                            />
+                        ) : (
+                            <div className="event-selector">
+                                <EventSelection
+                                    events={events}
+                                    selectedEventKey={selectedEventKey}
+                                    selectedEventAid={selectedEventAid}
+                                    onSelect={(eventKey) => {
+                                        const selectEvent = () => {
+                                            setSelectedEventKey(eventKey);
+                                            // Derive Aid
+                                            const aid = eventKey.includes(':') ? eventKey.split(':').shift() || '' : eventKey;
+                                            setSelectedEventAid(aid);
+                                        };
+
+                                        if (eventKey === 'all') {
+                                            selectEvent();
+                                        } else {
+                                            const action = () => {
+                                                selectEvent();
+                                                setDataSource('raw');
+                                            };
+                                            triggerLoadAction(action);
+                                        }
+                                    }}
+                                />
+                            </div>
+                        )}
 
                         {/* Year Dropdown */}
                         {/* Year Dropdown */}
@@ -928,6 +1073,8 @@ const Home = () => {
                                 pid={pid as string}
                                 hash={hash as string}
                                 canViewStudentHistory={false}
+                                defaultSortField="Date"
+                                defaultSortDirection="desc"
                                 onRowClick={(row) => {
                                     const item = row as any;
                                     if (item.isAggregate) {
