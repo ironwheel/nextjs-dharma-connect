@@ -2186,9 +2186,11 @@ const Home = () => {
                         </h4>
                         {filteredEvents.map(event => {
                             const earliestDate = getEarliestEventDate(event);
-                            const dateDisplay = earliestDate
-                                ? earliestDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
-                                : 'No date';
+                            const dateDisplay = event.list
+                                ? 'List'
+                                : (earliestDate
+                                    ? earliestDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+                                    : 'No date');
 
                             return (
                                 <div key={event.aid} className="event-item">
@@ -2199,8 +2201,8 @@ const Home = () => {
                                             </h5>
                                             <div style={{ fontSize: '0.9rem', color: '#aaa' }}>
                                                 Code: {event.aid} • Pool: {event.config?.pool || 'Not set'}
-                                                {event.subEvents && ` • ${Object.keys(event.subEvents).length} subevents`}
-                                                {event.category && ` • Category: ${event.category}`}
+                                                {!event.list && event.subEvents && ` • ${Object.keys(event.subEvents).length} subevents`}
+                                                {!event.list && event.category && ` • Category: ${event.category}`}
                                             </div>
                                         </div>
                                         <Button
@@ -2381,26 +2383,28 @@ const Home = () => {
                                     </Form.Group>
                                 </Col>
                             </Row>
-                            <Row>
-                                <Col md={6}>
-                                    <Form.Group className="mb-3">
-                                        <Form.Label>Category</Form.Label>
-                                        <Form.Control
-                                            type="text"
-                                            list="event-category-list"
-                                            value={eventFormData.category || ''}
-                                            onChange={(e) => setEventFormData({ ...eventFormData, category: e.target.value })}
-                                            placeholder="Select or enter a category"
-                                            style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
-                                        />
-                                        <datalist id="event-category-list">
-                                            {eventCategories.map(cat => (
-                                                <option key={cat} value={cat} />
-                                            ))}
-                                        </datalist>
-                                    </Form.Group>
-                                </Col>
-                            </Row>
+                            {!eventFormData.list && (
+                                <Row>
+                                    <Col md={6}>
+                                        <Form.Group className="mb-3">
+                                            <Form.Label>Category</Form.Label>
+                                            <Form.Control
+                                                type="text"
+                                                list="event-category-list"
+                                                value={eventFormData.category || ''}
+                                                onChange={(e) => setEventFormData({ ...eventFormData, category: e.target.value })}
+                                                placeholder="Select or enter a category"
+                                                style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                                            />
+                                            <datalist id="event-category-list">
+                                                {eventCategories.map(cat => (
+                                                    <option key={cat} value={cat} />
+                                                ))}
+                                            </datalist>
+                                        </Form.Group>
+                                    </Col>
+                                </Row>
+                            )}
                             <Row>
                                 <Col md={12}>
                                     <Form.Group className="mb-3">
