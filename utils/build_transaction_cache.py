@@ -26,18 +26,56 @@ def get_table(session, table_name):
     dynamodb = session.resource('dynamodb')
     return dynamodb.Table(table_name)
 
-def build_cache(profile, tx_table_name, cache_table_name, dry_run):
+def build_cache(profile, tx_table_name, cache_table_name, events_table_name, dry_run):
     print(f"Inside build_cache...")
     print(f"Starting Cache Build...")
     print(f"  Profile: {profile}")
     print(f"  Transactions: {tx_table_name}")
     print(f"  Cache: {cache_table_name}")
+    print(f"  Events: {events_table_name}")
     if dry_run:
         print("  Mode: DRY RUN (No updates)")
 
     session = boto3.Session(profile_name=profile, region_name='us-east-1')
     tx_table = get_table(session, tx_table_name)
     cache_table = get_table(session, cache_table_name)
+    events_table = get_table(session, events_table_name)
+
+    # 1. Fetch Events and Build Category Map
+    print("Fetching events...")
+    aid_to_category = {}
+    ignored_aids = set() # Events with list: true should be ignored
+    scan_kwargs_events = {}
+    done_events = False
+    start_key_events = None
+    
+    while not done_events:
+        if start_key_events:
+            scan_kwargs_events['ExclusiveStartKey'] = start_key_events
+        
+        response = events_table.scan(**scan_kwargs_events)
+        items = response.get('Items', [])
+        
+        for event in items:
+            aid = event.get('aid')
+            
+            # Check for list: true and ignore if set
+            if event.get('list') is True:
+                if aid:
+                    ignored_aids.add(aid)
+                continue
+                
+            category = event.get('category')
+            if not category or category.strip() == "":
+                category = "Uncategorized"
+            
+            if aid:
+                aid_to_category[aid] = category
+        
+        start_key_events = response.get('LastEvaluatedKey', None)
+        done_events = start_key_events is None
+    
+    print(f"Loaded {len(aid_to_category)} events.")
 
     # Aggregators
     # Key: Year (int) or "YYYY-MM" (str)
@@ -49,6 +87,17 @@ def build_cache(profile, tx_table_name, cache_table_name, dry_run):
     })
     
     months_data = defaultdict(lambda: {
+        'count': 0, 'amount': Decimal(0), 'stripeFee': Decimal(0), 'kmFee': Decimal(0)
+    })
+
+    # Category Aggregators
+    # Key: (category, year)
+    category_years_data = defaultdict(lambda: {
+        'count': 0, 'amount': Decimal(0), 'stripeFee': Decimal(0), 'kmFee': Decimal(0)
+    })
+    
+    # Key: (category, "YYYY-MM")
+    category_months_data = defaultdict(lambda: {
         'count': 0, 'amount': Decimal(0), 'stripeFee': Decimal(0), 'kmFee': Decimal(0)
     })
 
@@ -64,12 +113,9 @@ def build_cache(profile, tx_table_name, cache_table_name, dry_run):
             scan_kwargs['ExclusiveStartKey'] = start_key
         
         response = tx_table.scan(**scan_kwargs)
-        print(f"Response keys: {list(response.keys())}")
+        # print(f"Response keys: {list(response.keys())}")
         items = response.get('Items', [])
-        print(f"Items type: {type(items)}")
-        if len(items) > 0:
-            print(f"First item type: {type(items[0])}")
-            print(f"First item sample: {str(items[0])[:100]}")
+        # print(f"Items type: {type(items)}")
         
         total_scanned += len(items)
         
@@ -123,6 +169,13 @@ def build_cache(profile, tx_table_name, cache_table_name, dry_run):
             # The Dashboard will load it and multiply by 100.
             km_fee = Decimal(tx.get('kmFee', 0) or 0) 
 
+            aid = tx.get('aid')
+            if aid in ignored_aids:
+                continue
+
+            category = aid_to_category.get(aid, "Uncategorized")
+            # If for some reason aid is missing or not in events table, default to Uncategorized
+
             # Aggregation Keys
             y_key = year
             m_key = f"{year}-{month:02d}"
@@ -138,6 +191,18 @@ def build_cache(profile, tx_table_name, cache_table_name, dry_run):
             months_data[m_key]['amount'] += amount
             months_data[m_key]['stripeFee'] += fee
             months_data[m_key]['kmFee'] += km_fee
+
+            # Update Category Year
+            category_years_data[(category, year)]['count'] += 1
+            category_years_data[(category, year)]['amount'] += amount
+            category_years_data[(category, year)]['stripeFee'] += fee
+            category_years_data[(category, year)]['kmFee'] += km_fee
+
+            # Update Category Month
+            category_months_data[(category, m_key)]['count'] += 1
+            category_months_data[(category, m_key)]['amount'] += amount
+            category_months_data[(category, m_key)]['stripeFee'] += fee
+            category_months_data[(category, m_key)]['kmFee'] += km_fee
 
         start_key = response.get('LastEvaluatedKey', None)
         done = start_key is None
@@ -195,6 +260,51 @@ def build_cache(profile, tx_table_name, cache_table_name, dry_run):
                 batch.put_item(Item=item)
             print(f"  [MONTH] {m_str}: {item['count']} txs")
 
+        # Category Years
+        print("Writing Category Aggregates...")
+        for (category, year), data in category_years_data.items():
+            net = data['amount'] - (data['stripeFee'] + (data['kmFee'] * 100))
+            
+            item = {
+                'id': f"CAT#{category}#{year}",
+                'type': 'CATEGORY_YEAR',
+                'category': category,
+                'year': int(year),
+                'count': int(data['count']),
+                'amount': int(data['amount']),
+                'stripeFee': int(data['stripeFee']),
+                'kmFee': Decimal(str(data['kmFee'])),
+                'net': int(net),
+                'currency': 'usd',
+                'updatedAt': datetime.utcnow().isoformat()
+            }
+            if not dry_run:
+                batch.put_item(Item=item)
+            print(f"  [CAT-YEAR] {category} {year}: {item['count']} txs")
+
+        # Category Months
+        for (category, m_str), data in category_months_data.items():
+            year_part, month_part = m_str.split('-')
+            net = data['amount'] - (data['stripeFee'] + (data['kmFee'] * 100))
+            
+            item = {
+                'id': f"CAT#{category}#{m_str}",
+                'type': 'CATEGORY_MONTH',
+                'category': category,
+                'year': int(year_part),
+                'month': int(month_part) - 1,
+                'count': int(data['count']),
+                'amount': int(data['amount']),
+                'stripeFee': int(data['stripeFee']),
+                'kmFee': Decimal(str(data['kmFee'])),
+                'net': int(net),
+                'currency': 'usd',
+                'updatedAt': datetime.utcnow().isoformat()
+            }
+            if not dry_run:
+                batch.put_item(Item=item)
+            # print(f"  [CAT-MONTH] {category} {m_str}: {item['count']} txs")
+
     print("Cache build complete.")
 
 def main():
@@ -205,13 +315,14 @@ def main():
 
     tx_table = os.environ.get('TRANSACTIONS_TABLE')
     cache_table = os.environ.get('TRANSACTIONS_CACHE_TABLE')
+    events_table = os.environ.get('EVENTS_TABLE')
 
-    if not tx_table or not cache_table:
-        print("Error: TRANSACTIONS_TABLE and TRANSACTIONS_CACHE_TABLE env vars required.")
+    if not tx_table or not cache_table or not events_table:
+        print("Error: TRANSACTIONS_TABLE, TRANSACTIONS_CACHE_TABLE and EVENTS_TABLE env vars required.")
         sys.exit(1)
 
     try:
-        build_cache(args.profile, tx_table, cache_table, args.dry_run)
+        build_cache(args.profile, tx_table, cache_table, events_table, args.dry_run)
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
