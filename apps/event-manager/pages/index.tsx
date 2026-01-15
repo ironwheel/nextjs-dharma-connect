@@ -2200,6 +2200,7 @@ const Home = () => {
                                             <div style={{ fontSize: '0.9rem', color: '#aaa' }}>
                                                 Code: {event.aid} • Pool: {event.config?.pool || 'Not set'}
                                                 {event.subEvents && ` • ${Object.keys(event.subEvents).length} subevents`}
+                                                {event.category && ` • Category: ${event.category}`}
                                             </div>
                                         </div>
                                         <Button
