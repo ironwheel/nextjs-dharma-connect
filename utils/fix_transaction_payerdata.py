@@ -107,7 +107,7 @@ def process_record(record, table, dry_run):
 
 def main():
     parser = argparse.ArgumentParser(description="Fix transaction payerData from Stripe")
-    parser.add_argument('--profile', default='slsupport', help='AWS Profile')
+    parser.add_argument('--profile', help='AWS Profile')
     parser.add_argument('--dry-run', action='store_true', help='Dry run mode')
     parser.add_argument('--only-one', action='store_true', help='Process only one record and exit')
     args = parser.parse_args()
