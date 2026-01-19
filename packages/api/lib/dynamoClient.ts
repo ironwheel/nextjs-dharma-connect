@@ -799,34 +799,69 @@ export async function listAllQueryBeginsWithSortKeyMultiple(
   const primaryKeyList = primaryKeyValues.split(',');
   const results: Record<string, any[]> = {};
 
-  console.log("listAllQueryBeginsWithSortKeyMultiple: primaryKeyList:", primaryKeyList);
-  console.log("listAllQueryBeginsWithSortKeyMultiple: tableName:", tableName);
-  console.log("listAllQueryBeginsWithSortKeyMultiple: primaryKeyName:", primaryKeyName);
-  console.log("listAllQueryBeginsWithSortKeyMultiple: sortKeyName:", sortKeyName);
-  console.log("listAllQueryBeginsWithSortKeyMultiple: sortKeyValue:", sortKeyValue);
+  for (const pk of primaryKeyList) {
+    const items = await listAllQueryBeginsWithSortKey(
+      tableName,
+      primaryKeyName,
+      pk.trim(),
+      sortKeyName,
+      sortKeyValue,
+      roleArnOverride,
+      oidcToken
+    );
+    results[pk] = items;
+  }
+
+  return results;
+}
+
+/**
+ * @async
+ * @function queryIndex
+ * @description Query a GSI.
+ * @param {string} tableName - The name of the table to query.
+ * @param {string} indexName - The name of the index to query.
+ * @param {string} pkName - The name of the partition key for the index.
+ * @param {string} pkValue - The value of the partition key.
+ * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @returns {Promise<any[]>} A promise that resolves to an array of items.
+ * @throws {Error} When AWS operation fails or index cannot be queried.
+ */
+export async function queryIndex(
+  tableName: string,
+  indexName: string,
+  pkName: string,
+  pkValue: string,
+  roleArnOverride?: string,
+  oidcToken?: string
+) {
+  const client = await getDocClient(roleArnOverride, oidcToken);
+  const items: any[] = [];
+  let ExclusiveStartKey;
 
   try {
-    const queryPromises = primaryKeyList.map(async (primaryKeyValue) => {
-      const items = await listAllQueryBeginsWithSortKey(
-        tableName,
-        primaryKeyName,
-        primaryKeyValue.trim(),
-        sortKeyName,
-        sortKeyValue,
-        roleArnOverride,
-        oidcToken
+    do {
+      const response = await client.send(
+        new QueryCommand({
+          TableName: tableName,
+          IndexName: indexName,
+          KeyConditionExpression: `${pkName} = :pk`,
+          ExpressionAttributeValues: {
+            ':pk': pkValue,
+          },
+          ExclusiveStartKey,
+        })
       );
-      results[primaryKeyValue.trim()] = items;
-      console.log("listAllQueryBeginsWithSortKeyMultiple: results:", results);
-    });
+      if (response.Items) items.push(...response.Items);
+      ExclusiveStartKey = response.LastEvaluatedKey;
+    } while (ExclusiveStartKey);
 
-    await Promise.all(queryPromises);
-    return results;
+    return items;
   } catch (error) {
-    console.error(`Failed to query multiple partition keys in table ${tableName}:`, error);
+    console.error(`Failed to query index ${indexName} on table ${tableName}:`, error);
     if (error instanceof Error) {
-      throw new Error(`Failed to query multiple partition keys in table ${tableName}: ${error.message}`);
+      throw new Error(`Failed to query index ${indexName} on table ${tableName}: ${error.message}`);
     }
-    throw new Error(`Failed to query multiple partition keys in table ${tableName}: Unknown error occurred`);
+    throw new Error(`Failed to query index ${indexName} on table ${tableName}: Unknown error occurred`);
   }
 }

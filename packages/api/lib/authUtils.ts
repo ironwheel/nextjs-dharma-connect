@@ -708,6 +708,12 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
         .replace(/\|\|location\|\|/g, location)
         .replace(/\|\|code\|\|/g, verificationTokenId);
 
+    console.log('verificationEmailSend: Email smtpUser:', smtpUser);
+    console.log('verificationEmailSend: Email smtpPass:', smtpPass);
+    console.log('verificationEmailSend: Email emailFrom:', emailFrom);
+    console.log('verificationEmailSend: Email emailReplyTo:', emailReplyTo);
+    console.log('verificationEmailSend: Email participantData.email:', participantData.email);
+
     const transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
