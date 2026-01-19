@@ -593,6 +593,44 @@ export async function queryGetTableItems(
 
 /**
  * @async
+ * @function queryGetTableIndexItems
+ * @description Retrieve items from a table using a GSI.
+ * @param {string} resource - The resource to retrieve the items from.
+ * @param {string} indexName - The name of the index to query.
+ * @param {string} pkName - The name of the partition key for the index.
+ * @param {string} pkValue - The value of the partition key.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<any[] | RedirectedResponse>} A promise that resolves to an array of items.
+ */
+export async function queryGetTableIndexItems(
+    resource: string,
+    indexName: string,
+    pkName: string,
+    pkValue: string,
+    pid: string,
+    hash: string
+): Promise<any[] | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/table/${resource}/query-index`, pid, hash, {
+            indexName,
+            pkName,
+            pkValue
+        });
+
+        if (response && response.redirected) {
+            return { redirected: true };
+        }
+
+        return response.items || [];
+    } catch (error: any) {
+        console.error(`[API] queryGetTableIndexItems failed for ${resource}:`, error);
+        throw new Error(error.message || 'Failed to query table index items');
+    }
+}
+
+/**
+ * @async
  * @function getTableCount
  * @description Get the number of items in a table.
  * @param {string} resource - The resource to get the count from.
@@ -862,7 +900,7 @@ export async function getVimeoShowcaseVideos(
     perLanguage: boolean,
     pid: string,
     hash: string
-): Promise<Record<string, string> | Array<{index: number, language: string, videoId: string}> | RedirectedResponse> {
+): Promise<Record<string, string> | Array<{ index: number, language: string, videoId: string }> | RedirectedResponse> {
     try {
         const response = await api.get(`${API_BASE_URL}/vimeo/videoids?showcaseId=${encodeURIComponent(showcaseId)}&perLanguage=${perLanguage}`, pid, hash);
 
