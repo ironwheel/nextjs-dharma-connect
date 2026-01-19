@@ -13,7 +13,8 @@ import {
     authGetConfigValue,
     authGetViewsProfiles,
     getTableCount,
-    getTableItem // Added
+    getTableItem,
+    queryGetTableIndexItems // Added
 } from 'sharedFrontend';
 import { VersionBadge } from 'sharedFrontend';
 
@@ -104,7 +105,7 @@ const Home = () => {
     const [selectedViewName, setSelectedViewName] = useState<string | null>(null);
 
     // View Mode State
-    const [viewMode, setViewMode] = useState<'events' | 'categories'>('categories');
+    const [viewMode, setViewMode] = useState<'events' | 'categories'>('events');
     const [selectedCategory, setSelectedCategory] = useState<string>('All Categories');
     const [eventCategoryList, setEventCategoryList] = useState<string[]>([]);
 
@@ -114,6 +115,7 @@ const Home = () => {
     const [cacheItems, setCacheItems] = useState<any[]>([]);
     const [rawLoaded, setRawLoaded] = useState(false);
     const [dataSource, setDataSource] = useState<'cache' | 'raw'>('cache');
+    const [loadedScope, setLoadedScope] = useState<string | null>(null); // 'all' or specific aid
     // derived mapping aid -> category
     const [aidToCategoryMap, setAidToCategoryMap] = useState<Record<string, string>>({});
 
@@ -391,12 +393,14 @@ const Home = () => {
                         const filteredViews = (viewsData as any[]).filter(v => profileRec.views.includes(v.name));
                         setViews(filteredViews);
                         if (filteredViews.length > 0) {
-                            const defaultView = filteredViews.find(v => v.name === 'Refunded All') || filteredViews[0];
+                            // 2026-01-19: Prioritize "Completed" type views for default
+                            const defaultView = filteredViews.find(v => v.name === 'Completed' || v.name === 'Completed-Names') || filteredViews.find(v => v.name.includes('Completed')) || filteredViews[0];
                             setSelectedViewName(defaultView.name);
                         }
                     } else {
                         setViews(viewsData as View[]);
                     }
+
                 }
 
                 // 4. Get Total TX Count (for progress bar later)
@@ -412,21 +416,32 @@ const Home = () => {
                 setLoadingTransactions(false);
             }
         };
-
         fetchData();
     }, [pid, hash]);
 
     // Helper: Fetch Raw Transactions (Lazy)
     const fetchRawTransactions = useCallback(async () => {
-        if (rawLoaded || loadingTransactions || !pid || !hash) return;
+        if (loadingTransactions || !pid || !hash) return;
         setLoadingTransactions(true);
         const onProgress = (loaded: number, chunk: number, total: number) => {
             setTxnLoadedCount(loaded);
         };
         try {
-            const txs = await getAllTableItems('transactions', pid, hash, onProgress);
+            let txs: any[] | { redirected: true } = [];
+
+            // OPTIMIZATION: Use GSI if specific event is selected (and not 'all')
+            // Double check selectedEventAid is valid and not 'all'
+            if (selectedEventAid && selectedEventAid !== 'all') {
+                console.log(`OPTIMIZATION: Fetching transactions for event ${selectedEventAid} via GSI...`);
+                txs = await queryGetTableIndexItems('transactions', 'aid-index', 'aid', selectedEventAid, pid, hash);
+            } else {
+                console.log("Fetching ALL transactions (full scan)...");
+                txs = await getAllTableItems('transactions', pid, hash, onProgress);
+            }
+
             if (Array.isArray(txs)) {
                 setAllTransactions(txs);
+                setLoadedScope(selectedEventAid === 'all' ? 'all' : selectedEventAid);
                 setRawLoaded(true);
             }
         } catch (e) {
@@ -435,7 +450,7 @@ const Home = () => {
         } finally {
             setLoadingTransactions(false);
         }
-    }, [pid, hash, rawLoaded, loadingTransactions]);
+    }, [pid, hash, loadingTransactions, selectedEventAid]);
 
     // Determine Display Data
     useEffect(() => {
@@ -464,7 +479,21 @@ const Home = () => {
             // ---------------------
             // SHOW RAW TRANSACTIONS
             // ---------------------
-            if (!rawLoaded) {
+
+            // Check if we need to fetch:
+            // 1. Not loaded at all
+            // 2. We have a specific scope loaded, but we need a different one (and what we have isn't 'all')
+            // Note: If we have 'all' loaded, we don't strictly need to refetch for a specific event (we can filter),
+            // UNLESS the user explicitly wants to refresh the data or if we want to ensure GSI optimization is used generally.
+            // But for now, let's allow "All" to satisfy specific requests because it's already in memory.
+
+            // Logic: Refetch if:
+            // - !rawLoaded
+            // - OR (loadedScope !== 'all' AND loadedScope !== selectedEventAid)
+            //   (Meaning: We have 'Event A', but want 'Event B' or 'All'. 
+            //    If we have 'All', asking for 'Event A' -> Condition false -> No refetch (Good, filters 'All').)
+
+            if (!rawLoaded || (loadedScope !== 'all' && loadedScope !== selectedEventAid)) {
                 // If we are here, it means we entered RAW mode.
                 // fetchRawTransactions checks rawLoaded internally, but we can verify.
                 fetchRawTransactions();
@@ -640,7 +669,7 @@ const Home = () => {
                 displayDate: (c.type === 'YEAR' || c.type === 'CATEGORY_YEAR') ? c.year.toString() : `${c.year}-${(c.month + 1).toString().padStart(2, '0')}`
             } as Transaction)));
         }
-    }, [selectedYear, selectedMonth, selectedEventAid, selectedViewName, cacheItems, allTransactions, rawLoaded, views, dataSource, viewMode, selectedCategory]);
+    }, [selectedYear, selectedMonth, selectedEventAid, selectedViewName, cacheItems, allTransactions, rawLoaded, views, dataSource, viewMode, selectedCategory, loadedScope]);
 
 
 
@@ -757,6 +786,10 @@ const Home = () => {
                                         content = formatCurrency(totals.kmFee);
                                     } else if (['net', 'Net'].includes(col.field) || (typeof col.headerName === 'string' && col.headerName.includes('Net'))) {
                                         content = formatCurrency(totals.net);
+                                    } else if (col.field === 'Name') {
+                                        // Empty for Totals
+                                        content = '';
+                                        style.backgroundColor = 'transparent'; // Optional: make it stand out as empty or keep consistent
                                     }
 
                                     return <td key={col.field} style={style}>{content}</td>;
@@ -860,6 +893,38 @@ const Home = () => {
                     return formatCurrency(amount - (fee + km), row.currency);
                 };
                 col.width = 150;
+            } else if (def.name === 'Name') {
+                // Name Logic: Only show in Raw mode.
+                if (dataSource !== 'raw') {
+                    // Hide column in cache/totals mode
+                    // We can return null/undefined to filter it out or use a hide property if supported?
+                    // The map expects a Column return. We can set width 0 or something or filter after mapping.
+                    // But filter happens outside? No map returns Column[].
+                    // Let's hide it by creating a dummy hidden column or filtering.
+                    // Actually, the easiest way might be to mark it hidden and filter later, but getColumns returns Column[].
+                    // Let's invoke filter(Boolean) pattern if we returned null, but map signature is specific.
+                    // Let's use a 'hide' property on Column interface if possible? 
+                    // Let's return the column but we need to update usage to filter hidden columns. 
+                    // renderTotalsSection already does `getColumns().filter(c => !c.hide)`. 
+                    // So we can set col.hide = true.
+
+                    // But wait, user said "In the totals section... a space should be allocated... it should be empty".
+                    // This implies the column IS visible in the structure (header) but has empty content in Totals row?
+                    // User said: "When totals are displayed (not raw), the column should not be displayed." -> This means HIDE in main grid?
+                    // AND "In the totals section... a space should be allocated".
+                    // This is contradictory unless Totals Section is visible during Raw Mode too.
+                    // If Raw Mode: Grid Name Visible. Totals Section Name Empty.
+                    // If Cache Mode (Totals Displayed): "column should not be displayed".
+
+                    // So:
+                    // If dataSource !== raw -> Check if implicit 'hide' is needed.
+                    col.hide = true;
+                } else {
+                    // Raw Mode -> Show Name
+                    col.valueGetter = (row: Transaction) => row.name;
+                    col.render = (row: Transaction) => row.name;
+                    col.width = 200;
+                }
             }
 
             return col;
@@ -952,12 +1017,14 @@ const Home = () => {
 
                                         if (eventKey === 'all') {
                                             selectEvent();
+                                            setDataSource('cache');
                                         } else {
                                             const action = () => {
                                                 selectEvent();
                                                 setDataSource('raw');
                                             };
-                                            triggerLoadAction(action);
+                                            // Optimization: Specific events load fast via GSI, so no warning needed.
+                                            action();
                                         }
                                     }}
                                 />
@@ -1023,12 +1090,17 @@ const Home = () => {
                                         }
                                     } else {
                                         // Requires Raw Data
-                                        // Trigger Modal
                                         const action = () => {
                                             setSelectedViewName(key);
                                             setDataSource('raw');
                                         };
-                                        triggerLoadAction(action);
+
+                                        // If specific event selected, GSI makes this fast. No warning.
+                                        if (selectedEventAid && selectedEventAid !== 'all') {
+                                            action();
+                                        } else {
+                                            triggerLoadAction(action);
+                                        }
                                     }
                                 }}
                                 width="180px"
@@ -1041,6 +1113,7 @@ const Home = () => {
                         <span className="status-item version-info" style={{ marginLeft: 0, marginRight: '10px' }}>
                             <VersionBadge pid={pid as string} hash={hash as string} />
                         </span>
+                        <img src="/white-on-black.png" alt="Logo" style={{ height: '54px', marginLeft: '10px' }} />
                     </div>
                 </div>
             </nav>
@@ -1078,6 +1151,11 @@ const Home = () => {
                                 onRowClick={(row) => {
                                     const item = row as any;
                                     if (item.isAggregate) {
+                                        // 2026-01-19: Disabled "drill down" for now to prevent accidental full table loads.
+                                        // The logic below (Year/Month clicks) allowed viewing all transactions for a time period,
+                                        // but it triggers a large query and warnings.
+                                        return;
+
                                         if (item.displayDate && item.displayDate.length === 4) {
                                             // Year Clicked -> Filter by Year (Stay in Cache)
                                             setSelectedYear(item.displayDate);
@@ -1092,7 +1170,12 @@ const Home = () => {
                                                 setSelectedMonth(m.toString());
                                                 setDataSource('raw');
                                             };
-                                            triggerLoadAction(action);
+
+                                            if (selectedEventAid && selectedEventAid !== 'all') {
+                                                action();
+                                            } else {
+                                                triggerLoadAction(action);
+                                            }
                                         }
                                     }
                                 }}

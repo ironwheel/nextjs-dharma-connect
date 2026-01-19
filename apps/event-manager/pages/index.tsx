@@ -148,7 +148,7 @@ type ResourceType = 'prompts' | 'events' | 'pools' | 'scripts' | 'offerings' | '
 
 // Available script step definitions (from join.js stepDefs)
 const AVAILABLE_SCRIPT_STEPS = [
-    'writtenTranslation', 'spokenTranslation', 'location', 'motivation', 'experience',
+    'writtenTranslation', 'spokenTranslation', 'location', 'experienceMeditation', 'experienceBuddhism', 'motivation',
     'supplication', 'supplicationMY', 'supplicationAB', 'supplicationVY',
     'joinMY', 'joinAB', 'joinVY', 'join', 'visibleSignature', 'shareEmail',
     'socialMedia', 'selfCare', 'refugeVow', 'preRefugeVow', 'refugeSupplication',
@@ -3500,84 +3500,90 @@ const Home = () => {
                                     maxHeight: '400px',
                                     overflowY: 'auto'
                                 }}>
-                                    {AVAILABLE_SCRIPT_STEPS.map(step => {
-                                        const isSelected = scriptFormData.steps?.includes(step);
-                                        const stepIndex = scriptFormData.steps?.indexOf(step);
+                                    {(() => {
+                                        const selectedSteps = scriptFormData.steps || [];
+                                        const unselectedSteps = AVAILABLE_SCRIPT_STEPS.filter(step => !selectedSteps.includes(step));
+                                        const allStepsToDisplay = [...selectedSteps, ...unselectedSteps];
 
-                                        return (
-                                            <div key={step} style={{
-                                                marginBottom: '8px',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '10px'
-                                            }}>
-                                                <Form.Check
-                                                    type="checkbox"
-                                                    id={`step-${step}`}
-                                                    label={
-                                                        <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                                            {isSelected && (
-                                                                <Badge bg="warning" style={{ minWidth: '30px' }}>
-                                                                    {(stepIndex ?? -1) + 1}
-                                                                </Badge>
-                                                            )}
-                                                            <span>{step}</span>
-                                                        </span>
-                                                    }
-                                                    checked={isSelected}
-                                                    onChange={(e) => {
-                                                        if (e.target.checked) {
-                                                            setScriptFormData({
-                                                                ...scriptFormData,
-                                                                steps: [...(scriptFormData.steps || []), step]
-                                                            });
-                                                        } else {
-                                                            setScriptFormData({
-                                                                ...scriptFormData,
-                                                                steps: (scriptFormData.steps || []).filter(s => s !== step)
-                                                            });
+                                        return allStepsToDisplay.map(step => {
+                                            const isSelected = scriptFormData.steps?.includes(step);
+                                            const stepIndex = scriptFormData.steps?.indexOf(step);
+
+                                            return (
+                                                <div key={step} style={{
+                                                    marginBottom: '8px',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '10px'
+                                                }}>
+                                                    <Form.Check
+                                                        type="checkbox"
+                                                        id={`step-${step}`}
+                                                        label={
+                                                            <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                                {isSelected && (
+                                                                    <Badge bg="warning" style={{ minWidth: '30px' }}>
+                                                                        {(stepIndex ?? -1) + 1}
+                                                                    </Badge>
+                                                                )}
+                                                                <span style={{ color: 'white' }}>{step}</span>
+                                                            </span>
                                                         }
-                                                    }}
-                                                />
-                                                {isSelected && stepIndex !== undefined && stepIndex > 0 && (
-                                                    <Button
-                                                        variant="outline-secondary"
-                                                        size="sm"
-                                                        onClick={() => {
-                                                            const newSteps = [...scriptFormData.steps];
-                                                            const currentIndex = newSteps.indexOf(step);
-                                                            if (currentIndex > 0) {
-                                                                [newSteps[currentIndex - 1], newSteps[currentIndex]] =
-                                                                    [newSteps[currentIndex], newSteps[currentIndex - 1]];
-                                                                setScriptFormData({ ...scriptFormData, steps: newSteps });
+                                                        checked={isSelected}
+                                                        onChange={(e) => {
+                                                            if (e.target.checked) {
+                                                                setScriptFormData({
+                                                                    ...scriptFormData,
+                                                                    steps: [...(scriptFormData.steps || []), step]
+                                                                });
+                                                            } else {
+                                                                setScriptFormData({
+                                                                    ...scriptFormData,
+                                                                    steps: (scriptFormData.steps || []).filter(s => s !== step)
+                                                                });
                                                             }
                                                         }}
-                                                        style={{ padding: '2px 8px' }}
-                                                    >
-                                                        ↑
-                                                    </Button>
-                                                )}
-                                                {isSelected && stepIndex !== undefined && stepIndex < scriptFormData.steps.length - 1 && (
-                                                    <Button
-                                                        variant="outline-secondary"
-                                                        size="sm"
-                                                        onClick={() => {
-                                                            const newSteps = [...scriptFormData.steps];
-                                                            const currentIndex = newSteps.indexOf(step);
-                                                            if (currentIndex < newSteps.length - 1) {
-                                                                [newSteps[currentIndex], newSteps[currentIndex + 1]] =
-                                                                    [newSteps[currentIndex + 1], newSteps[currentIndex]];
-                                                                setScriptFormData({ ...scriptFormData, steps: newSteps });
-                                                            }
-                                                        }}
-                                                        style={{ padding: '2px 8px' }}
-                                                    >
-                                                        ↓
-                                                    </Button>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
+                                                    />
+                                                    {isSelected && stepIndex !== undefined && stepIndex > 0 && (
+                                                        <Button
+                                                            variant="outline-secondary"
+                                                            size="sm"
+                                                            onClick={() => {
+                                                                const newSteps = [...scriptFormData.steps];
+                                                                const currentIndex = newSteps.indexOf(step);
+                                                                if (currentIndex > 0) {
+                                                                    [newSteps[currentIndex - 1], newSteps[currentIndex]] =
+                                                                        [newSteps[currentIndex], newSteps[currentIndex - 1]];
+                                                                    setScriptFormData({ ...scriptFormData, steps: newSteps });
+                                                                }
+                                                            }}
+                                                            style={{ padding: '2px 8px' }}
+                                                        >
+                                                            ↑
+                                                        </Button>
+                                                    )}
+                                                    {isSelected && stepIndex !== undefined && stepIndex < scriptFormData.steps.length - 1 && (
+                                                        <Button
+                                                            variant="outline-secondary"
+                                                            size="sm"
+                                                            onClick={() => {
+                                                                const newSteps = [...scriptFormData.steps];
+                                                                const currentIndex = newSteps.indexOf(step);
+                                                                if (currentIndex < newSteps.length - 1) {
+                                                                    [newSteps[currentIndex], newSteps[currentIndex + 1]] =
+                                                                        [newSteps[currentIndex + 1], newSteps[currentIndex]];
+                                                                    setScriptFormData({ ...scriptFormData, steps: newSteps });
+                                                                }
+                                                            }}
+                                                            style={{ padding: '2px 8px' }}
+                                                        >
+                                                            ↓
+                                                        </Button>
+                                                    )}
+                                                </div>
+                                            );
+                                        })
+                                    })()}
                                 </div>
                                 <Form.Text className="text-muted">
                                     Steps are executed in the order shown. Use ↑↓ buttons to reorder selected steps.
