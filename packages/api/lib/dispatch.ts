@@ -8,7 +8,7 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import { tables, TableConfig } from './tableConfig';
 import { websockets, WebSocketConfig, websocketGetConfig } from './websocketConfig';
-import { listAll, listAllChunked, getOne, deleteOne, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll, batchGetItems, listAllQueryBeginsWithSortKeyMultiple } from './dynamoClient';
+import { listAll, listAllChunked, getOne, deleteOne, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll, batchGetItems, listAllQueryBeginsWithSortKeyMultiple, queryIndex } from './dynamoClient';
 import { verificationEmailSend, verificationEmailCallback, verificationCheck, createToken, getActionsProfiles, getAuthList, getViews, getViewsProfiles, putAuthItem, linkEmailSend, getConfigValue } from './authUtils';
 import { serialize } from 'cookie';
 import { v4 as uuidv4 } from 'uuid';
@@ -113,6 +113,14 @@ async function dispatchTable(
         });
       }
       return res.status(200).json({ results });
+    }
+
+    // QUERY INDEX (POST method for querying a GSI)
+    if (req.method === 'POST' && id === 'query-index' && req.body && req.body.indexName && req.body.pkName && req.body.pkValue && cfg.ops.includes('query-index')) {
+      const { indexName, pkName, pkValue } = req.body;
+      const items = await queryIndex(tableName, indexName, pkName, pkValue, undefined, oidcToken);
+      if (maskEmail) maskList(items);
+      return res.status(200).json({ items });
     }
 
     // BATCH GET (POST method for batch retrieval by IDs)
