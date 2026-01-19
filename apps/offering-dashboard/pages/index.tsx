@@ -80,7 +80,15 @@ interface View {
         numberName?: string;
         aid?: string;
     }>;
-    conditions: Array<{
+    conditions?: Array<{
+        name: string;
+        boolName?: string;
+        boolValue?: boolean;
+        dateValue?: string;
+        dataValue?: string;
+        statusValue?: string;
+    }>;
+    viewConditions?: Array<{
         name: string;
         boolName?: string;
         boolValue?: boolean;
@@ -391,14 +399,24 @@ const Home = () => {
                     const profileRec = (viewsProfileData as any[]).find(p => p.profile === pName);
                     if (profileRec && profileRec.views) {
                         const filteredViews = (viewsData as any[]).filter(v => profileRec.views.includes(v.name));
-                        setViews(filteredViews);
-                        if (filteredViews.length > 0) {
+                        // Normalize views to ensure 'conditions' is populated from 'viewConditions' if valid
+                        const normalizedViews = filteredViews.map(v => ({
+                            ...v,
+                            conditions: v.conditions || v.viewConditions || []
+                        }));
+                        setViews(normalizedViews);
+                        if (normalizedViews.length > 0) {
                             // 2026-01-19: Prioritize "Completed" type views for default
-                            const defaultView = filteredViews.find(v => v.name === 'Completed' || v.name === 'Completed-Names') || filteredViews.find(v => v.name.includes('Completed')) || filteredViews[0];
+                            const defaultView = normalizedViews.find(v => v.name === 'Completed' || v.name === 'Completed-Names') || normalizedViews.find(v => v.name.includes('Completed')) || normalizedViews[0];
                             setSelectedViewName(defaultView.name);
                         }
                     } else {
-                        setViews(viewsData as View[]);
+                        // Normalize default views too
+                        const normalizedViews = (viewsData as any[]).map(v => ({
+                            ...v,
+                            conditions: v.conditions || v.viewConditions || []
+                        }));
+                        setViews(normalizedViews as View[]);
                     }
 
                 }
