@@ -871,6 +871,7 @@ const Home = () => {
                     needAcceptance: false,
                     offeringKMFee: true,
                     offeringCADPar: false,
+                    offeringSupportEmail: "offerings@sakyonglineage.org",
                     scriptName: '',
                     "lambda-url": "https://729jjip6ik.execute-api.us-east-1.amazonaws.com/prod"
                 },
@@ -1302,6 +1303,18 @@ const Home = () => {
                 return;
             }
 
+            // Validation: Required config fields for non-list events
+            if (!eventFormData.list) {
+                if (!eventFormData.config?.offeringPresentation) {
+                    toast.error('Offering Presentation is required');
+                    return;
+                }
+                if (!eventFormData.config?.offeringSupportEmail) {
+                    toast.error('Offering Support Email is required');
+                    return;
+                }
+            }
+
             // Validation: Check for conflicts with existing events
             if (isNewEvent) {
                 // Check if aid already exists
@@ -1564,6 +1577,12 @@ const Home = () => {
     };
 
     const handleSaveSubEvent = () => {
+        // Validation: offeringMode is required
+        if (!subEventFormData.offeringMode) {
+            toast.warning('Please set offeringMode before save');
+            return;
+        }
+
         // Clean up empty showcase entries
         const cleanedData = { ...subEventFormData };
         if (cleanedData.embeddedShowcaseList) {
@@ -2477,47 +2496,90 @@ const Home = () => {
                                 )}
                             </Row>
                             {!eventFormData.list && (
-                                <Row>
-                                    <Col md={4}>
-                                        <Form.Group className="mb-3">
-                                            <Form.Check
-                                                type="checkbox"
-                                                label={<span style={{ color: 'white' }}>Need Acceptance</span>}
-                                                checked={eventFormData.config?.needAcceptance || false}
-                                                onChange={(e) => setEventFormData({
-                                                    ...eventFormData,
-                                                    config: { ...eventFormData.config, needAcceptance: e.target.checked }
-                                                })}
-                                            />
-                                        </Form.Group>
-                                    </Col>
-                                    <Col md={4}>
-                                        <Form.Group className="mb-3">
-                                            <Form.Check
-                                                type="checkbox"
-                                                label={<span style={{ color: 'white' }}>Offering KM Fee</span>}
-                                                checked={eventFormData.config?.offeringKMFee !== undefined ? eventFormData.config.offeringKMFee : true}
-                                                onChange={(e) => setEventFormData({
-                                                    ...eventFormData,
-                                                    config: { ...eventFormData.config, offeringKMFee: e.target.checked }
-                                                })}
-                                            />
-                                        </Form.Group>
-                                    </Col>
-                                    <Col md={4}>
-                                        <Form.Group className="mb-3">
-                                            <Form.Check
-                                                type="checkbox"
-                                                label={<span style={{ color: 'white' }}>Offering CAD Par</span>}
-                                                checked={eventFormData.config?.offeringCADPar || false}
-                                                onChange={(e) => setEventFormData({
-                                                    ...eventFormData,
-                                                    config: { ...eventFormData.config, offeringCADPar: e.target.checked }
-                                                })}
-                                            />
-                                        </Form.Group>
-                                    </Col>
-                                </Row>
+                                <>
+                                    <Row>
+                                        <Col md={4}>
+                                            <Form.Group className="mb-3">
+                                                <Form.Check
+                                                    type="checkbox"
+                                                    label={<span style={{ color: 'white' }}>Need Acceptance</span>}
+                                                    checked={eventFormData.config?.needAcceptance || false}
+                                                    onChange={(e) => setEventFormData({
+                                                        ...eventFormData,
+                                                        config: { ...eventFormData.config, needAcceptance: e.target.checked }
+                                                    })}
+                                                />
+                                            </Form.Group>
+                                        </Col>
+                                    </Row>
+
+                                    <div style={{ marginTop: '1rem', marginBottom: '1rem', borderTop: '1px solid #555', paddingTop: '1rem' }}>
+                                        <h6 style={{ color: '#ffc107', marginBottom: '1rem' }}>Offerings</h6>
+                                        <Row>
+                                            <Col md={6}>
+                                                <Form.Group className="mb-3">
+                                                    <Form.Label>Offering Presentation*</Form.Label>
+                                                    <Form.Select
+                                                        value={eventFormData.config?.offeringPresentation || ''}
+                                                        onChange={(e) => setEventFormData({
+                                                            ...eventFormData,
+                                                            config: { ...eventFormData.config, offeringPresentation: e.target.value }
+                                                        })}
+                                                        style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                                                    >
+                                                        <option value="">Select presentation...</option>
+                                                        <option value="nextAndRemaining">nextAndRemaining</option>
+                                                        <option value="installments">installments</option>
+                                                        <option value="each">each</option>
+                                                    </Form.Select>
+                                                </Form.Group>
+                                            </Col>
+                                            <Col md={6}>
+                                                <Form.Group className="mb-3">
+                                                    <Form.Label>Offering Support Email*</Form.Label>
+                                                    <Form.Control
+                                                        type="email"
+                                                        value={eventFormData.config?.offeringSupportEmail || ''}
+                                                        onChange={(e) => setEventFormData({
+                                                            ...eventFormData,
+                                                            config: { ...eventFormData.config, offeringSupportEmail: e.target.value }
+                                                        })}
+                                                        placeholder="offerings@sakyonglineage.org"
+                                                        style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                                                    />
+                                                </Form.Group>
+                                            </Col>
+                                        </Row>
+                                        <Row>
+                                            <Col md={6}>
+                                                <Form.Group className="mb-3">
+                                                    <Form.Check
+                                                        type="checkbox"
+                                                        label={<span style={{ color: 'white' }}>Offering KM Fee</span>}
+                                                        checked={eventFormData.config?.offeringKMFee !== undefined ? eventFormData.config.offeringKMFee : true}
+                                                        onChange={(e) => setEventFormData({
+                                                            ...eventFormData,
+                                                            config: { ...eventFormData.config, offeringKMFee: e.target.checked }
+                                                        })}
+                                                    />
+                                                </Form.Group>
+                                            </Col>
+                                            <Col md={6}>
+                                                <Form.Group className="mb-3">
+                                                    <Form.Check
+                                                        type="checkbox"
+                                                        label={<span style={{ color: 'white' }}>Offering CAD Par</span>}
+                                                        checked={eventFormData.config?.offeringCADPar || false}
+                                                        onChange={(e) => setEventFormData({
+                                                            ...eventFormData,
+                                                            config: { ...eventFormData.config, offeringCADPar: e.target.checked }
+                                                        })}
+                                                    />
+                                                </Form.Group>
+                                            </Col>
+                                        </Row>
+                                    </div>
+                                </>
                             )}
 
                             {/* Dashboard Views Section */}
