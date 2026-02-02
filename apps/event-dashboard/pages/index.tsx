@@ -2531,9 +2531,12 @@ const Home = () => {
             }
             // Apply search filter - case insensitive partial match on name field
             if (searchTerm && searchTerm.trim()) {
-                const searchLower = searchTerm.toLowerCase().trim();
-                const fullName = `${student.first} ${student.last}`.toLowerCase();
-                const matches = fullName.includes(searchLower);
+                const normalize = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+                const searchNormalized = normalize(searchTerm.trim());
+                const fullNameNormalized = normalize(`${student.first} ${student.last}`);
+                const emailNormalized = normalize(student.email || '');
+
+                const matches = fullNameNormalized.includes(searchNormalized) || emailNormalized.includes(searchNormalized);
                 if (!matches) {
                     return false;
                 }
@@ -2645,9 +2648,12 @@ const Home = () => {
             }
             // Apply search filter - case insensitive partial match on name field
             if (searchTerm && searchTerm.trim()) {
-                const searchLower = searchTerm.toLowerCase().trim();
-                const fullName = `${student.first} ${student.last}`.toLowerCase();
-                const matches = fullName.includes(searchLower);
+                const normalize = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+                const searchNormalized = normalize(searchTerm.trim());
+                const fullNameNormalized = normalize(`${student.first} ${student.last}`);
+                const emailNormalized = normalize(student.email || '');
+
+                const matches = fullNameNormalized.includes(searchNormalized) || emailNormalized.includes(searchNormalized);
                 if (!matches) {
                     return false;
                 }
