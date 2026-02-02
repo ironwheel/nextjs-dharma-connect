@@ -350,14 +350,14 @@ const Home = () => {
                 setEventNamesLoading(true);
                 const eventListConfig = await fetchConfig('eventAccessList');
                 let eventCodes: string[] = [];
-                
+
                 if (eventListConfig && eventListConfig.value && Array.isArray(eventListConfig.value)) {
                     eventCodes = eventListConfig.value;
                 } else {
                     // Fallback to a default list if config not found
                     eventCodes = ['all'];
                 }
-                
+
                 setEventAccessList(eventCodes);
 
                 // Look up event names for each event code (excluding 'all')
@@ -382,13 +382,13 @@ const Home = () => {
 
                 // Wait for all event lookups to complete
                 const eventResults = await Promise.all(eventLookups);
-                
+
                 // Create a mapping of event codes to names
                 const eventNamesMap: Record<string, string> = { 'all': 'All Events (Wildcard)' };
                 eventResults.forEach(({ code, name }) => {
                     eventNamesMap[code] = name;
                 });
-                
+
                 setEventNames(eventNamesMap);
                 setEventNamesLoading(false);
 
@@ -493,9 +493,12 @@ const Home = () => {
         // Apply search filter
         const filteredStudents = allStudentsForTable.filter(student => {
             if (searchTerm && searchTerm.trim()) {
-                const searchLower = searchTerm.toLowerCase().trim();
-                const fullName = `${student.first} ${student.last}`.toLowerCase();
-                return fullName.includes(searchLower);
+                const normalize = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+                const searchNormalized = normalize(searchTerm.trim());
+                const fullNameNormalized = normalize(`${student.first} ${student.last}`);
+                const emailNormalized = normalize(student.email || '');
+
+                return fullNameNormalized.includes(searchNormalized) || emailNormalized.includes(searchNormalized);
             }
             return true;
         });
@@ -617,7 +620,7 @@ const Home = () => {
                                     // Use current value if available, otherwise use default from schema
                                     const currentValue = rowData.authRecord?.config?.[host]?.[key];
                                     const defaultValue = hostSchema[key];
-                                    
+
                                     // Handle array fields specially (like eventAccess)
                                     if (Array.isArray(defaultValue)) {
                                         initialConfig[host][key] = Array.isArray(currentValue) ? currentValue : defaultValue;
@@ -751,15 +754,15 @@ const Home = () => {
         if (studentIndex !== -1) {
             const updatedStudents = [...allStudents];
             if (field === 'deceased') {
-                updatedStudents[studentIndex] = { 
-                    ...allStudents[studentIndex], 
+                updatedStudents[studentIndex] = {
+                    ...allStudents[studentIndex],
                     deceased: checked,
                     unsubscribe: checked ? true : allStudents[studentIndex].unsubscribe // If deceased is checked, set unsubscribe to true; otherwise keep current value
                 };
             } else if (field === 'unsubscribed') {
-                updatedStudents[studentIndex] = { 
-                    ...allStudents[studentIndex], 
-                    unsubscribe: checked 
+                updatedStudents[studentIndex] = {
+                    ...allStudents[studentIndex],
+                    unsubscribe: checked
                 };
             }
             allStudents = updatedStudents;
@@ -869,7 +872,7 @@ const Home = () => {
                                 // Use current value if available, otherwise use default from schema
                                 const currentValue = authRecord?.config?.[host]?.[key];
                                 const defaultValue = hostSchema[key];
-                                
+
                                 // Handle array fields specially (like eventAccess)
                                 if (Array.isArray(defaultValue)) {
                                     initialConfig[host][key] = Array.isArray(currentValue) ? currentValue : defaultValue;
@@ -989,12 +992,12 @@ const Home = () => {
             // Save Friends and Family (faf) field
             const originalFaf = Array.isArray(originalStudent?.faf) ? originalStudent.faf : [];
             const fafChanged = JSON.stringify(originalFaf.sort()) !== JSON.stringify(fafList.sort());
-            
+
             if (fafChanged) {
                 if (fafList.length === 0) {
                     // Delete the faf field if list is empty (use null to trigger REMOVE operation)
                     await updateStudentField(formData.studentId, 'faf', null);
-                    
+
                     // Update local student data
                     const studentIndex = allStudents.findIndex(s => s.id === formData.studentId);
                     if (studentIndex !== -1) {
@@ -1005,7 +1008,7 @@ const Home = () => {
                 } else {
                     // Update the faf field
                     await updateStudentField(formData.studentId, 'faf', fafList);
-                    
+
                     // Update local student data
                     const studentIndex = allStudents.findIndex(s => s.id === formData.studentId);
                     if (studentIndex !== -1) {
@@ -1149,7 +1152,7 @@ const Home = () => {
             // Exclude the current student and already added friends/family
             if (selectedStudent && student.id === selectedStudent.id) return false;
             if (fafList.includes(student.id)) return false;
-            
+
             const fullName = `${student.first} ${student.last}`.toLowerCase();
             return fullName.includes(searchLower);
         });
@@ -1697,7 +1700,7 @@ const Home = () => {
                                 backgroundColor: '#1a1a1a'
                             }}>
                                 <h5 style={{ marginBottom: '20px' }}>Friends and Family</h5>
-                                
+
                                 {/* Current Friends and Family List */}
                                 {fafList.length > 0 && (
                                     <div style={{ marginBottom: '20px' }}>
@@ -1752,7 +1755,7 @@ const Home = () => {
                                         placeholder="Search by first or last name..."
                                         style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
                                     />
-                                    
+
                                     {/* Search Results Dropdown */}
                                     {fafSearchResults.length > 0 && (
                                         <div style={{
@@ -1796,7 +1799,7 @@ const Home = () => {
                                             </div>
                                         </div>
                                     )}
-                                    
+
                                     {fafSearchTerm && fafSearchResults.length === 0 && (
                                         <Form.Text className="text-muted" style={{ display: 'block', marginTop: '5px' }}>
                                             No matching students found
@@ -1854,16 +1857,16 @@ const Home = () => {
                                     {(() => {
                                         // Separate fields by type for better organization
                                         const fields = Object.entries(hostSchema);
-                                        const nonBooleanFields = fields.filter(([key, defaultValue]) => 
-                                            typeof defaultValue !== 'boolean' && 
-                                            key !== 'eventAccess' && 
+                                        const nonBooleanFields = fields.filter(([key, defaultValue]) =>
+                                            typeof defaultValue !== 'boolean' &&
+                                            key !== 'eventAccess' &&
                                             key !== 'viewsProfile'
                                         );
-                                        const specialFields = fields.filter(([key, defaultValue]) => 
-                                            key === 'viewsProfile' || 
+                                        const specialFields = fields.filter(([key, defaultValue]) =>
+                                            key === 'viewsProfile' ||
                                             (key === 'eventAccess' && Array.isArray(defaultValue))
                                         );
-                                        const booleanFields = fields.filter(([key, defaultValue]) => 
+                                        const booleanFields = fields.filter(([key, defaultValue]) =>
                                             typeof defaultValue === 'boolean'
                                         );
 
@@ -1952,9 +1955,9 @@ const Home = () => {
                                                                 <Col md={12}>
                                                                     <Form.Group className="mb-3">
                                                                         <Form.Label>Event Access</Form.Label>
-                                                                        <div style={{ 
-                                                                            border: '1px solid #555', 
-                                                                            borderRadius: '4px', 
+                                                                        <div style={{
+                                                                            border: '1px solid #555',
+                                                                            borderRadius: '4px',
                                                                             padding: '10px',
                                                                             backgroundColor: isPermitted ? '#2b2b2b' : '#1a1a1a',
                                                                             maxHeight: '300px',
@@ -1969,15 +1972,15 @@ const Home = () => {
                                                                                     const eventName = eventNames[eventCode] || eventCode;
                                                                                     const isChecked = Array.isArray(value) ? value.includes(eventCode) : false;
                                                                                     const isAllEvent = eventCode === 'all';
-                                                                                    
+
                                                                                     return (
                                                                                         <div key={eventCode} style={{ marginBottom: '8px' }}>
                                                                                             <Form.Check
                                                                                                 type="checkbox"
                                                                                                 label={
-                                                                                                    <div style={{ 
-                                                                                                        fontWeight: isAllEvent ? 'bold' : 'normal', 
-                                                                                                        color: isAllEvent ? '#ffc107' : 'white' 
+                                                                                                    <div style={{
+                                                                                                        fontWeight: isAllEvent ? 'bold' : 'normal',
+                                                                                                        color: isAllEvent ? '#ffc107' : 'white'
                                                                                                     }}>
                                                                                                         {eventName}
                                                                                                     </div>
@@ -1986,7 +1989,7 @@ const Home = () => {
                                                                                                 onChange={(e) => {
                                                                                                     const currentEvents = Array.isArray(value) ? [...value] : [];
                                                                                                     let newEvents;
-                                                                                                    
+
                                                                                                     if (e.target.checked) {
                                                                                                         if (isAllEvent) {
                                                                                                             // If selecting 'all', clear other selections
@@ -1998,7 +2001,7 @@ const Home = () => {
                                                                                                     } else {
                                                                                                         newEvents = currentEvents.filter(code => code !== eventCode);
                                                                                                     }
-                                                                                                    
+
                                                                                                     setFormData(prev => ({
                                                                                                         ...prev,
                                                                                                         config: {
@@ -2018,16 +2021,16 @@ const Home = () => {
                                                                                 })
                                                                             )}
                                                                         </div>
-                                                                                                                                <Form.Text className="text-muted">
-                                                            Select which events this student can access. You can select multiple specific events or choose "All Events" for complete access.
-                                                        </Form.Text>
-                                                    </Form.Group>
-                                                </Col>
-                                            </Row>
-                                        );
-                                    }
-                                    return null;
-                                })}
+                                                                        <Form.Text className="text-muted">
+                                                                            Select which events this student can access. You can select multiple specific events or choose "All Events" for complete access.
+                                                                        </Form.Text>
+                                                                    </Form.Group>
+                                                                </Col>
+                                                            </Row>
+                                                        );
+                                                    }
+                                                    return null;
+                                                })}
 
                                                 {/* Add spacing between Event Access and other sections */}
                                                 {specialFields.some(([key]) => key === 'eventAccess') && (
