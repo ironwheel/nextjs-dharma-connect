@@ -132,6 +132,20 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
             raise Exception(f"Can't use #reglink. No prompt found for prompt: reglink, {full_language}")
         html = html.replace("#reglink", registration_link_text)
 
+    # If #tangralink directive in html, replace it with the langauge specific reg link language
+    # ||pid|| will get replaced with the participant's pid below
+    # ||name|| will get replaced with the person's name below
+    # ||taid|| will get replaced with the event's tangra link aid below
+    if "#tangralink" in html:
+        tangra = (event.get('config') or {}).get('tangra')
+        if tangra is None or (isinstance(tangra, str) and not tangra.strip()):
+            raise Exception("Can't use #tangralink. No tangra field found in the event config.")
+        full_language = code_to_full_language(language)
+        tangra_link_text = prompt_lookup(prompts_array, 'tangralink', full_language, event['aid'])
+        if not tangra_link_text:
+            raise Exception(f"Can't use #tangralink. No prompt found for prompt: tangralink, {full_language}")
+        html = html.replace("#tangralink", tangra_link_text)
+
     # If #offeringsection <subevent> directive in html, replace it with the langauge specific offering section language
     # placeholder pid will get replaced with the participant's pid below
     # ||pid|| will get replaced with the participant's pid below
@@ -245,6 +259,9 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
 
     # Replace placeholder aid with event aid
     html = html.replace("||aid||", event['aid'])
+
+    # Replace placeholder taid with event tangra link aid
+    html = html.replace("||taid||", event['config']['tangra'])
 
     # Filter the HTML via any #if/#else/#endif statements
     in_if = False
