@@ -1008,6 +1008,22 @@ const Home = () => {
         toast.info(`Creating duplicate of "${event.name}". Please review and modify the aid and other fields before saving.`);
     };
 
+    const handleCopyTangraLink = async (event: Event) => {
+        const tangra = event.config?.tangra;
+        if (!tangra) {
+            toast.error('Event has no Tangra ID (config.tangra)');
+            return;
+        }
+        const url = `https://reg.slsupport.link/?pid=0c918b0b-da97-4d7e-bcd7-a4088d30df15&aid=${tangra}`;
+        try {
+            await navigator.clipboard.writeText(url);
+            toast.success('Tangra link copied to clipboard');
+        } catch (err) {
+            console.error('Failed to copy Tangra link:', err);
+            toast.error('Failed to copy link to clipboard');
+        }
+    };
+
     const handleEditPool = (pool: Pool) => {
         setIsNewPool(false);
         setSelectedPool(pool);
@@ -2224,16 +2240,30 @@ const Home = () => {
                                                 {!event.list && event.category && ` • Category: ${event.category}`}
                                             </div>
                                         </div>
-                                        <Button
-                                            variant="outline-warning"
-                                            size="sm"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleDuplicateEvent(event);
-                                            }}
-                                        >
-                                            📋 Duplicate
-                                        </Button>
+                                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                            {event.config?.tangra && (
+                                                <Button
+                                                    variant="outline-info"
+                                                    size="sm"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleCopyTangraLink(event);
+                                                    }}
+                                                >
+                                                    🔗 Heart Gift Link
+                                                </Button>
+                                            )}
+                                            <Button
+                                                variant="outline-warning"
+                                                size="sm"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleDuplicateEvent(event);
+                                                }}
+                                            >
+                                                📋 Duplicate
+                                            </Button>
+                                        </div>
                                     </div>
                                 </div>
                             );
