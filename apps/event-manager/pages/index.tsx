@@ -1017,7 +1017,7 @@ const Home = () => {
         const url = `https://reg.slsupport.link/?pid=0c918b0b-da97-4d7e-bcd7-a4088d30df15&aid=${tangra}`;
         try {
             await navigator.clipboard.writeText(url);
-            toast.success('Tangra link copied to clipboard');
+            toast.success('Heart Gift link copied to clipboard');
         } catch (err) {
             console.error('Failed to copy Tangra link:', err);
             toast.error('Failed to copy link to clipboard');
