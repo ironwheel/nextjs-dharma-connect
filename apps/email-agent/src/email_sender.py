@@ -260,8 +260,12 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
     # Replace placeholder aid with event aid
     html = html.replace("||aid||", event['aid'])
 
-    # Replace placeholder taid with event tangra link aid
-    html = html.replace("||taid||", event['config']['tangra'])
+    # Replace placeholder taid with event tangra link aid (only when ||taid|| is used)
+    if "||taid||" in html:
+        tangra = (event.get('config') or {}).get('tangra')
+        if tangra is None or (isinstance(tangra, str) and not tangra.strip()):
+            raise Exception("Can't use ||taid||. No tangra field found in the event config.")
+        html = html.replace("||taid||", str(tangra).strip())
 
     # Filter the HTML via any #if/#else/#endif statements
     in_if = False
