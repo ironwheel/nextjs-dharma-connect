@@ -90,16 +90,7 @@ async function getParentWorkOrder(
     const items = await getAllTableItemsFiltered('work-orders', 'eventCode', eventCode, pid, hash);
     if (!Array.isArray(items) || items.length === 0) return null;
 
-    // Check for multiple parent stages existing (error condition)
-    const existingParentStages = parentStages.filter(parentStage =>
-        items.some(item => item.subEvent === subEvent && item.stage === parentStage)
-    );
-
-    if (existingParentStages.length > 1) {
-        throw new Error(`Multiple parent stages found: ${existingParentStages.join(', ')}. Only one parent stage should exist.`);
-    }
-
-    // Find the first available parent stage in order of preference
+    // Find the first available parent stage in order of preference (multiple parent stages are allowed)
     for (const parentStage of parentStages) {
         const filtered = items.filter(item =>
             item.subEvent === subEvent &&
@@ -444,11 +435,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 lastValidationRef.current = { eventCode, subEvent, stage: newStage }
             } catch (error) {
                 console.error('Error finding parent work order:', error)
-                if (error instanceof Error && error.message.includes('Multiple parent stages found')) {
-                    toast.error(error.message)
-                } else {
-                    toast.error(`Error finding parent work order for stages: ${stageRecord.parentStages.join(', ')}`)
-                }
+                toast.error(`Error finding parent work order for stages: ${stageRecord.parentStages.join(', ')}`)
                 // Don't set the stage - keep current selection
                 attemptedStageRef.current = stage;
             } finally {
