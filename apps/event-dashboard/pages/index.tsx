@@ -476,6 +476,18 @@ const OfferingGraph = (
 ) => {
     const [hovered, setHovered] = useState<{ seriesLabel: string; point: OfferingGraphPoint } | null>(null);
     const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [containerWidth, setContainerWidth] = useState(800);
+
+    useEffect(() => {
+        const el = containerRef.current;
+        if (!el) return;
+        const updateWidth = () => setContainerWidth(Math.max(400, el.clientWidth));
+        updateWidth();
+        const ro = new ResizeObserver(updateWidth);
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
 
     const effectiveSeries: OfferingGraphSeries[] = (series && series.length > 0)
         ? series
@@ -495,9 +507,9 @@ const OfferingGraph = (
     const isCategorical = effectiveSeries[0].points[0]?.label != null;
     const maxCount = Math.max(1, ...effectiveSeries.flatMap(s => s.points.map(p => p.count)));
     const categoricalTotal = isCategorical ? effectiveSeries.flatMap(s => s.points.map(p => p.count)).reduce((a, b) => a + b, 0) : 0;
-    const width = 800;
-    const height = 320;
-    const margin = { top: 20, right: 20, bottom: 40, left: 44 };
+    const width = containerWidth;
+    const height = 380;
+    const margin = { top: 20, right: 44, bottom: 64, left: 44 };
     const chartWidth = width - margin.left - margin.right;
     const chartHeight = height - margin.top - margin.bottom;
     const numSeries = effectiveSeries.length;
@@ -526,7 +538,7 @@ const OfferingGraph = (
             : `Offerings per day (viewing: ${itemCount}) · Day 0 = event date`;
 
     return (
-        <div className="p-4" style={{ background: GRAPH_DARK.bg, borderRadius: 8, color: GRAPH_DARK.text }}>
+        <div ref={containerRef} className="p-4" style={{ width: '100%', background: GRAPH_DARK.bg, borderRadius: 8, color: GRAPH_DARK.text }}>
             <div style={{ marginBottom: 8, fontSize: 14, color: GRAPH_DARK.textMuted }}>
                 {description}
             </div>
@@ -540,13 +552,18 @@ const OfferingGraph = (
                     ))}
                 </div>
             )}
-            {hovered && tooltipPos && (
+            {hovered && tooltipPos && (() => {
+                const offset = 12;
+                const estimatedTooltipWidth = 280;
+                const flipLeft = typeof window !== 'undefined' && tooltipPos.x + offset + estimatedTooltipWidth > window.innerWidth;
+                const left = flipLeft ? tooltipPos.x - offset - estimatedTooltipWidth : tooltipPos.x + offset;
+                return (
                 <div
                     role="tooltip"
                     style={{
                         position: 'fixed',
-                        left: tooltipPos.x + 12,
-                        top: tooltipPos.y + 12,
+                        left: Math.max(8, left),
+                        top: tooltipPos.y + offset,
                         background: GRAPH_DARK.panel,
                         color: GRAPH_DARK.text,
                         padding: '8px 12px',
@@ -579,7 +596,8 @@ const OfferingGraph = (
                         </>
                     )}
                 </div>
-            )}
+                );
+            })()}
             <svg width={width} height={height} style={{ display: 'block' }}>
                 <g transform={`translate(${margin.left},${margin.top})`}>
                     <text x={-chartHeight / 2} y={-28} textAnchor="middle" transform="rotate(-90)" fill={GRAPH_DARK.text} fontSize={12}>{yAxisLabel}</text>
@@ -589,7 +607,7 @@ const OfferingGraph = (
                             <text x={-6} y={scaleY(tick) + 4} textAnchor="end" fill={GRAPH_DARK.textMuted} fontSize={10}>{tick}</text>
                         </g>
                     ))}
-                    <text x={chartWidth / 2} y={chartHeight + 32} textAnchor="middle" fill={GRAPH_DARK.text} fontSize={12}>{isCategorical ? 'SKU type' : 'Days before event'}</text>
+                    <text x={chartWidth / 2} y={chartHeight + 44} textAnchor="middle" fill={GRAPH_DARK.text} fontSize={12}>{isCategorical ? 'SKU type' : 'Days before event'}</text>
                     {graphType === 'line' && !isCategorical && effectiveSeries.map((s, seriesIdx) => {
                         const pathD = s.points.map((p, i) => {
                             const x = getX(i);
@@ -2090,7 +2108,9 @@ const Home = () => {
                         position: 'absolute',
                         top: '100%',
                         left: 0,
-                        right: 0,
+                        minWidth: '100%',
+                        width: 'max-content',
+                        whiteSpace: 'nowrap',
                         background: '#000000',
                         border: '1px solid rgba(255, 255, 255, 0.2)',
                         borderRadius: '8px',
