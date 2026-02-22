@@ -3786,6 +3786,7 @@ const Home = () => {
                                 </div>
                             )}
                         </div>
+                        {viewMotif !== 'graph' && (
                         <div className="navbar-right">
                             <div className="search-container">
                                 <input
@@ -3801,6 +3802,7 @@ const Home = () => {
                                 />
                             </div>
                         </div>
+                        )}
                     </div>
                 </nav>
                 {viewMotif === 'graph' ? (
