@@ -51,26 +51,56 @@ interface Event {
     hide?: boolean;
     selectedSubEvent?: string;
     list?: boolean;
+    category?: string;
 }
 
 
 
 interface View {
     name: string;
-    columnDefs: Array<{
+    columnDefs?: Array<{
         name: string;
-        headerName: string;
+        headerName?: string;
         boolName?: string;
         stringName?: string;
         numberName?: string;
         pool?: string;
         aid?: string;
     }>;
-    conditions: Array<{
+    conditions?: Array<{
         name: string;
         boolName: string;
         boolValue: boolean;
+        /** "current" (default) = evaluate with selected event; "series" = in category graph, evaluate per series with that series' event */
+        eventContext?: 'current' | 'series';
     }>;
+    /** When "graph", view uses x-axis / y-axis instead of columnDefs */
+    motif?: string;
+    /** e.g. "days-before-subevent" */
+    'x-axis'?: string;
+    /** e.g. "offering-on-that-day" or "offering-on-that-day-cumulative" */
+    'y-axis'?: string;
+    /** Number of days before subevent to show on x-axis (e.g. 45); or "days-before-subevent-start" / "auto" to use earliest offering */
+    'days-before-subevent-start'?: number | string;
+    /** "bar" (default) or "line" */
+    'graph-type'?: string;
+    /** "current" (default) or "category" - category shows one series per subevent in same category */
+    'graph-series-scope'?: string;
+}
+
+/** One bar in the offering graph: days before subevent -> count, or categorical (e.g. SKU type) -> count */
+interface OfferingGraphPoint {
+    daysBefore?: number;
+    date?: string;
+    /** When set, point is categorical (x = label, y = count) e.g. for x-axis sku-type */
+    label?: string;
+    count: number;
+}
+
+/** One series in a multi-series graph (e.g. one per subevent in category) */
+interface OfferingGraphSeries {
+    label: string;
+    points: OfferingGraphPoint[];
 }
 
 // Module-level variables
@@ -425,6 +455,205 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
     );
 };
 
+/** Dark theme colors for the offering graph */
+const GRAPH_DARK = {
+    bg: '#0f172a',
+    panel: '#1e293b',
+    text: '#e2e8f0',
+    textMuted: '#94a3b8',
+    grid: 'rgba(148, 163, 184, 0.2)',
+    bar: '#8b5cf6',
+    barHover: '#a78bfa',
+};
+
+/** Palette for multiple series (line/bar) */
+const GRAPH_SERIES_COLORS = ['#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#ec4899', '#6366f1'];
+
+/** Bar or line chart: x = days before event (left to right: start → 0), y = count (per day or cumulative). Supports single data or multiple series. */
+const OfferingGraph = (
+    { data, series, itemCount, graphType = 'bar', isCumulative = false }:
+    { data: OfferingGraphPoint[]; series?: OfferingGraphSeries[]; itemCount: number; graphType?: 'bar' | 'line'; isCumulative?: boolean }
+) => {
+    const [hovered, setHovered] = useState<{ seriesLabel: string; point: OfferingGraphPoint } | null>(null);
+    const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
+
+    const effectiveSeries: OfferingGraphSeries[] = (series && series.length > 0)
+        ? series
+        : (data && data.length > 0)
+            ? [{ label: '', points: data }]
+            : [];
+
+    if (effectiveSeries.length === 0 || effectiveSeries.every(s => s.points.length === 0)) {
+        return (
+            <div className="p-4" style={{ minHeight: 280, display: 'flex', alignItems: 'center', justifyContent: 'center', background: GRAPH_DARK.bg, color: GRAPH_DARK.textMuted, borderRadius: 8 }}>
+                No data. Select an event with a sub-event and a view with motif "graph", x-axis "days-before-subevent" or "sku-type", with matching y-axis.
+            </div>
+        );
+    }
+
+    const numPoints = effectiveSeries[0].points.length;
+    const isCategorical = effectiveSeries[0].points[0]?.label != null;
+    const maxCount = Math.max(1, ...effectiveSeries.flatMap(s => s.points.map(p => p.count)));
+    const categoricalTotal = isCategorical ? effectiveSeries.flatMap(s => s.points.map(p => p.count)).reduce((a, b) => a + b, 0) : 0;
+    const width = 800;
+    const height = 320;
+    const margin = { top: 20, right: 20, bottom: 40, left: 44 };
+    const chartWidth = width - margin.left - margin.right;
+    const chartHeight = height - margin.top - margin.bottom;
+    const numSeries = effectiveSeries.length;
+    const barWidthTotal = chartWidth / numPoints;
+    const barWidthOne = Math.max(2, (barWidthTotal / numSeries) - 2);
+    const scaleY = (n: number) => chartHeight - (n / maxCount) * chartHeight;
+    const getX = (i: number) => (i + 0.5) * (chartWidth / numPoints);
+
+    const handlePointMouseEnter = (seriesLabel: string, point: OfferingGraphPoint, e: React.MouseEvent) => {
+        setHovered({ seriesLabel, point });
+        setTooltipPos({ x: e.clientX, y: e.clientY });
+    };
+    const handlePointMouseMove = (e: React.MouseEvent) => {
+        if (hovered) setTooltipPos({ x: e.clientX, y: e.clientY });
+    };
+    const handlePointMouseLeave = () => {
+        setHovered(null);
+        setTooltipPos(null);
+    };
+
+    const yAxisLabel = isCategorical ? 'Count' : (isCumulative ? 'Cumulative count' : 'Count');
+    const description = isCategorical
+        ? `Offerings by SKU type (viewing: ${itemCount})`
+        : isCumulative
+            ? `Cumulative offerings (viewing: ${itemCount}) · Day 0 = event date`
+            : `Offerings per day (viewing: ${itemCount}) · Day 0 = event date`;
+
+    return (
+        <div className="p-4" style={{ background: GRAPH_DARK.bg, borderRadius: 8, color: GRAPH_DARK.text }}>
+            <div style={{ marginBottom: 8, fontSize: 14, color: GRAPH_DARK.textMuted }}>
+                {description}
+            </div>
+            {numSeries > 1 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 16px', marginBottom: 10 }}>
+                    {effectiveSeries.map((s, idx) => (
+                        <span key={s.label} style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ width: 12, height: 12, borderRadius: graphType === 'line' ? 2 : 2, background: GRAPH_SERIES_COLORS[idx % GRAPH_SERIES_COLORS.length] }} />
+                            {s.label}
+                        </span>
+                    ))}
+                </div>
+            )}
+            {hovered && tooltipPos && (
+                <div
+                    role="tooltip"
+                    style={{
+                        position: 'fixed',
+                        left: tooltipPos.x + 12,
+                        top: tooltipPos.y + 12,
+                        background: GRAPH_DARK.panel,
+                        color: GRAPH_DARK.text,
+                        padding: '8px 12px',
+                        borderRadius: 6,
+                        fontSize: 13,
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+                        pointerEvents: 'none',
+                        zIndex: 1000,
+                        border: `1px solid ${GRAPH_DARK.grid}`,
+                    }}
+                >
+                    {numSeries > 1 && <div style={{ fontSize: 11, color: GRAPH_DARK.textMuted, marginBottom: 4 }}>{hovered.seriesLabel}</div>}
+                    {isCategorical ? (
+                        <>
+                            <strong>{hovered.point.label}</strong>: <strong>{hovered.point.count}</strong> offering{hovered.point.count !== 1 ? 's' : ''}
+                        </>
+                    ) : isCumulative ? (
+                        <>
+                            <strong>{hovered.point.count}</strong> offering{hovered.point.count !== 1 ? 's' : ''} cumulative through {hovered.point.date}
+                            <div style={{ fontSize: 11, color: GRAPH_DARK.textMuted, marginTop: 2 }}>
+                                {hovered.point.daysBefore} day{hovered.point.daysBefore !== 1 ? 's' : ''} before event
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <strong>{hovered.point.count}</strong> offering{hovered.point.count !== 1 ? 's' : ''} on {hovered.point.date}
+                            <div style={{ fontSize: 11, color: GRAPH_DARK.textMuted, marginTop: 2 }}>
+                                {hovered.point.daysBefore} day{hovered.point.daysBefore !== 1 ? 's' : ''} before event
+                            </div>
+                        </>
+                    )}
+                </div>
+            )}
+            <svg width={width} height={height} style={{ display: 'block' }}>
+                <g transform={`translate(${margin.left},${margin.top})`}>
+                    <text x={-chartHeight / 2} y={-28} textAnchor="middle" transform="rotate(-90)" fill={GRAPH_DARK.text} fontSize={12}>{yAxisLabel}</text>
+                    {[0, Math.ceil(maxCount / 2), maxCount].filter((_, i, a) => a.indexOf(a[i]) === i).map((tick) => (
+                        <g key={tick}>
+                            <line x1={0} y1={scaleY(tick)} x2={chartWidth} y2={scaleY(tick)} stroke={GRAPH_DARK.grid} strokeWidth={1} strokeDasharray="4,2" />
+                            <text x={-6} y={scaleY(tick) + 4} textAnchor="end" fill={GRAPH_DARK.textMuted} fontSize={10}>{tick}</text>
+                        </g>
+                    ))}
+                    <text x={chartWidth / 2} y={chartHeight + 32} textAnchor="middle" fill={GRAPH_DARK.text} fontSize={12}>{isCategorical ? 'SKU type' : 'Days before event'}</text>
+                    {graphType === 'line' && !isCategorical && effectiveSeries.map((s, seriesIdx) => {
+                        const pathD = s.points.map((p, i) => {
+                            const x = getX(i);
+                            const y = scaleY(p.count);
+                            return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+                        }).join(' ');
+                        return pathD ? <path key={s.label} d={pathD} fill="none" stroke={GRAPH_SERIES_COLORS[seriesIdx % GRAPH_SERIES_COLORS.length]} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" /> : null;
+                    })}
+                    {effectiveSeries.map((s, seriesIdx) => {
+                        const color = GRAPH_SERIES_COLORS[seriesIdx % GRAPH_SERIES_COLORS.length];
+                        const offset = numSeries > 1 ? (seriesIdx - (numSeries - 1) / 2) * barWidthOne : 0;
+                        return s.points.map((point, i) => {
+                            const x = getX(i) + offset;
+                            const barH = (point.count / maxCount) * chartHeight;
+                            const y = chartHeight - barH;
+                            const xLabel = isCategorical ? (point.label ?? '') : (point.daysBefore === 0 || point.daysBefore === s.points[0]?.daysBefore || i % Math.max(1, Math.floor(s.points.length / 10)) === 0 ? String(point.daysBefore) : '');
+                            const pointKey = isCategorical ? `${s.label}-${point.label}` : `${s.label}-${point.date}`;
+                            const isHovered = hovered?.seriesLabel === s.label && (isCategorical ? hovered?.point.label === point.label : hovered?.point.date === point.date);
+                            if (graphType === 'line' && !isCategorical) {
+                                return (
+                                    <g
+                                        key={pointKey}
+                                        onMouseEnter={(e) => handlePointMouseEnter(s.label, point, e)}
+                                        onMouseMove={handlePointMouseMove}
+                                        onMouseLeave={handlePointMouseLeave}
+                                        style={{ cursor: 'pointer' }}
+                                    >
+                                        <circle cx={getX(i)} cy={y} r={isHovered ? 6 : 4} fill={isHovered ? GRAPH_DARK.barHover : color} stroke={GRAPH_DARK.bg} strokeWidth={1} />
+                                        {seriesIdx === 0 && xLabel ? <text x={getX(i)} y={chartHeight + 18} textAnchor="middle" fill={GRAPH_DARK.textMuted} fontSize={9}>{xLabel}</text> : null}
+                                    </g>
+                                );
+                            }
+                            return (
+                                <g
+                                    key={pointKey}
+                                    onMouseEnter={(e) => handlePointMouseEnter(s.label, point, e)}
+                                    onMouseMove={handlePointMouseMove}
+                                    onMouseLeave={handlePointMouseLeave}
+                                    style={{ cursor: 'pointer' }}
+                                >
+                                    <rect
+                                        x={x - barWidthOne / 2}
+                                        y={y}
+                                        width={barWidthOne}
+                                        height={barH}
+                                        fill={isHovered ? GRAPH_DARK.barHover : color}
+                                        rx={2}
+                                    />
+                                    {isCategorical && categoricalTotal > 0 && (
+                                        <text x={getX(i)} y={y - 4} textAnchor="middle" fill={GRAPH_DARK.textMuted} fontSize={10}>
+                                            {Math.round((point.count / categoricalTotal) * 100)}%
+                                        </text>
+                                    )}
+                                    {seriesIdx === 0 && xLabel ? <text x={getX(i)} y={chartHeight + 18} textAnchor="middle" fill={GRAPH_DARK.textMuted} fontSize={9}>{xLabel}</text> : null}
+                                </g>
+                            );
+                        });
+                    }).flat()}
+                </g>
+            </svg>
+        </div>
+    );
+};
+
 const Home = () => {
 
 
@@ -476,6 +705,12 @@ const Home = () => {
     const [allStudentsLoaded, setAllStudentsLoaded] = useState<boolean>(false);
     const [loadingEligibilityCache, setLoadingEligibilityCache] = useState<boolean>(false);
     const [allStudentsLoadedForCurrentEvent, setAllStudentsLoadedForCurrentEvent] = useState<boolean>(false);
+    // Graph motif: when view has motif "graph", show chart instead of table
+    const [viewMotif, setViewMotif] = useState<'table' | 'graph'>('table');
+    const [graphData, setGraphData] = useState<OfferingGraphPoint[]>([]);
+    const [graphSeries, setGraphSeries] = useState<OfferingGraphSeries[]>([]);
+    const [graphType, setGraphType] = useState<'bar' | 'line'>('bar');
+    const [graphYAxisCumulative, setGraphYAxisCumulative] = useState<boolean>(false);
     // Use a ref to maintain accumulated eligible students across callbacks
     const accumulatedEligibleStudentsRef = useRef<Student[]>([]);
     const currentLoadingAbortControllerRef = useRef<AbortController | null>(null);
@@ -1211,21 +1446,17 @@ const Home = () => {
             }
         }
 
-        // Refresh table data
-        const [cl, rd] = await assembleColumnLabelsAndRowData(view || 'Joined', month, year);
-        setColumnLabels(cl);
-        setRowData(rd);
+        // Refresh table or graph data
+        await updateTableDataIncrementally([], view || 'Joined', evShadow || undefined, allPools);
     };
 
     // Search and export functions
     const handleSearch = async (searchValue: string) => {
         setSearchTerm(searchValue);
 
-        // Rebuild the data with the new search term
+        // Rebuild the data with the new search term (table or graph)
         if (view) {
-            const [cl, rd] = await assembleColumnLabelsAndRowData(view, month, year);
-            setColumnLabels(cl);
-            setRowData(rd);
+            await updateTableDataIncrementally([], view, evShadow || undefined, allPools);
         }
     };
 
@@ -1810,12 +2041,11 @@ const Home = () => {
                 console.error('Error updating user eventDashboardLastUsedConfig:', error);
             }
 
+            // Use updateTableDataIncrementally so both table and graph motifs are supported (pass [] to use accumulated eligible students)
             try {
-                const [cl, rd] = await assembleColumnLabelsAndRowData(viewName, month, year);
-                setColumnLabels(cl);
-                setRowData(rd);
+                await updateTableDataIncrementally([], viewName, evShadow || undefined, allPools);
             } catch (error) {
-                console.error('[VIEW SELECTION DEBUG] Error in assembleColumnLabelsAndRowData', { viewName, error });
+                console.error('[VIEW SELECTION DEBUG] Error updating view data', { viewName, error });
             }
             setViewDropdownOpen(false);
         };
@@ -1886,9 +2116,35 @@ const Home = () => {
         );
     };
 
-
-
-
+    /**
+     * Returns all offering dates (YYYY-MM-DD) for a student for the given event/subEvent.
+     * Used by graph motif "offering-on-that-day" to count offerings per day.
+     */
+    function getOfferingDatesForSubEvent(
+        student: Student,
+        eventAid: string,
+        subEventKey: string,
+        eventConfig: any
+    ): string[] {
+        const person = student.programs?.[eventAid];
+        if (!person?.offeringHistory?.[subEventKey]) return [];
+        const hist = person.offeringHistory[subEventKey];
+        const dates: string[] = [];
+        if (eventConfig?.offeringPresentation === 'installments') {
+            const installments = hist.installments || {};
+            for (const entry of Object.values<any>(installments)) {
+                if (entry?.offeringTime) {
+                    const d = entry.offeringTime.substring(0, 10);
+                    if (d && !dates.includes(d)) dates.push(d);
+                }
+            }
+        } else {
+            if (hist.offeringTime) {
+                dates.push(hist.offeringTime.substring(0, 10));
+            }
+        }
+        return dates;
+    }
 
     // Add this helper function above assembleColumnLabelsAndRowData
     function studentMatchesViewConditions(
@@ -2417,7 +2673,416 @@ const Home = () => {
             // Update the ref with accumulated data
             accumulatedEligibleStudentsRef.current = allEligibleStudents;
 
-            // Use all accumulated eligible students instead of just the current batch
+            // Resolve effective view name (dashboardViews translation)
+            let effectiveViewName = currentView;
+            if (eventToUse.config?.dashboardViews && eventToUse.config.dashboardViews[currentView]) {
+                effectiveViewName = eventToUse.config.dashboardViews[currentView];
+            }
+
+            const viewConfig = await fetchView(effectiveViewName) as View | null;
+
+            // Graph motif: compute graph data instead of table
+            if (viewConfig?.motif === 'graph') {
+                setViewError(null);
+                setViewMotif('graph');
+                const conditions = (viewConfig as any).viewConditions || viewConfig.conditions || [];
+                setCurrentViewConditions(conditions);
+
+                const selectedSubEvent = eventToUse.selectedSubEvent as string | undefined;
+                const subEventData = selectedSubEvent && eventToUse.subEvents?.[selectedSubEvent]
+                    ? eventToUse.subEvents[selectedSubEvent]
+                    : null;
+                const subEventDateStr = subEventData?.date; // YYYY-MM-DD
+
+                const xAxis = viewConfig['x-axis'];
+                const yAxis = viewConfig['y-axis'];
+
+                // SKU-type graph: x = sku type (e.g. full-offering, assisted), y = count of offerings per type
+                if (xAxis === 'sku-type' && yAxis === 'count-of-sku-types') {
+                    if (eventToUse.list === true || !selectedSubEvent) {
+                        setGraphData([]);
+                        setGraphSeries([]);
+                        setColumnLabels([]);
+                        setRowData([]);
+                        setItemCount(0);
+                        setCurrentEligibleStudents(allEligibleStudents);
+                        return;
+                    }
+                    const applySearchFilter = (student: Student) => {
+                        if (!searchTerm?.trim()) return true;
+                        const normalize = (str: string) => str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+                        const searchNormalized = normalize(searchTerm.trim());
+                        const fullNameNormalized = normalize(`${student.first} ${student.last}`);
+                        const emailNormalized = normalize(student.email || '');
+                        return fullNameNormalized.includes(searchNormalized) || emailNormalized.includes(searchNormalized);
+                    };
+                    const normalizeSkuTypeForDisplay = (raw: string): string => {
+                        const match = raw.match(/^(?:[^-]+-)?remaining-(\d+)-(.+)$/);
+                        return match ? `${match[1]}-${match[2]}` : raw;
+                    };
+                    const getSkuTypesFromStudentForEvent = (student: Student, event: Event, subEventKey: string): string[] => {
+                        const hist = student.programs?.[event.aid]?.offeringHistory?.[subEventKey];
+                        if (!hist) return [];
+                        const prefix = `${event.aid}-${subEventKey}-`;
+                        const types: string[] = [];
+                        if (hist.offeringSKU) {
+                            const sku = String(hist.offeringSKU);
+                            const type = sku.startsWith(prefix) ? sku.slice(prefix.length) : sku;
+                            if (type) types.push(normalizeSkuTypeForDisplay(type));
+                        }
+                        const installments = hist.installments && typeof hist.installments === 'object' ? hist.installments as Record<string, any> : {};
+                        for (const inst of Object.values(installments)) {
+                            if (inst?.offeringSKU) {
+                                const sku = String(inst.offeringSKU);
+                                const type = sku.startsWith(prefix) ? sku.slice(prefix.length) : sku;
+                                if (type) types.push(normalizeSkuTypeForDisplay(type));
+                            }
+                        }
+                        return types;
+                    };
+
+                    const seriesScopeSku = viewConfig['graph-series-scope'] === 'category' ? 'category' : 'current';
+                    const currentCategorySku = eventToUse.category;
+                    const conditionsCurrentSku = conditions.filter((c: any) => (c.eventContext || 'current') === 'current');
+                    const conditionsSeriesSku = conditions.filter((c: any) => c.eventContext === 'series');
+
+                    let skuSeriesList: OfferingGraphSeries[] = [];
+                    let skuItemCount: number;
+
+                    if (seriesScopeSku === 'category' && currentCategorySku && Array.isArray(allEvents)) {
+                        const eventsInCategorySku = allEvents.filter(
+                            (e) => !e.hide && !e.list && e.category === currentCategorySku && e.subEvents && typeof e.subEvents === 'object'
+                        );
+                        const subeventItemsSku: { event: Event; subEventKey: string }[] = [];
+                        for (const event of eventsInCategorySku) {
+                            const keys = Object.keys(event.subEvents);
+                            if (keys.length === 0) {
+                                if (selectedSubEvent !== '') continue;
+                                subeventItemsSku.push({ event, subEventKey: '' });
+                            } else {
+                                for (const subEventKey of keys) {
+                                    if (subEventKey !== selectedSubEvent) continue;
+                                    subeventItemsSku.push({ event, subEventKey });
+                                }
+                            }
+                        }
+                        const allSkuLabels = new Set<string>();
+                        const seriesDataList: { label: string; counts: Record<string, number> }[] = [];
+                        for (const { event, subEventKey } of subeventItemsSku) {
+                            const eventWithSub = { ...event, selectedSubEvent: subEventKey } as Event;
+                            const filteredForSeries = allEligibleStudents.filter((student) => {
+                                const matchesCurrent = conditionsCurrentSku.length === 0 || studentMatchesViewConditions(student, conditionsCurrentSku, eventToUse, poolsToUse);
+                                const matchesSeries = conditionsSeriesSku.length === 0 || studentMatchesViewConditions(student, conditionsSeriesSku, eventWithSub, poolsToUse);
+                                if (!matchesCurrent || !matchesSeries) return false;
+                                return applySearchFilter(student);
+                            });
+                            const counts: Record<string, number> = {};
+                            for (const student of filteredForSeries) {
+                                for (const t of getSkuTypesFromStudentForEvent(student, event, subEventKey)) {
+                                    counts[t] = (counts[t] || 0) + 1;
+                                    allSkuLabels.add(t);
+                                }
+                            }
+                            const se = subEventKey ? event.subEvents[subEventKey] : null;
+                            const datePart = se?.date ?? '';
+                            const seriesLabel = Object.keys(event.subEvents).length > 1
+                                ? `${event.name} (${subEventKey})`
+                                : `${event.name} (${datePart})`;
+                            seriesDataList.push({ label: seriesLabel, counts });
+                        }
+                        const sortedLabels = Array.from(allSkuLabels).sort((a, b) => {
+                            const totalA = seriesDataList.reduce((s, d) => s + (d.counts[a] || 0), 0);
+                            const totalB = seriesDataList.reduce((s, d) => s + (d.counts[b] || 0), 0);
+                            return totalB - totalA;
+                        });
+                        for (const { label: seriesLabel, counts } of seriesDataList) {
+                            const points: OfferingGraphPoint[] = sortedLabels.map((label) => ({ label, count: counts[label] || 0 }));
+                            skuSeriesList.push({ label: seriesLabel, points });
+                        }
+                        if (skuSeriesList.length === 0) {
+                            const filteredStudents = allEligibleStudents.filter((s) => {
+                                if (!studentMatchesViewConditions(s, conditions, eventToUse, poolsToUse)) return false;
+                                return applySearchFilter(s);
+                            });
+                            const counts: Record<string, number> = {};
+                            for (const student of filteredStudents) {
+                                for (const t of getSkuTypesFromStudentForEvent(student, eventToUse, selectedSubEvent)) {
+                                    counts[t] = (counts[t] || 0) + 1;
+                                }
+                            }
+                            const skuPoints = Object.entries(counts).map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+                            skuSeriesList = [{ label: `${eventToUse.name} (${subEventData?.date || selectedSubEvent})`, points: skuPoints }];
+                            skuItemCount = filteredStudents.length;
+                        } else {
+                            const filteredForCurrentLabel = allEligibleStudents.filter((s) => {
+                                if (!studentMatchesViewConditions(s, conditions, eventToUse, poolsToUse)) return false;
+                                return applySearchFilter(s);
+                            });
+                            skuItemCount = filteredForCurrentLabel.length;
+                        }
+                    } else {
+                        const filteredStudents = allEligibleStudents.filter((student) => {
+                            if (!studentMatchesViewConditions(student, conditions, eventToUse, poolsToUse)) return false;
+                            return applySearchFilter(student);
+                        });
+                        skuItemCount = filteredStudents.length;
+                        const skuCounts: Record<string, number> = {};
+                        for (const student of filteredStudents) {
+                            for (const t of getSkuTypesFromStudentForEvent(student, eventToUse, selectedSubEvent)) {
+                                skuCounts[t] = (skuCounts[t] || 0) + 1;
+                            }
+                        }
+                        const skuPoints: OfferingGraphPoint[] = Object.entries(skuCounts)
+                            .map(([label, count]) => ({ label, count }))
+                            .sort((a, b) => b.count - a.count);
+                        skuSeriesList = [{ label: `${eventToUse.name} (${subEventData?.date || selectedSubEvent})`, points: skuPoints }];
+                    }
+
+                    const graphTypeSku = viewConfig['graph-type'] || (viewConfig as any).type || 'bar';
+                    setGraphType(graphTypeSku === 'line' ? 'line' : 'bar');
+                    setGraphSeries(skuSeriesList);
+                    setGraphData(skuSeriesList.length === 1 ? skuSeriesList[0].points : []);
+                    setGraphYAxisCumulative(false);
+                    setColumnLabels([]);
+                    setRowData([]);
+                    setItemCount(skuItemCount);
+                    setCurrentEligibleStudents(allEligibleStudents);
+                    return;
+                }
+
+                const isCumulative = yAxis === 'offering-on-that-day-cumulative';
+                const isPerDay = yAxis === 'offering-on-that-day';
+                if (
+                    eventToUse.list === true ||
+                    !selectedSubEvent ||
+                    !subEventDateStr ||
+                    (xAxis !== 'days-before-subevent') ||
+                    (!isPerDay && !isCumulative)
+                ) {
+                    setGraphData([]);
+                    setGraphSeries([]);
+                    setColumnLabels([]);
+                    setRowData([]);
+                    setItemCount(0);
+                    setCurrentEligibleStudents(allEligibleStudents);
+                    return;
+                }
+
+                const applySearchFilter = (student: Student) => {
+                    if (!searchTerm?.trim()) return true;
+                    const normalize = (str: string) => str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+                    const searchNormalized = normalize(searchTerm.trim());
+                    const fullNameNormalized = normalize(`${student.first} ${student.last}`);
+                    const emailNormalized = normalize(student.email || '');
+                    return fullNameNormalized.includes(searchNormalized) || emailNormalized.includes(searchNormalized);
+                };
+
+                const seriesScope = viewConfig['graph-series-scope'] === 'category' ? 'category' : 'current';
+                const currentCategory = eventToUse.category;
+                const conditionsCurrent = conditions.filter((c: any) => (c.eventContext || 'current') === 'current');
+                const conditionsSeries = conditions.filter((c: any) => c.eventContext === 'series');
+
+                const rawDaysBeforeStart = viewConfig['days-before-subevent-start'];
+                const useAutoStart = (String(rawDaysBeforeStart) === 'days-before-subevent-start' || String(rawDaysBeforeStart) === 'auto');
+                let daysBeforeStart = useAutoStart ? 45 : Math.max(0, Number(rawDaysBeforeStart) || 45);
+
+                const now = new Date();
+                const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+                const oneDayMs = 24 * 60 * 60 * 1000;
+
+                /** Earliest offering date (YYYY-MM-DD) among students for the given event/subevent, or null */
+                const getEarliestOfferingDate = (event: Event, subEventKey: string, students: Student[]): string | null => {
+                    let earliest: string | null = null;
+                    for (const student of students) {
+                        const dates = getOfferingDatesForSubEvent(student, event.aid, subEventKey, event.config);
+                        for (const d of dates) {
+                            if (!earliest || d < earliest) earliest = d;
+                        }
+                    }
+                    return earliest;
+                };
+
+                /** Build points for one (event, subEventKey) over d from leftEnd down to rightEnd, using the given student list */
+                const buildPointsForSubevent = (
+                    event: Event,
+                    subEventKey: string,
+                    subEventDateStr: string,
+                    rightEnd: number,
+                    students: Student[],
+                    leftEnd: number
+                ): OfferingGraphPoint[] => {
+                    const pts: OfferingGraphPoint[] = [];
+                    for (let d = leftEnd; d >= rightEnd; d--) {
+                        const date = new Date(subEventDateStr + 'T12:00:00Z');
+                        date.setUTCDate(date.getUTCDate() - d);
+                        const yyyy = date.getUTCFullYear();
+                        const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
+                        const dd = String(date.getUTCDate()).padStart(2, '0');
+                        const dateStr = `${yyyy}-${mm}-${dd}`;
+                        let count = 0;
+                        for (const student of students) {
+                            const offeringDates = getOfferingDatesForSubEvent(
+                                student,
+                                event.aid,
+                                subEventKey,
+                                event.config
+                            );
+                            if (offeringDates.includes(dateStr)) count += 1;
+                        }
+                        pts.push({ daysBefore: d, date: dateStr, count });
+                    }
+                    if (isCumulative) {
+                        let running = 0;
+                        for (let i = 0; i < pts.length; i++) {
+                            running += pts[i].count;
+                            pts[i] = { ...pts[i], count: running };
+                        }
+                    }
+                    return pts;
+                };
+
+                let seriesList: OfferingGraphSeries[] = [];
+                let itemCountForDisplay: number;
+
+                if (seriesScope === 'category' && currentCategory && Array.isArray(allEvents)) {
+                    const eventsInCategory = allEvents.filter(
+                        (e) => !e.hide && !e.list && e.category === currentCategory && e.subEvents && typeof e.subEvents === 'object'
+                    );
+                    // Only include subevents whose key matches the currently selected subevent (e.g. weekend1)
+                    const subeventItems: { event: Event; subEventKey: string; subEventDateStr: string }[] = [];
+                    const rightEnds: number[] = [];
+                    for (const event of eventsInCategory) {
+                        const keys = Object.keys(event.subEvents);
+                        if (keys.length === 0) {
+                            if (selectedSubEvent !== '') continue;
+                            const d = (event as any).date;
+                            if (d) {
+                                subeventItems.push({ event, subEventKey: '', subEventDateStr: d });
+                                const subEventDate = new Date(d + 'T12:00:00Z');
+                                const daysFromToday = Math.floor((subEventDate.getTime() - todayStart.getTime()) / oneDayMs);
+                                rightEnds.push(Math.max(0, daysFromToday));
+                            }
+                        } else {
+                            for (const subEventKey of keys) {
+                                if (subEventKey !== selectedSubEvent) continue;
+                                const se = event.subEvents[subEventKey];
+                                const subEventDateStr = se?.date;
+                                if (subEventDateStr) {
+                                    subeventItems.push({ event, subEventKey, subEventDateStr });
+                                    const subEventDate = new Date(subEventDateStr + 'T12:00:00Z');
+                                    const daysFromToday = Math.floor((subEventDate.getTime() - todayStart.getTime()) / oneDayMs);
+                                    rightEnds.push(Math.max(0, daysFromToday));
+                                }
+                            }
+                        }
+                    }
+                    const rightEndGlobal = rightEnds.length > 0 ? Math.min(...rightEnds) : Math.max(0, Math.floor(
+                        (new Date(subEventDateStr + 'T12:00:00Z').getTime() - todayStart.getTime()) / oneDayMs
+                    ));
+
+                    if (useAutoStart) {
+                        let leftEndGlobal = 0;
+                        for (const { event, subEventKey, subEventDateStr } of subeventItems) {
+                            const eventWithSub = { ...event, selectedSubEvent: subEventKey } as Event;
+                            const filteredForSeries = allEligibleStudents.filter((student) => {
+                                const matchesCurrent = conditionsCurrent.length === 0 || studentMatchesViewConditions(student, conditionsCurrent, eventToUse, poolsToUse);
+                                const matchesSeries = conditionsSeries.length === 0 || studentMatchesViewConditions(student, conditionsSeries, eventWithSub, poolsToUse);
+                                if (!matchesCurrent || !matchesSeries) return false;
+                                return applySearchFilter(student);
+                            });
+                            const earliest = getEarliestOfferingDate(event, subEventKey, filteredForSeries);
+                            if (earliest) {
+                                const subEventDate = new Date(subEventDateStr + 'T12:00:00Z');
+                                const earliestDate = new Date(earliest + 'T12:00:00Z');
+                                const daysBefore = Math.ceil((subEventDate.getTime() - earliestDate.getTime()) / oneDayMs);
+                                leftEndGlobal = Math.max(leftEndGlobal, Math.max(0, daysBefore));
+                            }
+                        }
+                        daysBeforeStart = leftEndGlobal > 0 ? leftEndGlobal : 45;
+                    }
+
+                    for (const { event, subEventKey, subEventDateStr } of subeventItems) {
+                        const eventWithSub = { ...event, selectedSubEvent: subEventKey } as Event;
+                        const filteredForSeries = allEligibleStudents.filter((student) => {
+                            const matchesCurrent = conditionsCurrent.length === 0 || studentMatchesViewConditions(student, conditionsCurrent, eventToUse, poolsToUse);
+                            const matchesSeries = conditionsSeries.length === 0 || studentMatchesViewConditions(student, conditionsSeries, eventWithSub, poolsToUse);
+                            if (!matchesCurrent || !matchesSeries) return false;
+                            return applySearchFilter(student);
+                        });
+                        const points = buildPointsForSubevent(event, subEventKey, subEventDateStr, rightEndGlobal, filteredForSeries, daysBeforeStart);
+                        const se = subEventKey ? event.subEvents[subEventKey] : null;
+                        const datePart = se?.date || subEventDateStr;
+                        const label = Object.keys(event.subEvents).length > 1
+                            ? `${event.name} (${subEventKey})`
+                            : `${event.name} (${datePart})`;
+                        seriesList.push({ label, points });
+                    }
+
+                    if (seriesList.length === 0) {
+                        const rightEndDaysBefore = Math.max(0, Math.floor(
+                            (new Date(subEventDateStr + 'T12:00:00Z').getTime() - todayStart.getTime()) / oneDayMs
+                        ));
+                        const filteredStudents = allEligibleStudents.filter((s) => {
+                            if (!studentMatchesViewConditions(s, conditions, eventToUse, poolsToUse)) return false;
+                            return applySearchFilter(s);
+                        });
+                        if (useAutoStart) {
+                            const earliest = getEarliestOfferingDate(eventToUse, selectedSubEvent, filteredStudents);
+                            if (earliest) {
+                                const subEventDate = new Date(subEventDateStr + 'T12:00:00Z');
+                                const earliestDate = new Date(earliest + 'T12:00:00Z');
+                                const daysBefore = Math.ceil((subEventDate.getTime() - earliestDate.getTime()) / oneDayMs);
+                                daysBeforeStart = Math.max(0, daysBefore);
+                            }
+                        }
+                        const points = buildPointsForSubevent(eventToUse, selectedSubEvent, subEventDateStr, rightEndDaysBefore, filteredStudents, daysBeforeStart);
+                        seriesList = [{ label: `${eventToUse.name} (${subEventData?.date || selectedSubEvent})`, points }];
+                        itemCountForDisplay = filteredStudents.length;
+                    } else {
+                        const filteredForCurrentLabel = allEligibleStudents.filter((s) => {
+                            if (!studentMatchesViewConditions(s, conditions, eventToUse, poolsToUse)) return false;
+                            return applySearchFilter(s);
+                        });
+                        itemCountForDisplay = filteredForCurrentLabel.length;
+                    }
+                } else {
+                    const filteredStudents = allEligibleStudents.filter((student) => {
+                        if (!studentMatchesViewConditions(student, conditions, eventToUse, poolsToUse)) return false;
+                        return applySearchFilter(student);
+                    });
+                    itemCountForDisplay = filteredStudents.length;
+                    const subEventDate = new Date(subEventDateStr + 'T12:00:00Z');
+                    const daysFromTodayToSubevent = Math.floor((subEventDate.getTime() - todayStart.getTime()) / oneDayMs);
+                    const rightEndDaysBefore = Math.max(0, daysFromTodayToSubevent);
+                    if (useAutoStart) {
+                        const earliest = getEarliestOfferingDate(eventToUse, selectedSubEvent, filteredStudents);
+                        if (earliest) {
+                            const earliestDate = new Date(earliest + 'T12:00:00Z');
+                            const daysBefore = Math.ceil((subEventDate.getTime() - earliestDate.getTime()) / oneDayMs);
+                            daysBeforeStart = Math.max(0, daysBefore);
+                        }
+                    }
+                    const points = buildPointsForSubevent(eventToUse, selectedSubEvent, subEventDateStr, rightEndDaysBefore, filteredStudents, daysBeforeStart);
+                    seriesList = [{ label: `${eventToUse.name} (${subEventData?.date || selectedSubEvent})`, points }];
+                }
+
+                const graphType = viewConfig['graph-type'] === 'line' ? 'line' : 'bar';
+                setGraphType(graphType);
+                setGraphSeries(seriesList);
+                setGraphData(seriesList.length === 1 ? seriesList[0].points : []);
+                setGraphYAxisCumulative(isCumulative);
+                setColumnLabels([]);
+                setRowData([]);
+                setItemCount(itemCountForDisplay);
+                setCurrentEligibleStudents(allEligibleStudents);
+                return;
+            }
+
+            // Table motif (default)
+            setGraphType('bar');
+            setGraphYAxisCumulative(false);
+            setGraphSeries([]);
+            setViewMotif('table');
             const [cl, rd] = await assembleColumnLabelsAndRowDataWithData(
                 currentView,
                 month,
@@ -3030,12 +3695,9 @@ const Home = () => {
                 }
                 setAllStudents(currentStudents);
 
-                // Refresh view
+                // Refresh view (table or graph)
                 if (view) {
-                    assembleColumnLabelsAndRowData(view, month, year).then(([cl, rd]) => {
-                        setColumnLabels(cl);
-                        setRowData(rd);
-                    });
+                    updateTableDataIncrementally([], view, evShadow || undefined, allPools);
                 }
             }
         }
@@ -3121,30 +3783,34 @@ const Home = () => {
                         </div>
                     </div>
                 </nav>
-                <DataTable
-                    data={rowData}
-                    columns={columnLabels}
-                    onCellValueChanged={handleCellValueChanged}
-                    onCellClicked={handleCellClicked}
-                    onCheckboxChanged={handleCheckboxChanged}
-                    onCSVExport={handleCSVExport}
-                    loading={!loaded}
-                    websocketStatus={status}
-                    connectionId={connectionId || undefined}
-                    studentUpdateCount={studentUpdateCount}
-                    itemCount={itemCount}
-                    recordCountLabel={loadingEligibilityCache && loadingProgress.total > 0
-                        ? `${loadingProgress.current}/${loadingProgress.total}`
-                        : undefined}
-                    canWriteViews={canWriteViews}
-                    canExportCSV={canExportCSV}
-                    canViewStudentHistory={canViewStudentHistory}
-                    canRefreshCache={canRefreshCache && evShadow?.config?.eligibilityCacheDisabled !== true && evShadow?.list !== true}
-                    onRefreshCache={handleRefreshCache}
-                    currentUserName={currentUserName}
-                    pid={pid as string}
-                    hash={hash as string}
-                />
+                {viewMotif === 'graph' ? (
+                    <OfferingGraph data={graphData} series={graphSeries} itemCount={itemCount} graphType={graphType} isCumulative={graphYAxisCumulative} />
+                ) : (
+                    <DataTable
+                        data={rowData}
+                        columns={columnLabels}
+                        onCellValueChanged={handleCellValueChanged}
+                        onCellClicked={handleCellClicked}
+                        onCheckboxChanged={handleCheckboxChanged}
+                        onCSVExport={handleCSVExport}
+                        loading={!loaded}
+                        websocketStatus={status}
+                        connectionId={connectionId || undefined}
+                        studentUpdateCount={studentUpdateCount}
+                        itemCount={itemCount}
+                        recordCountLabel={loadingEligibilityCache && loadingProgress.total > 0
+                            ? `${loadingProgress.current}/${loadingProgress.total}`
+                            : undefined}
+                        canWriteViews={canWriteViews}
+                        canExportCSV={canExportCSV}
+                        canViewStudentHistory={canViewStudentHistory}
+                        canRefreshCache={canRefreshCache && evShadow?.config?.eligibilityCacheDisabled !== true && evShadow?.list !== true}
+                        onRefreshCache={handleRefreshCache}
+                        currentUserName={currentUserName}
+                        pid={pid as string}
+                        hash={hash as string}
+                    />
+                )}
             </Container>
             <StudentHistoryModal show={showHistoryModal} onClose={() => setShowHistoryModal(false)} student={selectedStudent} fetchConfig={fetchConfig} allEvents={allEvents} allPools={allPools} emailDisplayPermission={emailDisplayPermission} userEventAccess={userEventAccess} />
         </>
