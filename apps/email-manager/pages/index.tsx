@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useCallback, useRef } from 'react'
+import React, { useState, useCallback } from 'react'
 import { Container, Modal, Button, Table, Spinner } from 'react-bootstrap'
 import WorkOrderList from '../components/WorkOrderList'
 import WorkOrderForm from '../components/WorkOrderForm'
@@ -53,7 +53,6 @@ export default function Home() {
     const [newlyCreatedWorkOrder, setNewlyCreatedWorkOrder] = useState<WorkOrder | undefined>()
     const [isClient, setIsClient] = useState(false)
     const [writePermission, setWritePermission] = useState(false)
-    const [currentWorkOrderIndex, setCurrentWorkOrderIndex] = useState(0)
     const [workOrders, setWorkOrders] = useState<WorkOrder[]>([])
     const { status: websocketStatus } = useWebSocket()
     const [showArchiveModal, setShowArchiveModal] = useState(false)
@@ -67,7 +66,6 @@ export default function Home() {
     const [unarchivingId, setUnarchivingId] = useState<string | null>(null)
     const [userEventAccess, setUserEventAccess] = useState<string[]>([])
     const [permissionsLoaded, setPermissionsLoaded] = useState(false)
-    const initialWorkOrdersLoaded = useRef(false)
 
 
     // Set isClient to true after component mounts
@@ -199,85 +197,6 @@ export default function Home() {
         loadUserName();
     }, [userPid, userHash, loadUserName]);
 
-    // Restore last used work order on startup (only once)
-    React.useEffect(() => {
-        const restoreLastUsedWorkOrder = async () => {
-            // Only restore once when work orders are first loaded
-            if (workOrders.length === 0 || initialWorkOrdersLoaded.current) return;
-
-            // Mark that we've loaded initial work orders
-            initialWorkOrdersLoaded.current = true;
-
-            try {
-                const userConfig = await fetchCurrentUserLastUsedConfig();
-
-                if (userConfig?.workOrderId) {
-                    // Find the work order index by ID
-                    const workOrderIndex = workOrders.findIndex(wo => wo.id === userConfig.workOrderId);
-
-                    if (workOrderIndex !== -1) {
-                        setCurrentWorkOrderIndex(workOrderIndex);
-                    } else {
-                        setCurrentWorkOrderIndex(0);
-                    }
-                } else {
-                    setCurrentWorkOrderIndex(0);
-                }
-            } catch (error) {
-                console.error('Error restoring last used work order:', error);
-                setCurrentWorkOrderIndex(0);
-            }
-        };
-
-        restoreLastUsedWorkOrder();
-    }, [workOrders, fetchCurrentUserLastUsedConfig]);
-
-    // Keyboard navigation support
-    React.useEffect(() => {
-        const handleKeyDown = async (event: KeyboardEvent) => {
-            if (workOrders.length === 0) return;
-
-            switch (event.key) {
-                case 'Home':
-                    event.preventDefault();
-                    if (currentWorkOrderIndex !== 0) {
-                        setCurrentWorkOrderIndex(0);
-                        const firstWorkOrder = workOrders[0];
-                        if (firstWorkOrder && firstWorkOrder.id) {
-                            try {
-                                await updateUserEmailManagerLastUsedConfig({
-                                    workOrderId: firstWorkOrder.id
-                                });
-                            } catch (error) {
-                                console.error('Failed to persist work order navigation (Home):', error);
-                            }
-                        }
-                    }
-                    break;
-                case 'End':
-                    event.preventDefault();
-                    const lastIndex = workOrders.length - 1;
-                    if (currentWorkOrderIndex !== lastIndex) {
-                        setCurrentWorkOrderIndex(lastIndex);
-                        const lastWorkOrder = workOrders[lastIndex];
-                        if (lastWorkOrder && lastWorkOrder.id) {
-                            try {
-                                await updateUserEmailManagerLastUsedConfig({
-                                    workOrderId: lastWorkOrder.id
-                                });
-                            } catch (error) {
-                                console.error('Failed to persist work order navigation (End):', error);
-                            }
-                        }
-                    }
-                    break;
-            }
-        };
-
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [workOrders, currentWorkOrderIndex, updateUserEmailManagerLastUsedConfig]);
-
     const handleNewWorkOrder = () => {
         setEditingWorkOrderId(undefined)
         setShowForm(true)
@@ -347,47 +266,6 @@ export default function Home() {
         setShowForm(false)
         setEditingWorkOrderId(undefined)
     }
-
-    // Navigation functions
-    const goToNextWorkOrder = async () => {
-        if (currentWorkOrderIndex < workOrders.length - 1) {
-            const newIndex = currentWorkOrderIndex + 1;
-            setCurrentWorkOrderIndex(newIndex);
-
-            // Persist the new work order selection
-            const newWorkOrder = workOrders[newIndex];
-            if (newWorkOrder && newWorkOrder.id) {
-                try {
-                    await updateUserEmailManagerLastUsedConfig({
-                        workOrderId: newWorkOrder.id
-                    });
-                } catch (error) {
-                    console.error('Failed to persist work order navigation:', error);
-                }
-            }
-        }
-    }
-
-    const goToPreviousWorkOrder = async () => {
-        if (currentWorkOrderIndex > 0) {
-            const newIndex = currentWorkOrderIndex - 1;
-            setCurrentWorkOrderIndex(newIndex);
-
-            // Persist the new work order selection
-            const newWorkOrder = workOrders[newIndex];
-            if (newWorkOrder && newWorkOrder.id) {
-                try {
-                    await updateUserEmailManagerLastUsedConfig({
-                        workOrderId: newWorkOrder.id
-                    });
-                } catch (error) {
-                    console.error('Failed to persist work order navigation:', error);
-                }
-            }
-        }
-    }
-
-
 
     const handleOpenArchiveModal = async () => {
         setShowArchiveModal(true)
@@ -481,64 +359,11 @@ export default function Home() {
 
     return (
         <Container className="py-4 bg-dark text-light min-vh-100">
-            {/* Navigation, Title, and Actions Row */}
+            {/* Title and Actions Row */}
             <div className="d-flex justify-content-between align-items-center mb-3">
-                {/* Left side - Navigation Arrows and Title */}
-                <div className="d-flex align-items-center" style={{ gap: 8, paddingLeft: 16 }}>
-                    <Button
-                        variant="primary"
-                        onClick={goToPreviousWorkOrder}
-                        disabled={currentWorkOrderIndex === 0}
-                        size="sm"
-                        style={{
-                            borderRadius: '50%',
-                            width: 36,
-                            height: 36,
-                            padding: 0,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            backgroundColor: '#0d6efd',
-                            border: 'none',
-                            boxShadow: '0 2px 8px rgba(0,0,0,0.10)'
-                        }}
-                        title="Previous work order"
-                    >
-                        <svg width="18" height="18" viewBox="0 0 22 22" style={{ display: 'block', margin: 'auto' }}>
-                            <line x1="15" y1="4" x2="7" y2="11" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" />
-                            <line x1="7" y1="11" x2="15" y2="18" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" />
-                        </svg>
-                    </Button>
-                    <Button
-                        variant="primary"
-                        onClick={goToNextWorkOrder}
-                        disabled={currentWorkOrderIndex === workOrders.length - 1}
-                        size="sm"
-                        style={{
-                            borderRadius: '50%',
-                            width: 36,
-                            height: 36,
-                            padding: 0,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            backgroundColor: '#0d6efd',
-                            border: 'none',
-                            boxShadow: '0 2px 8px rgba(0,0,0,0.10)'
-                        }}
-                        title="Next work order"
-                    >
-                        <svg width="18" height="18" viewBox="0 0 22 22" style={{ display: 'block', margin: 'auto' }}>
-                            <line x1="7" y1="4" x2="15" y2="11" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" />
-                            <line x1="15" y1="11" x2="7" y2="18" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" />
-                        </svg>
-                    </Button>
-                    <small className="text-muted" style={{ fontSize: 12 }}>
-                        (←→ arrows, Home/End keys)
-                    </small>
-
-                    {/* Email Manager Title */}
-                    <h1 className="text-light fw-bold fs-3 mb-0 ms-4">
+                {/* Left side - Title */}
+                <div className="d-flex align-items-center" style={{ paddingLeft: 16 }}>
+                    <h1 className="text-light fw-bold fs-3 mb-0">
                         Email Manager
                     </h1>
                 </div>
@@ -613,8 +438,6 @@ export default function Home() {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 newlyCreatedWorkOrder={newlyCreatedWorkOrder as any}
                 writePermission={writePermission}
-                currentWorkOrderIndex={currentWorkOrderIndex}
-                setCurrentWorkOrderIndex={setCurrentWorkOrderIndex}
                 setWorkOrders={setWorkOrders}
                 userEventAccess={userEventAccess}
                 onWorkOrderIndexChange={updateUserEmailManagerLastUsedConfig}

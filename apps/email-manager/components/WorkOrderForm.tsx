@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Form, Button, Spinner, Badge, Modal } from 'react-bootstrap'
 import { toast } from 'react-toastify'
-import { getTableItem, putTableItem, deleteTableItem, getAllTableItems, getAllTableItemsFiltered } from 'sharedFrontend'
+import { getTableItem, putTableItem, getAllTableItems, getAllTableItemsFiltered } from 'sharedFrontend'
 
 // Define interfaces for type safety
 interface WorkOrder {
@@ -688,30 +688,6 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
         <Form onSubmit={handleSubmit} className="text-light">
             <div className="d-flex justify-content-between align-items-center mb-3">
                 <div className="d-flex gap-2 align-items-center">
-                    {id && (
-                        <Button
-                            variant="danger"
-                            onClick={async () => {
-                                if (window.confirm('Are you sure you want to delete this work order?')) {
-                                    setLoading(true)
-                                    try {
-                                        await deleteTableItem('work-orders', id, userPid, userHash)
-                                        toast.success('Work order deleted')
-                                        onSave()
-                                    } catch {
-                                        toast.error('Failed to delete work order')
-                                    } finally {
-                                        setLoading(false)
-                                    }
-                                }
-                            }}
-                            style={{ borderRadius: '50%', width: 40, height: 40, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 8 }}
-                            aria-label="Delete Work Order"
-                            disabled={loading || !writePermission}
-                        >
-                            &#128465;
-                        </Button>
-                    )}
                     <Button variant="secondary" onClick={onCancel} disabled={loading}>
                         Cancel
                     </Button>
