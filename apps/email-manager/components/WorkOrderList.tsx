@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react'
-import { Table, Button, Badge, Modal, Spinner } from 'react-bootstrap'
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
+import { Table, Button, Badge, Modal, Spinner, Dropdown } from 'react-bootstrap'
 import { toast } from 'react-toastify'
-import { getAllTableItems, useWebSocket, getTableItem, getTableItemOrNull, updateTableItem, sendSQSMessage, putTableItem, authGetConfigValue } from 'sharedFrontend'
+import { getAllTableItems, useWebSocket, getTableItem, getTableItemOrNull, updateTableItem, sendSQSMessage, putTableItem, deleteTableItem, authGetConfigValue } from 'sharedFrontend'
 import { unmarshall } from '@aws-sdk/util-dynamodb'
 
 interface WorkOrder {
@@ -55,8 +55,6 @@ interface WorkOrderListProps {
     userHash: string
     newlyCreatedWorkOrder?: WorkOrder
     writePermission: boolean
-    currentWorkOrderIndex: number
-    setCurrentWorkOrderIndex: (index: number) => void
     setWorkOrders: (workOrders: WorkOrder[]) => void
     onWorkOrderIndexChange?: (updates: { workOrderId?: string }) => Promise<boolean>
     editedWorkOrderId?: string | null
@@ -65,7 +63,7 @@ interface WorkOrderListProps {
     permissionsLoaded: boolean
 }
 
-export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, userHash, newlyCreatedWorkOrder, writePermission, currentWorkOrderIndex, setCurrentWorkOrderIndex, setWorkOrders, onWorkOrderIndexChange, editedWorkOrderId, setEditedWorkOrderId, userEventAccess, permissionsLoaded }: WorkOrderListProps) {
+export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, userHash, newlyCreatedWorkOrder, writePermission, setWorkOrders, onWorkOrderIndexChange, editedWorkOrderId, setEditedWorkOrderId, userEventAccess, permissionsLoaded }: WorkOrderListProps) {
     const [workOrders, setWorkOrdersLocal] = useState<WorkOrder[]>([])
     const [loading, setLoading] = useState(true)
     const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
@@ -86,16 +84,41 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
     const [emailDisplayPermission, setEmailDisplayPermission] = useState<boolean>(true);
     const [exportCSVPermission, setExportCSVPermission] = useState<boolean>(true);
     const [restorationRetryCount, setRestorationRetryCount] = useState<number>(0);
+    const [expandedWorkOrderIds, setExpandedWorkOrderIds] = useState<Set<string>>(new Set());
+    const [confirmAction, setConfirmAction] = useState<'archive' | 'delete' | null>(null);
+    const [confirmWorkOrder, setConfirmWorkOrder] = useState<WorkOrder | null>(null);
 
+    const sortByEventSubEventStage = useCallback((a: WorkOrder, b: WorkOrder) => {
+        const cmpEvent = (a.eventCode || '').localeCompare(b.eventCode || '', undefined, { sensitivity: 'base' });
+        if (cmpEvent !== 0) return cmpEvent;
+        const cmpSub = (a.subEvent || '').localeCompare(b.subEvent || '', undefined, { sensitivity: 'base' });
+        if (cmpSub !== 0) return cmpSub;
+        return (a.stage || '').localeCompare(b.stage || '', undefined, { sensitivity: 'base' });
+    }, []);
 
+    const toggleWorkOrderExpanded = useCallback((workOrderId: string) => {
+        setExpandedWorkOrderIds(prev => {
+            const next = new Set(prev);
+            if (next.has(workOrderId)) next.delete(workOrderId);
+            else next.add(workOrderId);
+            return next;
+        });
+    }, []);
 
-
-    // Reset current index when work orders change
-    useEffect(() => {
-        if (workOrders.length > 0 && currentWorkOrderIndex >= workOrders.length) {
-            setCurrentWorkOrderIndex(0)
-        }
-    }, [workOrders, currentWorkOrderIndex, setCurrentWorkOrderIndex])
+    // Sort for display: alphabetically by event name, sub event, stage (same event grouped)
+    const sortedWorkOrders = useMemo(() => {
+        return [...workOrders].sort((a, b) => {
+            const aEvent = (eventNames[a.eventCode] || a.eventCode || '').toLowerCase();
+            const bEvent = (eventNames[b.eventCode] || b.eventCode || '').toLowerCase();
+            const cmpEvent = aEvent.localeCompare(bEvent);
+            if (cmpEvent !== 0) return cmpEvent;
+            const aSub = (a.subEvent || '').toLowerCase();
+            const bSub = (b.subEvent || '').toLowerCase();
+            const cmpSub = aSub.localeCompare(bSub);
+            if (cmpSub !== 0) return cmpSub;
+            return (a.stage || '').toLowerCase().localeCompare((b.stage || '').toLowerCase());
+        });
+    }, [workOrders, eventNames]);
 
     // Update parent's workOrders state when local state changes
     useEffect(() => {
@@ -132,32 +155,6 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         setRecipientsType(type);
         setCurrentCampaignString(campaignString);
         setShowRecipientsModal(true);
-    }
-
-
-
-    const archiveWorkOrder = async (workOrderId: string) => {
-        try {
-            await updateTableItem('work-orders', workOrderId, 'archived', true, userPid, userHash)
-            await updateTableItem('work-orders', workOrderId, 'archivedAt', new Date().toISOString(), userPid, userHash)
-            await updateTableItem('work-orders', workOrderId, 'archivedBy', userPid, userPid, userHash)
-            toast.success('Work order archived successfully')
-            loadWorkOrders() // Refresh the main list
-        } catch (error) {
-            console.error('Failed to archive work order:', error)
-            toast.error('Failed to archive work order')
-        }
-    }
-
-
-
-    const isWorkOrderIdle = (workOrder: WorkOrder) => {
-        return !workOrder.steps || !workOrder.steps.some(step => {
-            const status = typeof step.status === 'string' ? step.status :
-                (step.status && typeof step.status === 'object' && 'S' in step.status) ?
-                    (step.status as { S: string }).S : 'ready'
-            return status === 'working' || status === 'sleeping'
-        })
     }
 
 
@@ -221,12 +218,8 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
 
                 // Filter out archived work orders by default
                 const activeWorkOrders = filteredWorkOrders.filter(wo => !wo.archived)
-                // Sort by createdAt (newest first), with fallback for missing createdAt
-                activeWorkOrders.sort((a, b) => {
-                    const aTime = new Date(a.createdAt || '1970-01-01').getTime();
-                    const bTime = new Date(b.createdAt || '1970-01-01').getTime();
-                    return bTime - aTime;
-                });
+                // Sort alphabetically by event code, sub event, stage so same event is grouped
+                activeWorkOrders.sort(sortByEventSubEventStage)
                 setWorkOrdersLocal(activeWorkOrders)
 
                 // Load participant names for all work orders
@@ -259,7 +252,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         } finally {
             setLoading(false)
         }
-    }, [userPid, userHash, userEventAccess, eventNames, loadEventName, loadParticipantName, participantNames, permissionsLoaded])
+    }, [userPid, userHash, userEventAccess, eventNames, loadEventName, loadParticipantName, participantNames, permissionsLoaded, sortByEventSubEventStage])
 
     useEffect(() => {
         if (permissionsLoaded) {
@@ -267,34 +260,28 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         }
     }, [refreshTrigger, loadWorkOrders, permissionsLoaded])
 
-    // Handle edited work order restoration after refresh
+    // Handle edited work order restoration after refresh — clear id when work order reappears (do not expand steps row)
     useEffect(() => {
         if (editedWorkOrderId && workOrders.length > 0 && setEditedWorkOrderId) {
-            const editedWorkOrderIndex = workOrders.findIndex(wo => wo.id === editedWorkOrderId);
-            if (editedWorkOrderIndex !== -1) {
-                setCurrentWorkOrderIndex(editedWorkOrderIndex);
-                setEditedWorkOrderId(null); // Clear the edited work order ID
-                setRestorationRetryCount(0); // Reset retry count on success
+            const found = workOrders.some(wo => wo.id === editedWorkOrderId);
+            if (found) {
+                setEditedWorkOrderId(null);
+                setRestorationRetryCount(0);
             } else {
-                // Increment retry count
                 setRestorationRetryCount(prev => prev + 1);
-
-                // Clear after max retries or timeout
                 if (restorationRetryCount >= 5) {
                     setEditedWorkOrderId(null);
                     setRestorationRetryCount(0);
                 } else {
-                    // Set a timeout as backup
                     const timeoutId = setTimeout(() => {
                         setEditedWorkOrderId(null);
                         setRestorationRetryCount(0);
-                    }, 5000); // 5 second timeout
-
+                    }, 5000);
                     return () => clearTimeout(timeoutId);
                 }
             }
         }
-    }, [workOrders, editedWorkOrderId, setEditedWorkOrderId, restorationRetryCount, setCurrentWorkOrderIndex]);
+    }, [workOrders, editedWorkOrderId, setEditedWorkOrderId, restorationRetryCount]);
 
     // Load email display permission
     useEffect(() => {
@@ -377,11 +364,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                             // If it's a new work order, only add it if user has access
                             if (isWorkOrderAccessible(updatedWorkOrder)) {
                                 const newOrders = [updatedWorkOrder, ...prevOrders]
-                                newOrders.sort((a, b) => {
-                                    const aTime = new Date(a.createdAt || '1970-01-01').getTime();
-                                    const bTime = new Date(b.createdAt || '1970-01-01').getTime();
-                                    return bTime - aTime;
-                                })
+                                newOrders.sort(sortByEventSubEventStage)
                                 return newOrders
                             } else {
                                 // User doesn't have access to this work order, don't add it
@@ -396,21 +379,12 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                         if (!hasAccess) {
                             // User no longer has access, remove this work order
                             console.log(`[ACCESS-DENIED] Removing work order ${updatedWorkOrder.id} (${updatedWorkOrder.eventCode}) - user no longer has access`);
-                            const filteredOrders = prevOrders.filter(wo => wo.id !== updatedWorkOrder.id);
-
-                            // If the removed work order was the current one, adjust the index
-                            if (index === currentWorkOrderIndex) {
-                                // Move to the next available work order, or the last one if we're at the end
-                                const newIndex = Math.min(currentWorkOrderIndex, filteredOrders.length - 1);
-                                if (newIndex >= 0) {
-                                    setCurrentWorkOrderIndex(newIndex);
-                                }
-                            } else if (index < currentWorkOrderIndex) {
-                                // If we removed a work order before the current one, adjust the index
-                                setCurrentWorkOrderIndex(currentWorkOrderIndex - 1);
-                            }
-
-                            return filteredOrders;
+                            setExpandedWorkOrderIds(prev => {
+                                const next = new Set(prev);
+                                next.delete(updatedWorkOrder.id);
+                                return next;
+                            });
+                            return prevOrders.filter(wo => wo.id !== updatedWorkOrder.id);
                         }
 
                         // Check if we need to refresh campaign existence data
@@ -521,11 +495,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                         // If it's a new work order, only add it if user has access
                         if (isWorkOrderAccessible(updatedWorkOrder)) {
                             const newOrders = [updatedWorkOrder, ...prevOrders]
-                            newOrders.sort((a, b) => {
-                                const aTime = new Date(a.createdAt || '1970-01-01').getTime();
-                                const bTime = new Date(b.createdAt || '1970-01-01').getTime();
-                                return bTime - aTime;
-                            })
+                            newOrders.sort(sortByEventSubEventStage)
                             return newOrders
                         } else {
                             // User doesn't have access to this work order, don't add it
@@ -540,21 +510,12 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                     if (!hasAccess) {
                         // User no longer has access, remove this work order
                         console.log(`[ACCESS-DENIED] Removing work order ${updatedWorkOrder.id} (${updatedWorkOrder.eventCode}) - user no longer has access`);
-                        const filteredOrders = prevOrders.filter(wo => wo.id !== updatedWorkOrder.id);
-
-                        // If the removed work order was the current one, adjust the index
-                        if (index === currentWorkOrderIndex) {
-                            // Move to the next available work order, or the last one if we're at the end
-                            const newIndex = Math.min(currentWorkOrderIndex, filteredOrders.length - 1);
-                            if (newIndex >= 0) {
-                                setCurrentWorkOrderIndex(newIndex);
-                            }
-                        } else if (index < currentWorkOrderIndex) {
-                            // If we removed a work order before the current one, adjust the index
-                            setCurrentWorkOrderIndex(currentWorkOrderIndex - 1);
-                        }
-
-                        return filteredOrders;
+                        setExpandedWorkOrderIds(prev => {
+                            const next = new Set(prev);
+                            next.delete(updatedWorkOrder.id);
+                            return next;
+                        });
+                        return prevOrders.filter(wo => wo.id !== updatedWorkOrder.id);
                     }
 
                     // Check if we need to refresh campaign existence data
@@ -620,7 +581,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                 })
             }
         }
-    }, [lastMessage, currentWorkOrderIndex, isWorkOrderAccessible, prefetchCampaignExistence, setCurrentWorkOrderIndex, userHash, userPid])
+    }, [lastMessage, isWorkOrderAccessible, prefetchCampaignExistence, userHash, userPid])
 
     // Helper function to check if campaign data needs to be refreshed
     const checkIfCampaignDataNeedsRefresh = (oldWorkOrder: WorkOrder, newWorkOrder: WorkOrder): boolean => {
@@ -680,68 +641,52 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         prevWorkOrdersRef.current = workOrders;
     }, [workOrders]);
 
-    // Handle newly created work order
+    // Handle newly created work order — add to list and expand its row
     useEffect(() => {
         if (newlyCreatedWorkOrder) {
-            // Add the newly created work order to the list
             setWorkOrdersLocal(prevOrders => {
-                // Check if it's already in the list (from WebSocket or reload)
                 const exists = prevOrders.some(wo => wo.id === newlyCreatedWorkOrder.id);
                 if (!exists) {
                     const newOrders = [newlyCreatedWorkOrder, ...prevOrders];
-                    // Sort by createdAt (newest first)
-                    newOrders.sort((a, b) => {
-                        const aTime = new Date(a.createdAt || '1970-01-01').getTime();
-                        const bTime = new Date(b.createdAt || '1970-01-01').getTime();
-                        return bTime - aTime;
-                    });
+                    newOrders.sort(sortByEventSubEventStage);
                     return newOrders;
                 }
                 return prevOrders;
             });
 
-            // Select the newly created work order
-            setCurrentWorkOrderIndex(0);
-
-            // Persist the newly created work order selection
-            if (newlyCreatedWorkOrder.id && onWorkOrderIndexChange) {
-                onWorkOrderIndexChange({
-                    workOrderId: newlyCreatedWorkOrder.id
-                }).catch(error => {
-                    console.error('Failed to persist newly created work order selection:', error);
-                });
-            }
-
-            // Clear the newly created work order after handling it
-            // This will be done by the parent component
-        }
-    }, [newlyCreatedWorkOrder, onWorkOrderIndexChange, setCurrentWorkOrderIndex]);
-
-    // Prefetch campaign existence when workOrders or currentWorkOrderIndex changes
-    useEffect(() => {
-        if (workOrders.length > 0) {
-            const workOrder = workOrders[currentWorkOrderIndex];
-            if (workOrder) {
-                const cachedData = campaignExistence[workOrder.id];
-                // Check if we need to refresh: no cache, or revision changed
-                const cachedRevision = cachedData?._revision; // Store revision in cache for comparison
-                const currentRevision = workOrder.revision || null;
-
-                if (!cachedData || cachedRevision !== currentRevision) {
-                    // Clear old cache entry if revision changed
-                    if (cachedData && cachedRevision !== currentRevision) {
-                        setCampaignExistence(prev => {
-                            const updated = { ...prev };
-                            delete updated[workOrder.id];
-                            return updated;
-                        });
-                    }
-                    prefetchCampaignExistence(workOrder);
+            if (newlyCreatedWorkOrder.id) {
+                setExpandedWorkOrderIds(prev => new Set(prev).add(newlyCreatedWorkOrder.id));
+                if (onWorkOrderIndexChange) {
+                    onWorkOrderIndexChange({ workOrderId: newlyCreatedWorkOrder.id }).catch(error => {
+                        console.error('Failed to persist newly created work order selection:', error);
+                    });
                 }
             }
         }
+    }, [newlyCreatedWorkOrder, onWorkOrderIndexChange, sortByEventSubEventStage]);
+
+    // Prefetch campaign existence for expanded work orders
+    useEffect(() => {
+        if (workOrders.length === 0) return;
+        expandedWorkOrderIds.forEach(workOrderId => {
+            const workOrder = workOrders.find(wo => wo.id === workOrderId);
+            if (!workOrder) return;
+            const cachedData = campaignExistence[workOrder.id];
+            const cachedRevision = cachedData?._revision;
+            const currentRevision = workOrder.revision || null;
+            if (!cachedData || cachedRevision !== currentRevision) {
+                if (cachedData && cachedRevision !== currentRevision) {
+                    setCampaignExistence(prev => {
+                        const updated = { ...prev };
+                        delete updated[workOrder.id];
+                        return updated;
+                    });
+                }
+                prefetchCampaignExistence(workOrder);
+            }
+        });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [workOrders, currentWorkOrderIndex]);
+    }, [workOrders, expandedWorkOrderIds]);
 
     const handleUnlockWorkOrder = async (workOrderId: string) => {
         try {
@@ -779,9 +724,103 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
         }
     }
 
+    const extractStepString = useCallback((value: unknown): string => {
+        if (typeof value === 'string') return value
+        if (value && typeof value === 'object' && 'S' in value) return (value as { S: string }).S
+        if (value && typeof value === 'object' && 'value' in value) return (value as { value: string }).value
+        return String(value || '')
+    }, [])
+
+    const getWorkOrderStatusDisplay = useCallback((workOrder: WorkOrder): string => {
+        if (workOrder.locked) return 'Working'
+        const steps = workOrder.steps || []
+        const getStep = (name: string) => steps.find(s => {
+            const n = extractStepString(s.name)
+            return n === name || (name === 'Send' && (n === 'Send' || n === 'Send-Once' || n === 'Send-Continuously'))
+        })
+        const getStatus = (step: { status?: unknown } | undefined) => step ? extractStepString(step.status) : ''
+
+        if (workOrder.sendContinuously && (workOrder.sleepUntil && new Date(workOrder.sleepUntil) > new Date() || steps.some(s => extractStepString(s.status) === 'sleeping')))
+            return 'Sleeping'
+        if (steps.some(s => getStatus(s) === 'error' || getStatus(s) === 'exception'))
+            return 'Error'
+
+        const sendStep = getStep('Send') || steps.find(s => extractStepString(s.name).includes('Send'))
+        if (sendStep && getStatus(sendStep) === 'complete') return 'Sent'
+
+        const countStep = getStep('Count')
+        const prepareStep = getStep('Prepare')
+        const dryRunStep = getStep('Dry-Run')
+        const testStep = getStep('Test')
+
+        const countComplete = getStatus(countStep) === 'complete'
+        const prepareComplete = getStatus(prepareStep) === 'complete'
+        const dryRunComplete = getStatus(dryRunStep) === 'complete'
+        const testComplete = getStatus(testStep) === 'complete'
+
+        if (!countComplete) return 'Count'
+        if (!prepareComplete) return 'Prepare'
+        if (!dryRunComplete) return 'Dry-Run'
+        if (!testComplete) return 'Test'
+        return 'Send'
+    }, [extractStepString])
+
+    const openEditModal = useCallback(async (workOrder: WorkOrder) => {
+        if (!writePermission) return
+        let wo = workOrder
+        if (workOrder.locked) {
+            const ok = window.confirm('This work order is locked. Do you want to unlock it and open for editing?')
+            if (!ok) return
+            await handleUnlockWorkOrder(workOrder.id)
+            wo = { ...workOrder, locked: false, lockedBy: undefined }
+            setWorkOrdersLocal(prev => {
+                const idx = prev.findIndex(w => w.id === workOrder.id)
+                if (idx === -1) return prev
+                const next = [...prev]
+                next[idx] = { ...next[idx], locked: false, lockedBy: undefined }
+                return next
+            })
+        }
+        await handleRowClick(wo)
+    }, [writePermission, handleUnlockWorkOrder])
+
+    const archiveWorkOrder = useCallback(async (workOrderId: string) => {
+        try {
+            await updateTableItem('work-orders', workOrderId, 'archived', true, userPid, userHash)
+            await updateTableItem('work-orders', workOrderId, 'archivedAt', new Date().toISOString(), userPid, userHash)
+            await updateTableItem('work-orders', workOrderId, 'archivedBy', userPid, userPid, userHash)
+            toast.success('Work order archived')
+            loadWorkOrders()
+        } catch (error) {
+            console.error('Failed to archive work order:', error)
+            toast.error('Failed to archive work order')
+        }
+    }, [userPid, userHash, loadWorkOrders])
+
+    const handleDeleteWorkOrder = useCallback(async (workOrderId: string) => {
+        try {
+            await deleteTableItem('work-orders', workOrderId, userPid, userHash)
+            toast.success('Work order deleted')
+            loadWorkOrders()
+        } catch (error) {
+            console.error('Failed to delete work order:', error)
+            toast.error('Failed to delete work order')
+        }
+    }, [userPid, userHash, loadWorkOrders])
+
+    const handleConfirmAction = useCallback(async () => {
+        if (!confirmWorkOrder || !confirmAction) return
+        if (confirmAction === 'archive') {
+            await archiveWorkOrder(confirmWorkOrder.id)
+        } else {
+            await handleDeleteWorkOrder(confirmWorkOrder.id)
+        }
+        setConfirmWorkOrder(null)
+        setConfirmAction(null)
+    }, [confirmWorkOrder, confirmAction, archiveWorkOrder, handleDeleteWorkOrder])
+
     const handleRowClick = async (workOrder: WorkOrder) => {
         if (workOrder.locked) {
-            // Don't allow editing if locked
             return
         }
 
@@ -961,10 +1000,11 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                     <Table borderless hover variant="dark" className="mb-0">
                         <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: '#212529' }}>
                             <tr style={{ border: 'none' }}>
+                                <th style={{ border: 'none', width: 40 }} aria-label="Actions" />
                                 <th style={{ border: 'none' }}>Status</th>
                                 <th style={{ border: 'none' }}>Event</th>
-                                <th style={{ border: 'none' }}>Sub Event</th>
                                 <th style={{ border: 'none' }}>Stage</th>
+                                <th style={{ border: 'none' }}>Sub Event</th>
                                 <th style={{ border: 'none' }}>Rev</th>
                                 <th style={{ border: 'none' }}>Languages</th>
                                 <th style={{ border: 'none' }}>Email Account</th>
@@ -972,73 +1012,72 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                             </tr>
                         </thead>
                         <tbody>
-                            {(() => {
-                                const workOrder = workOrders[currentWorkOrderIndex]
-                                if (!workOrder) {
-                                    return (
-                                        <tr>
-                                            <td colSpan={9} className="text-center text-muted py-4">
-                                                No work orders found
-                                            </td>
-                                        </tr>
-                                    )
-                                }
-                                return (
+                            {sortedWorkOrders.map((workOrder) => (
                                     <React.Fragment key={workOrder.id}>
                                         <tr
+                                            className="workorder-summary-row"
                                             onMouseEnter={() => setHoveredRow(workOrder.id)}
                                             onMouseLeave={() => setHoveredRow(null)}
-                                            style={{ cursor: 'default' }}
+                                            onClick={(e) => {
+                                                const target = e.target as HTMLElement;
+                                                if (!target.closest('button')) {
+                                                    toggleWorkOrderExpanded(workOrder.id);
+                                                }
+                                            }}
+                                            style={{ cursor: 'pointer' }}
+                                            title="Click to expand or collapse steps"
                                         >
-                                            <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
-                                                <div className="d-flex align-items-center">
-                                                    <Button
-                                                        variant={workOrder.locked ? 'danger' : 'success'}
+                                            <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40', width: 40 }} onClick={(e) => e.stopPropagation()}>
+                                                <Dropdown align="end" data-bs-theme="dark">
+                                                    <Dropdown.Toggle
+                                                        variant="outline-secondary"
                                                         size="sm"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation()
-                                                            if (workOrder.locked) {
-                                                                handleUnlockWorkOrder(workOrder.id)
-                                                            } else {
-                                                                handleRowClick(workOrder)
-                                                            }
-                                                        }}
-                                                        disabled={!writePermission}
-                                                        className="px-3 py-2"
-                                                        title={workOrder.locked ? 'Click to unlock work order' : 'Click to edit work order'}
+                                                        id={`kebab-${workOrder.id}`}
+                                                        className="kebab-toggle-no-caret"
+                                                        style={{ padding: '4px 10px', border: 'none', background: 'transparent', color: '#adb5bd', fontSize: '1.25rem', lineHeight: 1 }}
+                                                        aria-label="Row actions"
                                                     >
-                                                        {workOrder.locked ? 'Locked' : 'Edit'}
-                                                    </Button>
-                                                    {!workOrder.archived && (
-                                                        <Button
-                                                            variant="warning"
-                                                            size="sm"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation()
-                                                                if (confirm('Are you sure you want to archive this work order?')) {
-                                                                    archiveWorkOrder(workOrder.id)
-                                                                }
-                                                            }}
-                                                            disabled={!writePermission || !isWorkOrderIdle(workOrder)}
-                                                            style={{ marginLeft: 8 }}
-                                                            title={isWorkOrderIdle(workOrder) ? "Archive work order" : "Cannot archive while active"}
+                                                        ⋮
+                                                    </Dropdown.Toggle>
+                                                    <Dropdown.Menu>
+                                                        <Dropdown.Item onClick={() => openEditModal(workOrder)} disabled={!writePermission}>
+                                                            Edit
+                                                        </Dropdown.Item>
+                                                        <Dropdown.Item onClick={() => { setConfirmWorkOrder(workOrder); setConfirmAction('archive'); }} disabled={!writePermission}>
+                                                            Archive
+                                                        </Dropdown.Item>
+                                                        <Dropdown.Item className="text-danger" onClick={() => { setConfirmWorkOrder(workOrder); setConfirmAction('delete'); }} disabled={!writePermission}>
+                                                            Delete
+                                                        </Dropdown.Item>
+                                                    </Dropdown.Menu>
+                                                </Dropdown>
+                                            </td>
+                                            <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
+                                                {(() => {
+                                                    const status = getWorkOrderStatusDisplay(workOrder);
+                                                    if (status === 'Sent') return status;
+                                                    const variant = status === 'Working' || status === 'Sleeping' ? 'primary' : status === 'Error' ? 'danger' : 'success';
+                                                    return (
+                                                        <Badge
+                                                            bg={variant}
+                                                            style={{ fontSize: '1rem', fontWeight: 400, padding: '0.35em 0.65em' }}
                                                         >
-                                                            📁
-                                                        </Button>
-                                                    )}
-
-                                                </div>
+                                                            {status}
+                                                        </Badge>
+                                                    );
+                                                })()}
                                             </td>
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>
                                                 {eventNames[workOrder.eventCode] || workOrder.eventCode}
                                             </td>
-                                            <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.subEvent}</td>
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.stage}</td>
+                                            <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.subEvent}</td>
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.revision || ''}</td>
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{Object.keys(workOrder.languages ?? {}).filter(lang => !!workOrder.languages?.[lang]).join(',')}</td>
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{workOrder.account}</td>
                                             <td style={{ border: 'none', verticalAlign: 'middle', background: hoveredRow === workOrder.id ? '#484b50' : '#3a3d40' }}>{participantNames[workOrder.createdBy] || workOrder.createdBy}</td>
                                         </tr>
+                                        {expandedWorkOrderIds.has(workOrder.id) && (
                                         <tr>
                                             <td colSpan={9} style={{ padding: 0, background: 'transparent', border: 'none' }}>
                                                 {(workOrder.steps || []).map((step, index) => {
@@ -1311,9 +1350,9 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                                                 })}
                                             </td>
                                         </tr>
+                                        )}
                                     </React.Fragment>
-                                )
-                            })()}
+                            ))}
                         </tbody>
                     </Table>
                 </div>
@@ -1322,6 +1361,69 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                     No work orders available
                 </div>
             )}
+
+            {/* Archive / Delete confirmation modal */}
+            <Modal
+                show={confirmWorkOrder !== null && confirmAction !== null}
+                onHide={() => { setConfirmWorkOrder(null); setConfirmAction(null); }}
+                centered
+                contentClassName="border-0 shadow-lg"
+                style={{ borderRadius: 12 }}
+            >
+                <Modal.Header className="border-0 pb-0" style={{ backgroundColor: '#212529', color: '#fff' }}>
+                    <Modal.Title style={{ fontWeight: 600, fontSize: '1.25rem' }}>
+                        {confirmAction === 'archive' ? 'Archive work order?' : 'Delete work order?'}
+                    </Modal.Title>
+                </Modal.Header>
+                <Modal.Body style={{ backgroundColor: '#212529', color: '#e9ecef' }}>
+                    {confirmWorkOrder && (
+                        <>
+                            <p className="mb-3" style={{ fontSize: '0.95rem', color: '#adb5bd' }}>
+                                {confirmAction === 'archive'
+                                    ? 'This work order will be moved to the archive. You can restore it from Archived Work Orders.'
+                                    : 'This cannot be undone. The work order will be permanently deleted.'}
+                            </p>
+                            <div style={{
+                                backgroundColor: '#2d3238',
+                                borderRadius: 8,
+                                padding: '1rem 1.25rem',
+                                border: '1px solid #495057'
+                            }}>
+                                <div style={{ display: 'grid', gap: '0.5rem', fontSize: '0.95rem' }}>
+                                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                        <span style={{ color: '#868e96', minWidth: 72 }}>Event</span>
+                                        <span>{eventNames[confirmWorkOrder.eventCode] || confirmWorkOrder.eventCode}</span>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                        <span style={{ color: '#868e96', minWidth: 72 }}>Stage</span>
+                                        <span>{confirmWorkOrder.stage}</span>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                        <span style={{ color: '#868e96', minWidth: 72 }}>Sub event</span>
+                                        <span>{confirmWorkOrder.subEvent}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </>
+                    )}
+                </Modal.Body>
+                <Modal.Footer className="border-0 pt-3" style={{ backgroundColor: '#212529' }}>
+                    <Button
+                        variant="secondary"
+                        onClick={() => { setConfirmWorkOrder(null); setConfirmAction(null); }}
+                        style={{ borderRadius: 8 }}
+                    >
+                        Cancel
+                    </Button>
+                    <Button
+                        variant={confirmAction === 'delete' ? 'danger' : 'warning'}
+                        onClick={handleConfirmAction}
+                        style={{ borderRadius: 8 }}
+                    >
+                        {confirmAction === 'archive' ? 'Archive' : 'Delete'}
+                    </Button>
+                </Modal.Footer>
+            </Modal>
 
             {/* Recipients Modal */}
             <Modal
@@ -1409,6 +1511,12 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                 }
                 .workorder-main-row:hover {
                     background: #484b50 !important;
+                }
+                .workorder-summary-row td {
+                    border-bottom: 1px solid #495057 !important;
+                }
+                .kebab-toggle-no-caret.dropdown-toggle::after {
+                    display: none;
                 }
             `}</style>
         </div>

@@ -9,13 +9,14 @@ import argparse
 import boto3
 import os
 import sys
-from typing import Dict, Any, Optional
-from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-# Add the parent directory to the path so we can import config
-sys.path.append(str(Path(__file__).parent.parent / 'src'))
+AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
+AWS_PROFILE = os.getenv('AWS_PROFILE', 'slsupport')
+STUDENT_TABLE = os.getenv('STUDENT_TABLE')
 
-from config import STUDENT_TABLE, AWS_REGION, AWS_PROFILE
+# Language suffixes used when --append-language-suffix is set
+LANGUAGE_SUFFIXES = ('_EN', '_SP', '_FR', '_PT', '_DE', '_CZ', '_IT')
 
 def get_dynamodb_client():
     """
@@ -73,15 +74,15 @@ def scan_student_table(dynamodb, table_name: str, student_id: Optional[str] = No
         
         return students
 
-def process_student_record(student: Dict[str, Any], from_campaign: str, to_campaign: str, dryrun: bool = False) -> bool:
+def process_student_record(
+    student: Dict[str, Any],
+    rename_pairs: List[Tuple[str, str]],
+    dryrun: bool = False,
+) -> bool:
     """
-    @function process_student_record
-    @description Process a single student record to rename campaign keys.
-    @param student - The student record from DynamoDB.
-    @param from_campaign - The campaign key to rename from.
-    @param to_campaign - The campaign key to rename to.
-    @param dryrun - If True, only count matches without making changes.
-    @returns True if changes were made (or would be made in dryrun), False otherwise.
+    Process a single student record to rename campaign keys.
+    rename_pairs: list of (from_key, to_key) to apply; all matching renames are applied in one update.
+    Returns True if any change was made (or would be made in dryrun).
     """
     student_id = student.get('id', 'unknown')
     emails = student.get('emails', {})
@@ -90,38 +91,38 @@ def process_student_record(student: Dict[str, Any], from_campaign: str, to_campa
         print(f"Student {student_id}: emails field is not a dictionary, skipping")
         return False
     
-    # Check if the from_campaign key exists
-    if from_campaign not in emails:
+    # Collect renames that apply (from_key exists)
+    applied = []
+    new_emails = dict(emails)
+    for from_key, to_key in rename_pairs:
+        if from_key not in new_emails:
+            continue
+        timestamp = new_emails[from_key]
+        applied.append((from_key, to_key, timestamp))
+        new_emails[to_key] = timestamp
+        del new_emails[from_key]
+    
+    if not applied:
         return False
     
-    # Get the timestamp value
-    timestamp = emails[from_campaign]
-    
     if dryrun:
-        print(f"DRYRUN: Would rename campaign '{from_campaign}' to '{to_campaign}' for student {student_id} (timestamp: {timestamp})")
+        for from_key, to_key, timestamp in applied:
+            print(f"DRYRUN: Would rename campaign '{from_key}' to '{to_key}' for student {student_id} (timestamp: {timestamp})")
         return True
-    else:
-        # Perform the actual rename
-        try:
-            # Create new emails dict with renamed key
-            new_emails = emails.copy()
-            new_emails[to_campaign] = timestamp
-            del new_emails[from_campaign]
-            
-            # Update the student record
-            table = get_dynamodb_client().Table(STUDENT_TABLE)
-            table.update_item(
-                Key={'id': student_id},
-                UpdateExpression='SET emails = :emails',
-                ExpressionAttributeValues={':emails': new_emails}
-            )
-            
-            print(f"SUCCESS: Renamed campaign '{from_campaign}' to '{to_campaign}' for student {student_id} (timestamp: {timestamp})")
-            return True
-            
-        except Exception as e:
-            print(f"ERROR: Failed to update student {student_id}: {e}")
-            return False
+    
+    try:
+        table = get_dynamodb_client().Table(STUDENT_TABLE)
+        table.update_item(
+            Key={'id': student_id},
+            UpdateExpression='SET emails = :emails',
+            ExpressionAttributeValues={':emails': new_emails}
+        )
+        for from_key, to_key, timestamp in applied:
+            print(f"SUCCESS: Renamed campaign '{from_key}' to '{to_key}' for student {student_id} (timestamp: {timestamp})")
+        return True
+    except Exception as e:
+        print(f"ERROR: Failed to update student {student_id}: {e}")
+        return False
 
 def main():
     """
@@ -134,6 +135,7 @@ def main():
         epilog="""
 Examples:
   python rename_campaign.py --from-campaign "vt2024-retreat-reminder" --to-campaign "vt2024-retreat-reminder-v2"
+  python rename_campaign.py --from-campaign "sc2026_event_eligible-no-reg-link" --to-campaign "sc2026_list_eligible-no-reg-link" --append-language-suffix --dryrun
   python rename_campaign.py --from-campaign "old-campaign" --to-campaign "new-campaign" --dryrun
   python rename_campaign.py --from-campaign "test-campaign" --to-campaign "prod-campaign" --id "student-123"
         """
@@ -162,12 +164,27 @@ Examples:
         help='Process only the student with the specified ID'
     )
     
+    parser.add_argument(
+        '--append-language-suffix',
+        action='store_true',
+        help='Append each supported language suffix (_EN, _SP, _FR, _PT, _DE, _CZ, _IT) to from- and to-campaign and rename all matching keys'
+    )
+    
     args = parser.parse_args()
     
     # Validate arguments
     if args.from_campaign == args.to_campaign:
         print("ERROR: --from-campaign and --to-campaign must be different")
         sys.exit(1)
+    
+    # Build list of (from_key, to_key) pairs
+    if args.append_language_suffix:
+        rename_pairs = [
+            (args.from_campaign + suffix, args.to_campaign + suffix)
+            for suffix in LANGUAGE_SUFFIXES
+        ]
+    else:
+        rename_pairs = [(args.from_campaign, args.to_campaign)]
     
     # Check if STUDENT_TABLE is configured
     if not STUDENT_TABLE:
@@ -177,6 +194,7 @@ Examples:
     print(f"Student table: {STUDENT_TABLE}")
     print(f"From campaign: {args.from_campaign}")
     print(f"To campaign: {args.to_campaign}")
+    print(f"Append language suffix: {args.append_language_suffix}")
     print(f"Dry run: {args.dryrun}")
     if args.id:
         print(f"Student ID: {args.id}")
@@ -203,7 +221,7 @@ Examples:
     # Process each student
     changes_made = 0
     for student in students:
-        if process_student_record(student, args.from_campaign, args.to_campaign, args.dryrun):
+        if process_student_record(student, rename_pairs, args.dryrun):
             changes_made += 1
     
     # Summary
