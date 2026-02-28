@@ -40,6 +40,7 @@ interface SubEvent {
     offeringMode?: string;
     rcpLevel?: number;
     regLinkAvailable?: boolean;
+    tangra?: string;
     timeString?: string;
     zoomLink?: string;
     [key: string]: any;
@@ -1048,6 +1049,7 @@ const Home = () => {
                 delete subEvent.embeddedVideoList;
                 delete subEvent.timeString;
                 delete subEvent.zoomLink;
+                delete subEvent.tangra;
 
                 // Blank out date and rcpLevel (set to empty/undefined, not delete)
                 subEvent.date = '';
@@ -1071,16 +1073,39 @@ const Home = () => {
         toast.info(`Creating duplicate of "${event.name}". Please review and modify the aid and other fields before saving.`);
     };
 
-    const handleCopyTangraLink = async (event: Event) => {
-        const tangra = event.config?.tangra;
+    const getTangraSubEventLinks = (event: Event): Array<{ subEventKey: string; tangraAid: string }> => {
+        const subEvents = event.subEvents || {};
+        const links = Object.keys(subEvents)
+            .sort()
+            .map(key => ({
+                subEventKey: key,
+                tangraAid: typeof subEvents[key]?.tangra === 'string' ? subEvents[key].tangra.trim() : ''
+            }))
+            .filter(link => link.tangraAid !== '');
+
+        if (links.length > 0) {
+            return links;
+        }
+
+        // Legacy fallback while older records still have this at event.config.
+        const legacyTangra = typeof event.config?.tangra === 'string' ? event.config.tangra.trim() : '';
+        if (legacyTangra) {
+            return [{ subEventKey: 'legacy', tangraAid: legacyTangra }];
+        }
+
+        return [];
+    };
+
+    const handleCopyTangraLink = async (tangraAid: string, subEventKey?: string) => {
+        const tangra = tangraAid?.trim();
         if (!tangra) {
-            toast.error('Event has no Tangra ID (config.tangra)');
+            toast.error('Event has no Tangra aid configured');
             return;
         }
         const url = `https://reg.slsupport.link/?pid=0c918b0b-da97-4d7e-bcd7-a4088d30df15&aid=${tangra}`;
         try {
             await navigator.clipboard.writeText(url);
-            toast.success('Heart Gift link copied to clipboard');
+            toast.success(subEventKey ? `Heart Gift link copied for ${subEventKey}` : 'Heart Gift link copied to clipboard');
         } catch (err) {
             console.error('Failed to copy Tangra link:', err);
             toast.error('Failed to copy link to clipboard');
@@ -1454,6 +1479,23 @@ const Home = () => {
 
             // Remove dashboardViews if it's empty
             const configToSave = { ...eventFormData.config };
+            const subEventsToSave = { ...(eventFormData.subEvents || {}) };
+            const legacyTangra = typeof configToSave.tangra === 'string' ? configToSave.tangra.trim() : '';
+            if (legacyTangra) {
+                const hasTangraInSubEvents = Object.values(subEventsToSave).some(
+                    (subEvent: any) => typeof subEvent?.tangra === 'string' && subEvent.tangra.trim() !== ''
+                );
+                if (!hasTangraInSubEvents) {
+                    const firstSubEventKey = Object.keys(subEventsToSave).sort()[0];
+                    if (firstSubEventKey) {
+                        subEventsToSave[firstSubEventKey] = {
+                            ...subEventsToSave[firstSubEventKey],
+                            tangra: legacyTangra
+                        };
+                    }
+                }
+            }
+            delete configToSave.tangra;
             if (typeof configToSave.promptsAliasAid === 'string') {
                 configToSave.promptsAliasAid = configToSave.promptsAliasAid.trim();
                 if (!configToSave.promptsAliasAid) {
@@ -1473,7 +1515,8 @@ const Home = () => {
 
             const eventToSave = {
                 ...eventFormData,
-                config: configToSave
+                config: configToSave,
+                subEvents: subEventsToSave
             };
 
             await putTableItem('events', eventFormData.aid, eventToSave, pid as string, hash as string);
@@ -1650,6 +1693,7 @@ const Home = () => {
             eventComplete: false,
             eventOnDeck: false,
             regLinkAvailable: false,
+            tangra: '',
             embeddedShowcaseList: ['']
         });
         setPerLanguageShowcases(false);
@@ -1680,6 +1724,18 @@ const Home = () => {
 
         // Clean up empty showcase entries
         const cleanedData = { ...subEventFormData };
+        if (typeof cleanedData.tangra === 'string') {
+            cleanedData.tangra = cleanedData.tangra.trim();
+            if (!cleanedData.tangra) {
+                delete cleanedData.tangra;
+            } else {
+                const validAids = new Set(allEvents.map(event => event.aid).filter(Boolean));
+                if (!validAids.has(cleanedData.tangra)) {
+                    toast.warning('Tangra aid must be selected from valid event aids');
+                    return;
+                }
+            }
+        }
         if (cleanedData.embeddedShowcaseList) {
             cleanedData.embeddedShowcaseList = cleanedData.embeddedShowcaseList.filter(id => id && id.trim() !== '');
             // Remove embeddedShowcaseList if it's empty
@@ -2320,18 +2376,19 @@ const Home = () => {
                                             </div>
                                         </div>
                                         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                            {event.config?.tangra && (
+                                            {getTangraSubEventLinks(event).map(link => (
                                                 <Button
+                                                    key={`${event.aid}-heart-${link.subEventKey}`}
                                                     variant="outline-info"
                                                     size="sm"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        handleCopyTangraLink(event);
+                                                        handleCopyTangraLink(link.tangraAid, link.subEventKey);
                                                     }}
                                                 >
-                                                    🔗 Heart Gift Link
+                                                    🔗 Heart Gift: {link.subEventKey}
                                                 </Button>
-                                            )}
+                                            ))}
                                             <Button
                                                 variant="outline-warning"
                                                 size="sm"
@@ -3456,6 +3513,19 @@ const Home = () => {
                                         value={subEventFormData.zoomLink || ''}
                                         onChange={(e) => setSubEventFormData({ ...subEventFormData, zoomLink: e.target.value })}
                                         placeholder="https://zoom.us/..."
+                                    />
+                                </Form.Group>
+                            </Col>
+                        </Row>
+                        <Row>
+                            <Col md={6}>
+                                <Form.Group className="mb-3">
+                                    <EventCodeAutocomplete
+                                        id="subevent-tangra"
+                                        label="Tangra Aid"
+                                        value={subEventFormData.tangra || ''}
+                                        onChange={(value) => setSubEventFormData({ ...subEventFormData, tangra: value })}
+                                        placeholder="Select event aid..."
                                     />
                                 </Form.Group>
                             </Col>
