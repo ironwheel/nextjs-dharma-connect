@@ -238,6 +238,68 @@ const EventCodeAutocomplete = ({ value, onChange, placeholder, label, id }: {
     );
 };
 
+// Autocomplete component for prompt aid values
+const PromptAidAutocomplete = ({ value, onChange, placeholder, label, id }: {
+    value: string;
+    onChange: (value: string) => void;
+    placeholder?: string;
+    label?: string;
+    id: string;
+}) => {
+    const [inputValue, setInputValue] = useState(value || '');
+    const [isValid, setIsValid] = useState(true);
+    const promptAids = Array.from(new Set(allPrompts.map(p => p.aid).filter(Boolean))).sort();
+    const uniqueId = `prompt-aid-${id}`;
+
+    React.useEffect(() => {
+        setInputValue(value || '');
+    }, [value]);
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newValue = e.target.value;
+        setInputValue(newValue);
+        onChange(newValue);
+
+        if (newValue.trim()) {
+            setIsValid(promptAids.includes(newValue.trim()));
+        } else {
+            setIsValid(true);
+        }
+    };
+
+    const handleBlur = () => {
+        if (inputValue.trim() && !promptAids.includes(inputValue.trim())) {
+            setIsValid(false);
+        }
+    };
+
+    return (
+        <>
+            {label && <Form.Label>{label}</Form.Label>}
+            <Form.Control
+                type="text"
+                list={uniqueId}
+                value={inputValue}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                placeholder={placeholder}
+                isInvalid={!isValid && inputValue.trim() !== ''}
+                style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+            />
+            <datalist id={uniqueId}>
+                {promptAids.map(aid => (
+                    <option key={aid} value={aid} />
+                ))}
+            </datalist>
+            {!isValid && inputValue.trim() !== '' && (
+                <Form.Control.Feedback type="invalid" style={{ display: 'block' }}>
+                    Please select a valid prompts aid from the list
+                </Form.Control.Feedback>
+            )}
+        </>
+    );
+};
+
 // Autocomplete component for pool names
 const PoolNameAutocomplete = ({ value, onChange, placeholder, label, id, excludePoolName }: {
     value: string;
@@ -869,6 +931,7 @@ const Home = () => {
                 config: {
                     pool: '',
                     needAcceptance: false,
+                    promptsAliasAid: '',
                     offeringKMFee: true,
                     offeringCADPar: false,
                     offeringSupportEmail: "offerings@sakyonglineage.org",
@@ -1379,8 +1442,24 @@ const Home = () => {
                 eventFormData.config['lambda-url'] = "https://729jjip6ik.execute-api.us-east-1.amazonaws.com/prod";
             }
 
+            // Validation: promptsAliasAid must be one of existing prompt aid values
+            const promptsAliasAid = eventFormData.config?.promptsAliasAid?.trim();
+            if (promptsAliasAid) {
+                const validPromptAids = new Set(allPrompts.map(prompt => prompt.aid).filter(Boolean));
+                if (!validPromptAids.has(promptsAliasAid)) {
+                    toast.error(`Prompts Alias Aid "${promptsAliasAid}" is not a valid prompts aid`);
+                    return;
+                }
+            }
+
             // Remove dashboardViews if it's empty
             const configToSave = { ...eventFormData.config };
+            if (typeof configToSave.promptsAliasAid === 'string') {
+                configToSave.promptsAliasAid = configToSave.promptsAliasAid.trim();
+                if (!configToSave.promptsAliasAid) {
+                    delete configToSave.promptsAliasAid;
+                }
+            }
             if (configToSave.dashboardViews) {
                 const dashboardViews = configToSave.dashboardViews;
                 const hasAnyValues = Object.values(dashboardViews).some(value => {
@@ -2539,6 +2618,21 @@ const Home = () => {
                                                         config: { ...eventFormData.config, needAcceptance: e.target.checked }
                                                     })}
                                                 />
+                                                <div style={{ marginTop: '0.75rem' }}>
+                                                    <PromptAidAutocomplete
+                                                        id="event-prompts-alias-aid"
+                                                        label="Prompts Alias Aid"
+                                                        value={eventFormData.config?.promptsAliasAid || ''}
+                                                        onChange={(value) => setEventFormData({
+                                                            ...eventFormData,
+                                                            config: { ...eventFormData.config, promptsAliasAid: value }
+                                                        })}
+                                                        placeholder="Select prompts aid to alias..."
+                                                    />
+                                                    <Form.Text className="text-muted" style={{ fontSize: '0.75rem', display: 'block', marginTop: '0.25rem' }}>
+                                                        Restricts to existing prompts aid values and enables autocomplete.
+                                                    </Form.Text>
+                                                </div>
                                             </Form.Group>
                                         </Col>
                                     </Row>
