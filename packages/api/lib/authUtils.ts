@@ -1283,7 +1283,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
                         process.env.AUTH_ROLE_ARN!,
                         oidcToken
                     );
-                    activeSession = null;
+                    activeSession = undefined;
                 } else {
                     console.log(`SILENT SESSION [pid=${pid}]: Reusing valid existing session`);
                 }
