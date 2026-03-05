@@ -94,9 +94,12 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
-            // In dev, we must not set the domain to the spoofed X-Host header, or the browser will reject it.
-            // Leaving it undefined defaults to the current host (localhost), which is what we want.
-            domain: process.env.NODE_ENV === 'production' ? req.headers['x-host'] as string : undefined,
+            // In development, leave domain undefined so it defaults to the current host (localhost).
+            // In production, scope the cookie to the shared parent domain so all subdomain apps
+            // (api, event-manager, student-dashboard, etc.) can see the same auth cookie.
+            domain: process.env.NODE_ENV === 'production'
+              ? (process.env.MONOREPO_PARENT_DOMAIN || process.env.API_DOMAIN || undefined)
+              : undefined,
             path: '/',
             // Session cookie - no maxAge means it expires when browser closes
           });
