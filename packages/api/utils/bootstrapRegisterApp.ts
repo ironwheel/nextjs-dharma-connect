@@ -1,15 +1,14 @@
-
-const { DynamoDBClient, UpdateItemCommand } = require("@aws-sdk/client-dynamodb");
-const path = require('path');
-const dotenv = require('dotenv');
+import { DynamoDBClient as AwsDynamoDBClient, UpdateItemCommand } from "@aws-sdk/client-dynamodb";
+import path from "path";
+import dotenv from "dotenv";
 
 // Load environment variables
-dotenv.config({ path: path.resolve(__dirname, '../.env.local') });
+dotenv.config({ path: path.resolve(__dirname, "../.env.local") });
 
 const REGION = process.env.AWS_REGION || "us-east-1";
 const TABLE_NAME = process.env.DYNAMODB_TABLE_ACTIONS_PROFILES || "actions.profiles";
 
-const dynamoClient = new DynamoDBClient({ region: REGION });
+const dynamoClient = new AwsDynamoDBClient({ region: REGION });
 
 const actions = [
     "GET/table/students",

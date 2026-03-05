@@ -1611,7 +1611,13 @@ export async function getViews(pid: string, host: string, oidcToken?: string): P
     const tableCfg = tableGetConfig('views-profiles');
     console.log('getViews(): Got views-profiles table config:', tableCfg);
 
-    const viewsListData = await getOne(tableCfg.tableName, tableCfg.pk, viewsProfile as string, process.env.AUTH_ROLE_ARN, oidcToken);
+    const viewsListData = await getOne(
+        tableCfg.tableName,
+        tableCfg.pk,
+        viewsProfile as string,
+        process.env.AUTH_ROLE_ARN!,
+        oidcToken
+    );
     console.log('getViews(): Retrieved views list data for profile:', viewsProfile, 'data:', viewsListData);
 
     if (!viewsListData) {
@@ -1636,7 +1642,11 @@ export async function getViewsProfiles(oidcToken?: string): Promise<string[]> {
 
     try {
         // Try listAll first to see what's in the table
-        const allProfiles = await listAll(tableCfg.tableName, process.env.AUTH_ROLE_ARN, oidcToken);
+        const allProfiles = await listAll(
+            tableCfg.tableName,
+            process.env.AUTH_ROLE_ARN!,
+            oidcToken
+        );
         console.log('getViewsProfiles: allProfiles from listAll:', allProfiles);
 
         // Extract just the profile names from the results
@@ -1649,7 +1659,13 @@ export async function getViewsProfiles(oidcToken?: string): Promise<string[]> {
 
         // Fallback to listAllFiltered if listAll fails
         try {
-            const filteredProfiles = await listAllFiltered(tableCfg.tableName, 'profile', 'profile', process.env.AUTH_ROLE_ARN, oidcToken);
+            const filteredProfiles = await listAllFiltered(
+                tableCfg.tableName,
+                'profile',
+                'profile',
+                process.env.AUTH_ROLE_ARN!,
+                oidcToken
+            );
             console.log('getViewsProfiles: filteredProfiles from listAllFiltered:', filteredProfiles);
 
             const filteredProfileNames = filteredProfiles.map((item: any) => item.profile).filter(Boolean);
