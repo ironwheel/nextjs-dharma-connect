@@ -56,8 +56,13 @@ async function apiFetch(
 ): Promise<any> {
   const url = `${API_BASE}${path}`;
   const fingerprint = await getFingerprint();
-  const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+  let hostname = typeof window !== 'undefined' ? window.location.hostname : '';
   const csrfToken = await ensureCsrfToken();
+
+  // In development, override hostname to strict scope tokens even on localhost
+  if (process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_APP_HOST) {
+    hostname = process.env.NEXT_PUBLIC_APP_HOST;
+  }
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',

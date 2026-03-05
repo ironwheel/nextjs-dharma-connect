@@ -20,7 +20,7 @@ if (!KM_RCP_API_KEY) {
  */
 async function findParticipant(id: string, oidcToken?: string): Promise<any> {
     const tableCfg = tableGetConfig('students');
-    return await getOne(tableCfg.tableName, tableCfg.pk, id, process.env.AUTH_ROLE_ARN, oidcToken);
+    return await getOne(tableCfg.tableName, tableCfg.pk, id, process.env.AUTH_ROLE_ARN!, oidcToken);
 }
 
 export async function rcpFind(pid: string, oidcToken?: string) {

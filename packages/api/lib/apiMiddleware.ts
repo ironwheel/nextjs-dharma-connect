@@ -81,6 +81,10 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
         // console.log("API MIDDLEWARE: COOKIES:", req.cookies);
         const checkResult = await checkAccess(req.headers['x-user-id'] as string, req.headers['x-verification-hash'] as string, req.headers['x-host'] as string, req.headers['x-device-fingerprint'] as string, operation, req.cookies['token'], oidcToken);
         console.log("checkResult:", checkResult.status);
+        if (checkResult.status === 'authenticated' && checkResult.role) {
+          (req as any).userRole = checkResult.role;
+        }
+
         if ((checkResult.status === 'authenticated' || checkResult.status === 'needs-verification' || checkResult.status === 'expired-auth-flow') && checkResult.accessToken) {
           // We have a new access token to set in cookie
           // Browser cookie rules require secure if sameSite is none
@@ -90,7 +94,9 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
-            domain: process.env.NODE_ENV === 'production' ? process.env.MONOREPO_PARENT_DOMAIN : req.headers['x-host'] as string,
+            // In dev, we must not set the domain to the spoofed X-Host header, or the browser will reject it.
+            // Leaving it undefined defaults to the current host (localhost), which is what we want.
+            domain: process.env.NODE_ENV === 'production' ? req.headers['x-host'] as string : undefined,
             path: '/',
             // Session cookie - no maxAge means it expires when browser closes
           });

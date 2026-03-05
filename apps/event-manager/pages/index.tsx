@@ -10,11 +10,13 @@ import {
     updateTableItem,
     getTableItemOrNull,
     deleteTableItem,
+    deleteTableItemWithSortKey,
     putTableItem,
     VersionBadge,
     getVimeoShowcaseVideos,
     enableVimeoVideoPlayback,
-    authGetConfigValue
+    authGetConfigValue,
+    translatePromptText
 } from 'sharedFrontend';
 
 // Types
@@ -146,6 +148,9 @@ interface View {
 }
 
 type ResourceType = 'prompts' | 'events' | 'pools' | 'scripts' | 'offerings' | 'views';
+
+// Languages for new prompt entries (add-prompt in edit modal)
+const PROMPT_LANGUAGES = ['Czech', 'English', 'French', 'German', 'Italian', 'Portuguese', 'Spanish'];
 
 // Available script step definitions (from join.js stepDefs)
 const AVAILABLE_SCRIPT_STEPS = [
@@ -602,11 +607,24 @@ const Home = () => {
     // Prompt editing state
     const [promptsEditAid, setPromptsEditAid] = useState<string>('');
     const [promptsEditData, setPromptsEditData] = useState<Prompt[]>([]);
+    // Snapshot of original prompts for diffing so we only write modified prompts on save
+    const [promptsOriginalData, setPromptsOriginalData] = useState<Prompt[]>([]);
     const [promptsFindText, setPromptsFindText] = useState<string>('');
     const [promptsReplaceText, setPromptsReplaceText] = useState<string>('');
     // Create prompts state
     const [createPromptsAid, setCreatePromptsAid] = useState<string>('');
     const [createPromptsTemplate, setCreatePromptsTemplate] = useState<string>('basicSupplication');
+    // Add prompt (within edit modal) state
+    const [showAddPromptModal, setShowAddPromptModal] = useState<boolean>(false);
+    const [addPromptStep, setAddPromptStep] = useState<1 | 2>(1);
+    const [newPromptName, setNewPromptName] = useState<string>('');
+    const [newPromptEnglishText, setNewPromptEnglishText] = useState<string>('');
+    const [addPromptSaving, setAddPromptSaving] = useState<boolean>(false);
+    // Delete prompt (within edit modal) state
+    const [showDeletePromptModal, setShowDeletePromptModal] = useState<boolean>(false);
+    const [deletePromptName, setDeletePromptName] = useState<string>('');
+    const [deletePromptMatches, setDeletePromptMatches] = useState<Prompt[] | null>(null);
+    const [deletePromptSaving, setDeletePromptSaving] = useState<boolean>(false);
     const [viewsProfileKeys, setViewsProfileKeys] = useState<string[]>([]);
 
     const initialLoadStarted = useRef(false);
@@ -1167,7 +1185,9 @@ const Home = () => {
         setIsDuplicatingPrompts(false);
         setSelectedPromptGroup(promptGroup);
         setPromptsEditAid(promptGroup.aid);
-        setPromptsEditData(JSON.parse(JSON.stringify(promptGroup.prompts))); // Deep copy
+        const deepCopy: Prompt[] = JSON.parse(JSON.stringify(promptGroup.prompts)); // Deep copy
+        setPromptsOriginalData(deepCopy);
+        setPromptsEditData(deepCopy);
         setPromptsFindText('');
         setPromptsReplaceText('');
         setShowPromptsModal(true);
@@ -1218,6 +1238,9 @@ const Home = () => {
         }
 
         setPromptsEditAid(newAid);
+        // For duplication, there are no existing prompts for the new aid yet,
+        // so treat everything as new by clearing the original snapshot.
+        setPromptsOriginalData([]);
         setPromptsEditData(duplicatedPrompts);
         setPromptsFindText('');
         setPromptsReplaceText('');
@@ -1272,20 +1295,63 @@ const Home = () => {
             // Show progress modal
             setShowSavingPromptsModal(true);
 
-            // Save all prompts
-            for (const prompt of promptsEditData) {
-                // Extract promptName from original prompt field
-                const originalParts = prompt.prompt.split('-');
-                const promptName = originalParts.slice(1).join('-'); // Everything after first dash
+            if (isDuplicatingPrompts) {
+                // When duplicating, all prompts are new for this aid, so write them all.
+                for (const prompt of promptsEditData) {
+                    const originalParts = prompt.prompt.split('-');
+                    const promptName = originalParts.slice(1).join('-');
+                    const updatedPrompt = {
+                        ...prompt,
+                        prompt: `${promptsEditAid}-${promptName}`,
+                        aid: promptsEditAid
+                    };
+                    await putTableItem('prompts', updatedPrompt.prompt, updatedPrompt, pid as string, hash as string);
+                }
+            } else {
+                // Editing existing prompts: only write ones whose text has changed or that are newly added.
+                const originalMap = new Map<string, Prompt>();
+                for (const p of promptsOriginalData) {
+                    const key = `${p.prompt}::${p.language}`;
+                    originalMap.set(key, p);
+                }
 
-                // Create new prompt object with updated prompt field
-                const updatedPrompt = {
-                    ...prompt,
-                    prompt: `${promptsEditAid}-${promptName}`,
-                    aid: promptsEditAid
-                };
+                let writeCount = 0;
+                for (const prompt of promptsEditData) {
+                    const originalKey = `${prompt.prompt}::${prompt.language}`;
+                    const original = originalMap.get(originalKey);
 
-                await putTableItem('prompts', updatedPrompt.prompt, updatedPrompt, pid as string, hash as string);
+                    // Extract promptName from original prompt field
+                    const originalParts = prompt.prompt.split('-');
+                    const promptName = originalParts.slice(1).join('-'); // Everything after first dash
+
+                    // Compute final key for this aid
+                    const finalPromptKey = `${promptsEditAid}-${promptName}`;
+                    const needsWrite =
+                        // New prompt that didn't exist in original snapshot (e.g., created via +)
+                        !original ||
+                        // Or text changed
+                        (original.text || '') !== (prompt.text || '') ||
+                        // Or aid/prompt key changed (shouldn't normally happen in edit mode, but safe)
+                        original.prompt !== finalPromptKey ||
+                        original.aid !== promptsEditAid;
+
+                    if (!needsWrite) {
+                        continue;
+                    }
+
+                    const updatedPrompt = {
+                        ...prompt,
+                        prompt: finalPromptKey,
+                        aid: promptsEditAid
+                    };
+
+                    await putTableItem('prompts', updatedPrompt.prompt, updatedPrompt, pid as string, hash as string);
+                    writeCount++;
+                }
+
+                if (writeCount === 0) {
+                    toast.info('No prompt changes detected; nothing to save.');
+                }
             }
 
             toast.success(`Prompts ${isDuplicatingPrompts ? 'duplicated' : 'saved'} successfully`);
@@ -1397,6 +1463,118 @@ const Home = () => {
         } catch (error) {
             console.error('Error creating prompts:', error);
             toast.error('Failed to create prompts');
+        }
+    };
+
+    const handleAddPromptNext = () => {
+        const promptNameForKey = newPromptName.trim().replace(/\s+/g, '-');
+        if (!promptNameForKey) {
+            toast.error('Please enter a prompt name');
+            return;
+        }
+        if (!promptsEditAid) {
+            toast.error('Event code (aid) is required');
+            return;
+        }
+        const fullKey = `${promptsEditAid}-${promptNameForKey}`;
+        if (allPrompts.some(p => p.prompt === fullKey)) {
+            toast.error(`Prompt "${fullKey}" already exists. Please use a different name.`);
+            return;
+        }
+        setAddPromptStep(2);
+    };
+
+    const handleAddPromptInEditModal = async () => {
+        const promptNameForKey = newPromptName.trim().replace(/\s+/g, '-');
+        if (!promptNameForKey) {
+            toast.error('Please enter a prompt name');
+            return;
+        }
+        if (!promptsEditAid) {
+            toast.error('Event code (aid) is required');
+            return;
+        }
+        const fullKey = `${promptsEditAid}-${promptNameForKey}`;
+        if (allPrompts.some(p => p.prompt === fullKey)) {
+            toast.error(`Prompt "${fullKey}" already exists. Please use a different name.`);
+            return;
+        }
+        setAddPromptSaving(true);
+        try {
+            let translations: Record<string, string> = {};
+            const englishInput = newPromptEnglishText.trim();
+            if (englishInput) {
+                const result = await translatePromptText(englishInput, pid as string, hash as string);
+                if (result && 'redirected' in result) {
+                    toast.error('Authentication required');
+                    return;
+                }
+                translations = result as Record<string, string>;
+            }
+            const newPrompts: Prompt[] = PROMPT_LANGUAGES.map(language => ({
+                prompt: fullKey,
+                language,
+                aid: promptsEditAid,
+                text: translations[language] ?? ''
+            }));
+            for (const prompt of newPrompts) {
+                await putTableItem('prompts', prompt.prompt, prompt, pid as string, hash as string);
+            }
+            allPrompts = [...newPrompts, ...allPrompts];
+            // Add to both original snapshot and editable data so unchanged prompts are not re-written on save
+            setPromptsOriginalData(prev => [...newPrompts, ...prev]);
+            setPromptsEditData(prev => [...newPrompts, ...prev]);
+            setNewPromptName('');
+            setNewPromptEnglishText('');
+            setAddPromptStep(1);
+            setShowAddPromptModal(false);
+            toast.success(englishInput ? `Added 7 prompts for "${fullKey}" with translated text` : `Added 7 prompts for "${fullKey}"`);
+        } catch (error) {
+            console.error('Error adding prompts:', error);
+            toast.error('Failed to add prompts');
+        } finally {
+            setAddPromptSaving(false);
+        }
+    };
+
+    const handleDeletePromptSearch = () => {
+        const nameForKey = deletePromptName.trim().replace(/\s+/g, '-');
+        if (!nameForKey) {
+            toast.error('Please enter a prompt name');
+            return;
+        }
+        if (!promptsEditAid) {
+            toast.error('Event code (aid) is required');
+            return;
+        }
+        const fullKey = `${promptsEditAid}-${nameForKey}`;
+        const matches = promptsEditData.filter(p => p.prompt === fullKey);
+        setDeletePromptMatches(matches);
+        if (matches.length === 0) {
+            toast.info(`No prompts found for "${fullKey}" in this event.`);
+        }
+    };
+
+    const handleDeletePromptConfirm = async () => {
+        if (!deletePromptMatches || deletePromptMatches.length === 0) return;
+        setDeletePromptSaving(true);
+        try {
+            for (const p of deletePromptMatches) {
+                await deleteTableItemWithSortKey('prompts', 'prompt', p.prompt, 'language', p.language, pid as string, hash as string);
+            }
+            const keysToRemove = new Set(deletePromptMatches.map(p => `${p.prompt}::${p.language}`));
+            allPrompts = allPrompts.filter(p => !keysToRemove.has(`${p.prompt}::${p.language}`));
+            setPromptsEditData(prev => prev.filter(p => !keysToRemove.has(`${p.prompt}::${p.language}`)));
+            setPromptsOriginalData(prev => prev.filter(p => !keysToRemove.has(`${p.prompt}::${p.language}`)));
+            setDeletePromptMatches(null);
+            setDeletePromptName('');
+            setShowDeletePromptModal(false);
+            toast.success(`Deleted ${deletePromptMatches.length} prompt(s).`);
+        } catch (error) {
+            console.error('Error deleting prompts:', error);
+            toast.error('Failed to delete prompts');
+        } finally {
+            setDeletePromptSaving(false);
         }
     };
 
@@ -4644,7 +4822,27 @@ const Home = () => {
                         </div>
 
                         <div className="card">
-                            <h5 style={{ color: '#ffc107', marginBottom: '1rem' }}>Prompts</h5>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                <h5 style={{ color: '#ffc107', margin: 0 }}>Prompts</h5>
+                                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                    <Button
+                                        variant="outline-danger"
+                                        size="sm"
+                                        onClick={() => { setShowDeletePromptModal(true); setDeletePromptMatches(null); setDeletePromptName(''); }}
+                                        title="Delete a prompt (all languages for this event)"
+                                    >
+                                        -
+                                    </Button>
+                                    <Button
+                                        variant="outline-success"
+                                        size="sm"
+                                        onClick={() => setShowAddPromptModal(true)}
+                                        title="Add a new prompt (7 languages)"
+                                    >
+                                        +
+                                    </Button>
+                                </div>
+                            </div>
                             <div style={{ overflowX: 'auto' }}>
                                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                     <thead>
@@ -4705,6 +4903,136 @@ const Home = () => {
                     <Button variant="warning" onClick={handleSavePrompts}>
                         {isDuplicatingPrompts ? 'Save Duplicated Prompts' : 'Save Changes'}
                     </Button>
+                </Modal.Footer>
+            </Modal>
+
+            {/* Add Prompt (within edit) Modal */}
+            <Modal show={showAddPromptModal} onHide={() => { if (!addPromptSaving) { setShowAddPromptModal(false); setNewPromptName(''); setNewPromptEnglishText(''); setAddPromptStep(1); } }}>
+                <Modal.Header closeButton={!addPromptSaving}>
+                    <Modal.Title>Add prompt {addPromptStep === 2 ? '— English text' : ''}</Modal.Title>
+                </Modal.Header>
+                <Modal.Body>
+                    <Form>
+                        {addPromptStep === 1 && (
+                            <Form.Group className="mb-3">
+                                <Form.Label>Prompt name (event-code specific)</Form.Label>
+                                <Form.Control
+                                    type="text"
+                                    value={newPromptName}
+                                    onChange={(e) => setNewPromptName(e.target.value)}
+                                    placeholder="e.g. nextOrRemaining"
+                                    disabled={addPromptSaving}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddPromptNext(); } }}
+                                    style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                                />
+                                <Form.Text className="text-muted">
+                                    Creates &quot;{promptsEditAid || 'aid'}-yourName&quot; in all 7 languages. Spaces become hyphens.
+                                </Form.Text>
+                            </Form.Group>
+                        )}
+                        {addPromptStep === 2 && (
+                            <Form.Group className="mb-3">
+                                <Form.Label>English text (optional)</Form.Label>
+                                <Form.Control
+                                    as="textarea"
+                                    rows={4}
+                                    value={newPromptEnglishText}
+                                    onChange={(e) => setNewPromptEnglishText(e.target.value)}
+                                    placeholder="Enter the prompt text in English. It will be translated to Czech, French, German, Italian, Portuguese, and Spanish via AWS Translate."
+                                    disabled={addPromptSaving}
+                                    style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                                />
+                                <Form.Text className="text-muted">
+                                    Leave blank to create prompts with empty text. If provided, the other 6 languages are auto-translated.
+                                </Form.Text>
+                            </Form.Group>
+                        )}
+                    </Form>
+                </Modal.Body>
+                <Modal.Footer>
+                    {addPromptStep === 1 ? (
+                        <>
+                            <Button variant="secondary" onClick={() => { setShowAddPromptModal(false); setNewPromptName(''); setNewPromptEnglishText(''); setAddPromptStep(1); }} disabled={addPromptSaving}>
+                                Cancel
+                            </Button>
+                            <Button variant="primary" onClick={handleAddPromptNext} disabled={addPromptSaving || !newPromptName.trim()}>
+                                Next
+                            </Button>
+                        </>
+                    ) : (
+                        <>
+                            <Button variant="secondary" onClick={() => setAddPromptStep(1)} disabled={addPromptSaving}>
+                                Back
+                            </Button>
+                            <Button variant="success" onClick={handleAddPromptInEditModal} disabled={addPromptSaving}>
+                                {addPromptSaving ? 'Adding...' : 'Add 7 prompts'}
+                            </Button>
+                        </>
+                    )}
+                </Modal.Footer>
+            </Modal>
+
+            {/* Delete Prompt (within edit) Modal */}
+            <Modal show={showDeletePromptModal} onHide={() => { if (!deletePromptSaving) { setShowDeletePromptModal(false); setDeletePromptName(''); setDeletePromptMatches(null); } }}>
+                <Modal.Header closeButton={!deletePromptSaving}>
+                    <Modal.Title>Delete prompt</Modal.Title>
+                </Modal.Header>
+                <Modal.Body>
+                    <Form>
+                        <Form.Group className="mb-3">
+                            <Form.Label>Prompt name to delete</Form.Label>
+                            <Form.Control
+                                type="text"
+                                value={deletePromptName}
+                                onChange={(e) => setDeletePromptName(e.target.value)}
+                                placeholder="e.g. nextOrRemaining"
+                                disabled={deletePromptSaving}
+                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleDeletePromptSearch(); } }}
+                                style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                            />
+                            <Form.Text className="text-muted">
+                                Finds prompts for this event with key &quot;{promptsEditAid || 'aid'}-yourName&quot; (all languages). Spaces become hyphens.
+                            </Form.Text>
+                        </Form.Group>
+                        {deletePromptMatches !== null && deletePromptMatches.length > 0 && (
+                            <div
+                                className="mb-3"
+                                style={{
+                                    padding: '0.75rem',
+                                    backgroundColor: '#3b1f24',
+                                    border: '1px solid rgba(220, 53, 69, 0.8)',
+                                    borderRadius: '4px',
+                                    color: 'white'
+                                }}
+                            >
+                                <strong>Found {deletePromptMatches.length} prompt(s):</strong>
+                                <ul style={{ marginBottom: 0, marginTop: '0.5rem', paddingLeft: '1.25rem' }}>
+                                    {deletePromptMatches.map(p => (
+                                        <li key={`${p.prompt}-${p.language}`} style={{ color: 'white' }}>
+                                            {p.prompt} ({p.language})
+                                        </li>
+                                    ))}
+                                </ul>
+                                <p style={{ marginTop: '0.75rem', marginBottom: 0, color: '#f8d7da' }}>
+                                    Confirm to delete these from the table and from this list.
+                                </p>
+                            </div>
+                        )}
+                    </Form>
+                </Modal.Body>
+                <Modal.Footer>
+                    <Button variant="secondary" onClick={() => { setShowDeletePromptModal(false); setDeletePromptName(''); setDeletePromptMatches(null); }} disabled={deletePromptSaving}>
+                        Cancel
+                    </Button>
+                    {deletePromptMatches !== null && deletePromptMatches.length > 0 ? (
+                        <Button variant="danger" onClick={handleDeletePromptConfirm} disabled={deletePromptSaving}>
+                            {deletePromptSaving ? 'Deleting...' : 'Confirm delete'}
+                        </Button>
+                    ) : (
+                        <Button variant="outline-primary" onClick={handleDeletePromptSearch} disabled={deletePromptSaving || !deletePromptName.trim()}>
+                            Find
+                        </Button>
+                    )}
                 </Modal.Footer>
             </Modal>
 

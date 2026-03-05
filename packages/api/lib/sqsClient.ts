@@ -16,13 +16,13 @@ let sqsClientInstances: Record<string, SQSClient> = {};
  * @async
  * @function getSqsClient
  * @description Initializes and returns a singleton SQSClient instance.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @param {string} oidcToken - Optional OIDC token to use for credentials.
  * @returns {Promise<SQSClient>} The initialized SQS client.
  * @throws {Error} If essential AWS configuration environment variables are not set or client fails to initialize.
  */
-export async function getSqsClient(roleArnOverride?: string, oidcToken?: string): Promise<SQSClient> {
-    const cacheKey = roleArnOverride || 'default';
+export async function getSqsClient(appSpecificRoleArn: string, oidcToken?: string): Promise<SQSClient> {
+    const cacheKey = appSpecificRoleArn;
     // Prefer passed OIDC token, fallback to runtime helper env var if needed
     const tokenToUse = oidcToken;
 
@@ -40,48 +40,42 @@ export async function getSqsClient(roleArnOverride?: string, oidcToken?: string)
         let baseCredentials;
 
         if (tokenToUse) {
-            const defaultRoleArn = process.env.DEFAULT_GUEST_ROLE_ARN;
-            if (!defaultRoleArn) {
-                throw new Error("Server configuration error: Missing DEFAULT_GUEST_ROLE_ARN.");
+            const proxyRoleArn = process.env.OIDC_PROXY_ROLE_ARN;
+            if (!proxyRoleArn) {
+                throw new Error("Server configuration error: Missing OIDC_PROXY_ROLE_ARN.");
             }
-            console.log("sqsClient: OIDC Token detected. Using fromWebToken.");
+            // console.log("sqsClient: OIDC Token detected. Using fromWebToken with proxy role.");
             baseCredentials = fromWebToken({
-                roleArn: defaultRoleArn,
+                roleArn: proxyRoleArn,
                 webIdentityToken: tokenToUse,
-                roleSessionName: "VercelSession"
+                roleSessionName: "DharmaConnectProxySession"
             });
         }
 
-        if (roleArnOverride) {
-            const stsClient = new STSClient({
-                region: REGION,
-                credentials: baseCredentials // Use OIDC credentials if available, otherwise default chain
-            });
-            const assumeRoleCommand = new AssumeRoleCommand({
-                RoleArn: roleArnOverride,
-                RoleSessionName: 'DharmaConnectSQSSession',
-            });
-            const { Credentials } = await stsClient.send(assumeRoleCommand);
+        // Assume the specified app role using the Base Credentials (Proxy Role or Default Chain)
+        const stsClient = new STSClient({
+            region: REGION,
+            credentials: baseCredentials // Use OIDC proxy credentials if available, otherwise default chain
+        });
 
-            if (!Credentials || !Credentials.AccessKeyId || !Credentials.SecretAccessKey || !Credentials.SessionToken) {
-                throw new Error("Failed to obtain temporary credentials from STS.");
-            }
+        const assumeRoleCommand = new AssumeRoleCommand({
+            RoleArn: appSpecificRoleArn,
+            RoleSessionName: 'DharmaConnectSQSSession',
+        });
+        const { Credentials } = await stsClient.send(assumeRoleCommand);
 
-            sqsClient = new SQSClient({
-                region: REGION,
-                credentials: {
-                    accessKeyId: Credentials.AccessKeyId,
-                    secretAccessKey: Credentials.SecretAccessKey,
-                    sessionToken: Credentials.SessionToken,
-                },
-            });
-        } else {
-            // Use default credential provider chain or explicit OIDC
-            sqsClient = new SQSClient({
-                region: REGION,
-                credentials: baseCredentials
-            });
+        if (!Credentials || !Credentials.AccessKeyId || !Credentials.SecretAccessKey || !Credentials.SessionToken) {
+            throw new Error("Failed to obtain temporary credentials from STS.");
         }
+
+        sqsClient = new SQSClient({
+            region: REGION,
+            credentials: {
+                accessKeyId: Credentials.AccessKeyId,
+                secretAccessKey: Credentials.SecretAccessKey,
+                sessionToken: Credentials.SessionToken,
+            },
+        });
 
         sqsClientInstances[cacheKey] = sqsClient;
         return sqsClient;
@@ -98,7 +92,7 @@ export async function getSqsClient(roleArnOverride?: string, oidcToken?: string)
  * @param {string} workOrderId - The ID of the work order.
  * @param {string} stepName - The name of the step.
  * @param {string} action - The action to perform.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @param {string} oidcToken - Optional OIDC token to use.
  * @returns {Promise<any>} A promise that resolves to the result of the send message command.
  * @throws {Error} If the SQS_QUEUE_URL environment variable is not set or the message fails to send.
@@ -107,14 +101,14 @@ export async function sendWorkOrderMessage(
     workOrderId: string,
     stepName: string,
     action: string,
-    roleArnOverride?: string,
+    appSpecificRoleArn: string,
     oidcToken?: string
 ) {
     const startTime = Date.now();
     console.log(`[SQS-SEND] Starting SQS message send for work order ${workOrderId}, step ${stepName}, action: ${action}`);
     console.log(`[SQS-SEND] Timestamp: ${new Date().toISOString()}`);
 
-    const sqsClient = await getSqsClient(roleArnOverride, oidcToken);
+    const sqsClient = await getSqsClient(appSpecificRoleArn, oidcToken);
     const queueUrl = process.env.SQS_QUEUE_URL;
 
     if (!queueUrl) {

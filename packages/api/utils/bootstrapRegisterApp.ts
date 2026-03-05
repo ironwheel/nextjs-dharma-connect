@@ -1,0 +1,39 @@
+
+const { DynamoDBClient, UpdateItemCommand } = require("@aws-sdk/client-dynamodb");
+const path = require('path');
+const dotenv = require('dotenv');
+
+// Load environment variables
+dotenv.config({ path: path.resolve(__dirname, '../.env.local') });
+
+const REGION = process.env.AWS_REGION || "us-east-1";
+const TABLE_NAME = process.env.DYNAMODB_TABLE_ACTIONS_PROFILES || "actions.profiles";
+
+const dynamoClient = new DynamoDBClient({ region: REGION });
+
+const actions = [
+    "GET/table/students",
+    "GET/table/events",
+    "POST/table/prompts",
+    "POST/table/students"
+];
+
+async function run() {
+    console.log(`Updating ${TABLE_NAME} for host "register"...`);
+    try {
+        await dynamoClient.send(new UpdateItemCommand({
+            TableName: TABLE_NAME,
+            Key: { profile: { S: "register" } },
+            UpdateExpression: "SET actions = :a",
+            ExpressionAttributeValues: {
+                ":a": { L: actions.map(a => ({ S: a })) }
+            }
+        }));
+        console.log("Successfully updated actions list.");
+    } catch (error) {
+        console.error("Error updating table:", error);
+        process.exit(1);
+    }
+}
+
+run();
