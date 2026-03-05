@@ -8,12 +8,14 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import { tables, TableConfig } from './tableConfig';
 import { websockets, WebSocketConfig, websocketGetConfig } from './websocketConfig';
-import { listAll, listAllChunked, getOne, deleteOne, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll, batchGetItems, listAllQueryBeginsWithSortKeyMultiple, queryIndex } from './dynamoClient';
+import { listAll, listAllChunked, getOne, deleteOne, deleteOneWithSort, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll, batchGetItems, listAllQueryBeginsWithSortKeyMultiple, queryIndex } from './dynamoClient';
 import { verificationEmailSend, verificationEmailCallback, verificationCheck, createToken, getActionsProfiles, getAuthList, getViews, getViewsProfiles, putAuthItem, linkEmailSend, getConfigValue } from './authUtils';
 import { serialize } from 'cookie';
 import { v4 as uuidv4 } from 'uuid';
 import { sendWorkOrderMessage } from './sqsClient';
 import { extractShowcaseToVideoList, enableVideoPlayback } from './vimeoClient';
+import { stripeCreatePaymentIntent, stripeUpdatePaymentIntent } from './stripe';
+import { translatePromptFromEnglish } from './translate';
 
 /**
  * @async
@@ -41,13 +43,18 @@ async function dispatchTable(
     if (!tableName) throw new Error(`Missing env var: ${cfg.envVar}`);
 
     // Check Email Masking for Students
+    let oidcToken = req.headers['x-vercel-oidc-token'] as string;
+    if (!oidcToken && process.env.NODE_ENV === 'development') {
+      oidcToken = process.env.VERCEL_OIDC_TOKEN!;
+    }
+
     let maskEmail = false;
     if (resource === 'students') {
       const pid = req.headers['x-user-id'] as string;
       const host = req.headers['x-host'] as string;
       try {
         // getConfigValue is async
-        const display = await getConfigValue(pid, host, 'emailDisplay');
+        const display = await getConfigValue(pid, host, 'emailDisplay', oidcToken);
         if (!display) maskEmail = true;
       } catch (e) {
         // Default to masking if check fails (e.g. permission error or missing default)
@@ -64,15 +71,12 @@ async function dispatchTable(
       return item;
     };
     const maskList = (items: any[]) => items.map(mask);
-    let oidcToken = req.headers['x-vercel-oidc-token'] as string;
-    if (!oidcToken && process.env.NODE_ENV === 'development') {
-      oidcToken = process.env.VERCEL_OIDC_TOKEN!;
-    }
+    const appRole = (req as any).userRole || process.env.DEFAULT_GUEST_ROLE_ARN!;
 
 
     // LIST
     if (req.method === 'GET' && !id && cfg.ops.includes('list')) {
-      const items = await listAll(tableName, undefined, oidcToken);
+      const items = await listAll(tableName, appRole, oidcToken);
       if (maskEmail) maskList(items);
       return res.status(200).json(items);
     }
@@ -80,7 +84,7 @@ async function dispatchTable(
     // LIST CHUNKED (POST method for chunked scanning)
     if (req.method === 'POST' && !id && req.body && req.body.limit) {
       const { limit, lastEvaluatedKey, scanParams = {}, projectionExpression, expressionAttributeNames } = req.body;
-      const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit, undefined, projectionExpression, expressionAttributeNames, oidcToken);
+      const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit, appRole, projectionExpression, expressionAttributeNames, oidcToken);
       if (maskEmail && result.items) maskList(result.items);
       return res.status(200).json(result);
     }
@@ -88,7 +92,7 @@ async function dispatchTable(
     // LIST CHUNKED (special case when id is "chunked")
     if (req.method === 'POST' && id === 'chunked' && req.body && req.body.limit) {
       const { limit, lastEvaluatedKey, scanParams = {}, projectionExpression, expressionAttributeNames } = req.body;
-      const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit, undefined, projectionExpression, expressionAttributeNames, oidcToken);
+      const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit, appRole, projectionExpression, expressionAttributeNames, oidcToken);
       if (maskEmail && result.items) maskList(result.items);
       return res.status(200).json(result);
     }
@@ -96,7 +100,7 @@ async function dispatchTable(
     // LIST FILTERED (POST method for filtered scanning)
     if (req.method === 'POST' && id === 'filtered' && req.body && req.body.filterFieldName && req.body.filterFieldValue) {
       const { filterFieldName, filterFieldValue } = req.body;
-      const items = await listAllFiltered(tableName, filterFieldName, filterFieldValue, undefined, oidcToken);
+      const items = await listAllFiltered(tableName, filterFieldName, filterFieldValue, appRole, oidcToken);
       if (maskEmail) maskList(items);
       return res.status(200).json({ items });
     }
@@ -104,7 +108,7 @@ async function dispatchTable(
     // QUERY (POST method for querying with begins_with on sort key)
     if (req.method === 'POST' && id === 'query' && req.body && req.body.primaryKeyValue && req.body.sortKeyValue && cfg.ops.includes('query')) {
       const { primaryKeyValue, sortKeyValue } = req.body;
-      const results = await listAllQueryBeginsWithSortKeyMultiple(tableName, cfg.pk, primaryKeyValue, cfg.sk, sortKeyValue, undefined, oidcToken);
+      const results = await listAllQueryBeginsWithSortKeyMultiple(tableName, cfg.pk, primaryKeyValue, cfg.sk, sortKeyValue, appRole, oidcToken);
       if (maskEmail) {
         Object.keys(results).forEach(key => {
           if (Array.isArray(results[key])) {
@@ -118,7 +122,7 @@ async function dispatchTable(
     // QUERY INDEX (POST method for querying a GSI)
     if (req.method === 'POST' && id === 'query-index' && req.body && req.body.indexName && req.body.pkName && req.body.pkValue && cfg.ops.includes('query-index')) {
       const { indexName, pkName, pkValue } = req.body;
-      const items = await queryIndex(tableName, indexName, pkName, pkValue, undefined, oidcToken);
+      const items = await queryIndex(tableName, indexName, pkName, pkValue, appRole, oidcToken);
       if (maskEmail) maskList(items);
       return res.status(200).json({ items });
     }
@@ -126,20 +130,31 @@ async function dispatchTable(
     // BATCH GET (POST method for batch retrieval by IDs)
     if (req.method === 'POST' && id === 'batch' && req.body && req.body.ids && Array.isArray(req.body.ids)) {
       const { ids } = req.body;
-      const items = await batchGetItems(tableName, cfg.pk, ids, undefined, oidcToken);
+      const items = await batchGetItems(tableName, cfg.pk, ids, appRole, oidcToken);
       if (maskEmail) maskList(items);
       return res.status(200).json(items);
     }
 
     // COUNT (POST method for counting items)
     if (req.method === 'POST' && id === 'count' && cfg.ops.includes('count')) {
-      const count = await countAll(tableName, undefined, oidcToken);
+      const count = await countAll(tableName, appRole, oidcToken);
       return res.status(200).json({ count });
+    }
+
+    // DELETE ONE BY COMPOSITE KEY (POST method for tables with sort key)
+    if (req.method === 'POST' && id === 'delete-one' && cfg.sk && cfg.ops.includes('delete') && req.body && typeof req.body === 'object') {
+      const pkVal = req.body[cfg.pk];
+      const skVal = req.body[cfg.sk];
+      if (pkVal == null || skVal == null) {
+        return res.status(400).json({ error: `Missing body: ${cfg.pk} and ${cfg.sk} required` });
+      }
+      await deleteOneWithSort(tableName, cfg.pk, pkVal, cfg.sk, skVal, appRole, oidcToken);
+      return res.status(204).end();
     }
 
     // GET ONE
     if (req.method === 'GET' && id && cfg.ops.includes('get')) {
-      const item = await getOne(tableName, cfg.pk, id, undefined, oidcToken);
+      const item = await getOne(tableName, cfg.pk, id, appRole, oidcToken);
       if (maskEmail && item) mask(item);
       return item ? res.status(200).json(item) : res.status(404).json({ error: `${resource} ${id} not found` });
     }
@@ -150,7 +165,7 @@ async function dispatchTable(
         return res.status(400).json({ error: 'Missing or invalid request body for PUT' });
       }
       // Upsert the item using the provided body
-      await putOne(tableName, req.body, undefined, oidcToken);
+      await putOne(tableName, req.body, appRole, oidcToken);
       return res.status(200).json({ success: true });
     }
 
@@ -190,7 +205,7 @@ async function dispatchTable(
         // Use conditional update for work-orders to prevent recreating deleted items
         if (resource === 'work-orders') {
           try {
-            await updateItemWithCondition(tableName, { [cfg.pk]: id }, updateExpression, {}, expressionAttributeNames);
+            await updateItemWithCondition(tableName, { [cfg.pk]: id }, updateExpression, {}, expressionAttributeNames, appRole, oidcToken);
             return res.status(200).json({ success: true });
           } catch (error: any) {
             // If the item doesn't exist, return success since the goal (unlocked state) is achieved
@@ -201,7 +216,7 @@ async function dispatchTable(
             throw error;
           }
         } else {
-          await updateItem(tableName, { [cfg.pk]: id }, updateExpression, {}, expressionAttributeNames, undefined, oidcToken);
+          await updateItem(tableName, { [cfg.pk]: id }, updateExpression, {}, expressionAttributeNames, appRole, oidcToken);
           return res.status(200).json({ success: true });
         }
       } else {
@@ -238,7 +253,7 @@ async function dispatchTable(
         // Use conditional update for work-orders to prevent recreating deleted items
         if (resource === 'work-orders') {
           try {
-            await updateItemWithCondition(tableName, { [cfg.pk]: id }, updateExpression, expressionAttributeValues, expressionAttributeNames);
+            await updateItemWithCondition(tableName, { [cfg.pk]: id }, updateExpression, expressionAttributeValues, expressionAttributeNames, appRole, oidcToken);
             return res.status(200).json({ success: true });
           } catch (error: any) {
             // If the item doesn't exist, return success since the goal (unlocked state) is achieved
@@ -249,7 +264,7 @@ async function dispatchTable(
             throw error;
           }
         } else {
-          await updateItem(tableName, { [cfg.pk]: id }, updateExpression, expressionAttributeValues, expressionAttributeNames, undefined, oidcToken);
+          await updateItem(tableName, { [cfg.pk]: id }, updateExpression, expressionAttributeValues, expressionAttributeNames, appRole, oidcToken);
           return res.status(200).json({ success: true });
         }
       }
@@ -257,7 +272,7 @@ async function dispatchTable(
 
     // DELETE
     if (req.method === 'DELETE' && id && cfg.ops.includes('delete')) {
-      await deleteOne(tableName, cfg.pk, id, undefined, oidcToken);
+      await deleteOne(tableName, cfg.pk, id, appRole, oidcToken);
       return res.status(204).end();
     }
 
@@ -427,7 +442,7 @@ async function dispatchWebSocket(
       case 'connect':
         // Create a JWT token for WebSocket authentication using the centralized createToken function
         const websocketActions = ['websocket:connect'];
-        const token = createToken(pid, deviceFingerprint, websocketActions);
+        const token = createToken(pid, deviceFingerprint, websocketActions, undefined, host);
 
         let url = `${wsConfig.websocketUrl}?token=${token}`;
         if (resource === 'students') {
@@ -491,6 +506,7 @@ async function dispatchSQS(
   if (!oidcToken && process.env.NODE_ENV === 'development') {
     oidcToken = process.env.VERCEL_OIDC_TOKEN!;
   }
+  const appRole = (req as any).userRole || process.env.DEFAULT_GUEST_ROLE_ARN!;
 
 
   // Validate required parameters
@@ -517,7 +533,7 @@ async function dispatchSQS(
 
         try {
           // Send SQS message to email-agent
-          const result = await sendWorkOrderMessage(workOrderId, stepName, messageAction, undefined, oidcToken);
+          const result = await sendWorkOrderMessage(workOrderId, stepName, messageAction, appRole, oidcToken);
           console.log(`[SQS-SEND] SUCCESS: Sent ${messageAction} message for work order ${workOrderId}, step ${stepName}`);
           return res.status(200).json({ success: true, messageId: result.MessageId });
         } catch (error: any) {
@@ -633,15 +649,44 @@ async function dispatchStripe(
     if (!pid) return res.status(400).json({ error: 'Missing x-user-id header' });
   }
 
+
   /* OIDC Token Extraction */
   let oidcToken = req.headers['x-vercel-oidc-token'] as string;
   if (!oidcToken && process.env.NODE_ENV === 'development') {
     oidcToken = process.env.VERCEL_OIDC_TOKEN!;
   }
+  const appRole = (req as any).userRole || process.env.DEFAULT_GUEST_ROLE_ARN!;
 
 
   try {
     switch (action) {
+      case 'create': {
+        if (req.method !== 'POST') {
+          res.setHeader('Allow', 'POST');
+          return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
+        }
+        const { aid, pid: createPid, amount: createAmount, currency, description } = req.body;
+        if (!aid || !createPid || !createAmount || !currency || !description) {
+          return res.status(400).json({ error: "Missing required parameters (aid, pid, amount, currency, description)" });
+        }
+        const createResult = await stripeCreatePaymentIntent(aid, createPid, createAmount, currency, description);
+        return res.status(200).json(createResult);
+      }
+
+      case 'update': {
+        if (req.method !== 'POST') {
+          res.setHeader('Allow', 'POST');
+          return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
+        }
+        const { paymentIntentId, amount: updateAmount } = req.body;
+
+        if (!paymentIntentId || !updateAmount) {
+          return res.status(400).json({ error: "Missing required parameters (paymentIntentId, amount)" });
+        }
+        const updateResult = await stripeUpdatePaymentIntent(paymentIntentId, updateAmount);
+        return res.status(200).json(updateResult);
+      }
+
       case 'refund':
         if (req.method !== 'POST') {
           res.setHeader('Allow', 'POST');
@@ -669,7 +714,7 @@ async function dispatchStripe(
         // 2. Send Email
         if (refund.status === 'succeeded' || refund.status === 'pending') {
           try {
-            await import('./stripe').then(m => m.sendRefundEmail(studentId, aid || 'refund-manager', undefined, offeringIntent, undefined, oidcToken));
+            await import('./stripe').then(m => m.sendRefundEmail(studentId, aid || 'refund-manager', undefined, offeringIntent, undefined, appRole, oidcToken));
           } catch (emailErr) {
             console.error("[STRIPE] Refund succeeded but email failed:", emailErr);
             // Don't fail the response, just log
@@ -731,11 +776,13 @@ async function dispatchRefunds(
     if (!pid) return res.status(400).json({ error: 'Missing x-user-id header' });
   }
 
+
   /* OIDC Token Extraction */
   let oidcToken = req.headers['x-vercel-oidc-token'] as string;
   if (!oidcToken && process.env.NODE_ENV === 'development') {
     oidcToken = process.env.VERCEL_OIDC_TOKEN!;
   }
+  const appRole = (req as any).userRole || process.env.DEFAULT_GUEST_ROLE_ARN!;
 
 
   try {
@@ -765,6 +812,7 @@ async function dispatchRefunds(
           reason,
           requestPid: pid, // Data from header
           host, // Data from header
+          roleArn: appRole,
           oidcToken
         }));
 
@@ -781,7 +829,7 @@ async function dispatchRefunds(
           return res.status(400).json({ error: "paymentIntentIds must be an array" });
         }
 
-        const refundRequests = await import('./refunds').then(m => m.checkRefundRequests(paymentIntentIds, oidcToken));
+        const refundRequests = await import('./refunds').then(m => m.checkRefundRequests(paymentIntentIds, appRole, oidcToken));
         return res.status(200).json({ refundRequests });
 
       case 'list':
@@ -794,7 +842,7 @@ async function dispatchRefunds(
         const limitParam = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
         const offsetParam = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
 
-        const refundsData = await import('./refunds').then(m => m.listRefunds(limitParam, offsetParam, oidcToken));
+        const refundsData = await import('./refunds').then(m => m.listRefunds(limitParam, offsetParam, appRole, oidcToken));
         return res.status(200).json(refundsData);
 
       case 'process':
@@ -812,7 +860,7 @@ async function dispatchRefunds(
           return res.status(400).json({ error: "Invalid action" });
         }
 
-        const result = await import('./refunds').then(m => m.processRefund(processIntent, processAction, pid, host, oidcToken));
+        const result = await import('./refunds').then(m => m.processRefund(processIntent, processAction, pid, host, appRole, oidcToken));
         return res.status(200).json(result);
 
       default:
@@ -824,6 +872,62 @@ async function dispatchRefunds(
       return res.status(409).json({ error: 'Refund request already exists for this payment intent.' });
     }
     return res.status(500).json({ error: error.message || 'Refund action failed' });
+  }
+}
+
+/**
+ * @async
+ * @function dispatchTranslate
+ * @description Dispatches translate-related API requests (e.g. prompt text from English to other languages).
+ */
+async function dispatchTranslate(
+  action: string,
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  const pid = req.headers['x-user-id'] as string;
+  const hash = req.headers['x-verification-hash'] as string;
+  const host = req.headers['x-host'] as string;
+  const deviceFingerprint = req.headers['x-device-fingerprint'] as string;
+
+  if (!pid || !hash || !host || !deviceFingerprint) {
+    return res.status(400).json({ error: 'Missing required authentication parameters' });
+  }
+
+  let oidcToken = req.headers['x-vercel-oidc-token'] as string;
+  if (!oidcToken && process.env.NODE_ENV === 'development') {
+    oidcToken = process.env.VERCEL_OIDC_TOKEN!;
+  }
+  const appRole = (req as any).userRole || process.env.DEFAULT_GUEST_ROLE_ARN!;
+
+  try {
+    switch (action) {
+      case 'prompt': {
+        if (req.method !== 'POST') {
+          res.setHeader('Allow', 'POST');
+          return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
+        }
+        const { text: englishText, targetLanguages } = req.body || {};
+        if (englishText == null || typeof englishText !== 'string') {
+          return res.status(400).json({ error: 'Missing or invalid body: text (string) required' });
+        }
+        const targetNames = Array.isArray(targetLanguages) && targetLanguages.length > 0
+          ? targetLanguages
+          : undefined;
+        const translations = await translatePromptFromEnglish(englishText, targetNames, appRole, oidcToken);
+        return res.status(200).json({
+          translations: {
+            English: englishText.trim(),
+            ...translations,
+          },
+        });
+      }
+      default:
+        return res.status(404).json({ error: `Unknown translate action: ${action}` });
+    }
+  } catch (error: any) {
+    console.error(`Translate action ${action} failed:`, error);
+    return res.status(500).json({ error: error.message || 'Translate action failed' });
   }
 }
 
@@ -882,6 +986,11 @@ export async function dispatch(
       const [refundAction] = rest;
       console.log("DISPATCH: subsystem:", subsystem, "action:", refundAction);
       return await dispatchRefunds(refundAction, req, res);
+    case 'translate':
+      // Translate URLs: /api/translate/[action]
+      const [translateAction] = rest;
+      console.log("DISPATCH: subsystem:", subsystem, "action:", translateAction);
+      return await dispatchTranslate(translateAction, req, res);
     default:
       return res.status(404).json({ error: `Unknown subsystem: ${subsystem}` });
   }

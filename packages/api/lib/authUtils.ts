@@ -13,6 +13,7 @@ import crypto from 'crypto';
 
 // Add this type at the top of the file, after imports
 type PermittedHost = string; // Now just a string representing the host
+type SessionTrustLevel = 'silent' | 'email-verified';
 
 // Verification result enumeration
 export enum VerifyResult {
@@ -24,6 +25,7 @@ export enum VerifyResult {
     VERIFY_ERR_TYPE_MISMATCH = 'VERIFY_ERR_TYPE_MISMATCH',
     VERIFY_ERR_FINGERPRINT_MISMATCH = 'VERIFY_ERR_FINGERPRINT_MISMATCH',
     VERIFY_ERR_PID_MISMATCH = 'VERIFY_ERR_PID_MISMATCH',
+    VERIFY_ERR_AUDIENCE_MISMATCH = 'VERIFY_ERR_AUDIENCE_MISMATCH',
     VERIFY_ERR_CONFIG_ERROR = 'VERIFY_ERR_CONFIG_ERROR',
     VERIFY_ERR_OPERATION_NOT_FOUND = 'VERIFY_ERR_OPERATION_NOT_FOUND',
     VERIFY_ERR_UNKNOWN = 'VERIFY_ERR_UNKNOWN'
@@ -32,7 +34,7 @@ export enum VerifyResult {
 // JWT Configuration (Constants)
 export const JWT_ISSUER = process.env.JWT_ISSUER_NAME;
 export const JWT_TOKEN_TYPE_ACCESS = 'access';
-export const JWT_VERSION = '2';
+export const JWT_VERSION = '3';
 const ADMIN_BYPASS_PID = process.env.ADMIN_BYPASS_PID;
 
 // Duration Configuration from Environment Variables (Strict)
@@ -101,6 +103,7 @@ export const TOKEN_ERROR_CODES = {
     INVALID_SIGNATURE: 'INVALID_SIGNATURE', EXPIRED: 'EXPIRED', ISSUER_MISMATCH: 'ISSUER_MISMATCH',
     VERSION_MISMATCH: 'VERSION_MISMATCH', TYPE_MISMATCH: 'TYPE_MISMATCH',
     FINGERPRINT_MISMATCH: 'FINGERPRINT_MISMATCH', PID_MISMATCH: 'PID_MISMATCH',
+    AUDIENCE_MISMATCH: 'AUDIENCE_MISMATCH',
     CONFIG_ERROR: 'CONFIG_ERROR', UNKNOWN: 'UNKNOWN_VERIFICATION_ERROR'
 };
 
@@ -159,7 +162,7 @@ export const DEFAULT_NO_PERMISSIONS = {
  */
 async function getActionsProfileForHost(host: string, oidcToken?: string): Promise<string> {
     const tableCfg = tableGetConfig('app.actions');
-    const appActionData = await getOne(tableCfg.tableName, tableCfg.pk, host, process.env.AUTH_ROLE_ARN, oidcToken);
+    const appActionData = await getOne(tableCfg.tableName, tableCfg.pk, host, process.env.AUTH_ROLE_ARN!, oidcToken);
     if (!appActionData) {
         throw new Error(`AUTH_APP_ACTIONS_NOT_FOUND: No actions profile found for host '${host}'`);
     }
@@ -168,54 +171,44 @@ async function getActionsProfileForHost(host: string, oidcToken?: string): Promi
 
 /**
  * @async
- * @function getAllActionsForUser
- * @description Gets all actions for a user based on their permitted hosts
- * @param {string[]} permittedHosts - Array of hosts the user has access to
- * @returns {Promise<string[]>} Array of all actions the user has access to
- * @throws {Error} If any host's actions profile is not found
+ * @function getAppActions
+ * @description Gets all actions for a user based on the specific host (app).
+ * @param {string} host - The host to look up
+ * @returns {Promise<{ actions: string[], role: string }>} Actions and role for the app
+ * @throws {Error} If host's actions profile is not found
  */
-async function getAllActionsForUser(permittedHosts: string[], oidcToken?: string): Promise<string[]> {
-    const allActions: string[] = [];
+async function getAppActions(host: string, oidcToken?: string): Promise<{ actions: string[], role: string }> {
+    const actionsProfile = await getActionsProfileForHost(host, oidcToken);
 
-    for (const host of permittedHosts) {
-        try {
-            const actionsProfile = await getActionsProfileForHost(host, oidcToken);
+    // Lookup the actions list for this profile
+    const tableCfg = tableGetConfig('actions-profile');
+    const actionsListData = await getOne(tableCfg.tableName, tableCfg.pk, actionsProfile, process.env.AUTH_ROLE_ARN!, oidcToken);
 
-            // Lookup the actions list for this profile
-            const tableCfg = tableGetConfig('actions-profile');
-            const actionsListData = await getOne(tableCfg.tableName, tableCfg.pk, actionsProfile, process.env.AUTH_ROLE_ARN, oidcToken);
-
-            if (!actionsListData) {
-                throw new Error(`AUTH_ACTIONS_LIST_NOT_FOUND: No actions list found for profile '${actionsProfile}'`);
-            }
-
-            // Ensure actionsList is an array
-            let actionsList: string[];
-            if (Array.isArray(actionsListData.actions)) {
-                actionsList = actionsListData.actions;
-            } else if (actionsListData.actions && typeof actionsListData.actions === 'string') {
-                try {
-                    actionsList = JSON.parse(actionsListData.actions);
-                } catch (e) {
-                    throw new Error(`AUTH_ACTIONS_LIST_INVALID_FORMAT: Invalid JSON for profile '${actionsProfile}'`);
-                }
-            } else {
-                throw new Error(`AUTH_ACTIONS_LIST_INVALID_FORMAT: Actions list is not in expected format for profile '${actionsProfile}'`);
-            }
-
-            // Add actions to the combined list (avoiding duplicates)
-            for (const action of actionsList) {
-                if (!allActions.includes(action)) {
-                    allActions.push(action);
-                }
-            }
-        } catch (error) {
-            console.error(`Failed to get actions for host ${host}:`, error);
-            throw error;
-        }
+    if (!actionsListData) {
+        throw new Error(`AUTH_ACTIONS_LIST_NOT_FOUND: No actions list found for profile '${actionsProfile}'`);
     }
 
-    return allActions;
+    // Capture the role from the actions profile
+    const role = actionsListData.role;
+    if (!role) {
+        throw new Error(`AUTH_ROLE_NOT_FOUND: No role found for profile '${actionsProfile}'`);
+    }
+
+    // Ensure actionsList is an array
+    let actionsList: string[];
+    if (Array.isArray(actionsListData.actions)) {
+        actionsList = actionsListData.actions;
+    } else if (actionsListData.actions && typeof actionsListData.actions === 'string') {
+        try {
+            actionsList = JSON.parse(actionsListData.actions);
+        } catch (e) {
+            throw new Error(`AUTH_ACTIONS_LIST_INVALID_FORMAT: Invalid JSON for profile '${actionsProfile}'`);
+        }
+    } else {
+        throw new Error(`AUTH_ACTIONS_LIST_INVALID_FORMAT: Actions list is not in expected format for profile '${actionsProfile}'`);
+    }
+
+    return { actions: actionsList, role };
 }
 
 /**
@@ -228,7 +221,7 @@ async function getAllActionsForUser(permittedHosts: string[], oidcToken?: string
  */
 async function getPromptsForAid(aid: string, oidcToken?: string): Promise<Array<any>> {
     const tableCfg = tableGetConfig('prompts');
-    return await listAllFiltered(tableCfg.tableName, 'aid', aid, undefined, oidcToken);
+    return await listAllFiltered(tableCfg.tableName, 'aid', aid, process.env.AUTH_ROLE_ARN!, oidcToken);
 }
 
 /**
@@ -241,7 +234,7 @@ async function getPromptsForAid(aid: string, oidcToken?: string): Promise<Array<
  */
 async function findParticipantForAuth(id: string, oidcToken?: string): Promise<{ participant: any, auditor: boolean } | null> {
     const tableCfg = tableGetConfig('students');
-    const student = await getOne(tableCfg.tableName, tableCfg.pk, id, undefined, oidcToken);
+    const student = await getOne(tableCfg.tableName, tableCfg.pk, id, process.env.AUTH_ROLE_ARN!, oidcToken);
 
     if (student) {
         return { participant: student, auditor: false };
@@ -249,7 +242,7 @@ async function findParticipantForAuth(id: string, oidcToken?: string): Promise<{
 
     // Fallback to auditors table
     const auditorsTableCfg = tableGetConfig('auditors');
-    const auditorRecord = await getOne(auditorsTableCfg.tableName, auditorsTableCfg.pk, id, undefined, oidcToken);
+    const auditorRecord = await getOne(auditorsTableCfg.tableName, auditorsTableCfg.pk, id, process.env.AUTH_ROLE_ARN!, oidcToken);
 
     if (auditorRecord) {
         return { participant: auditorRecord, auditor: true };
@@ -264,16 +257,26 @@ async function findParticipantForAuth(id: string, oidcToken?: string): Promise<{
  * @param {string} pid - The participant ID expected in the token.
  * @param {string} clientFingerprint - The client's browser fingerprint (can be null/undefined).
  * @param {string} actionList - List of allowed operations.
+ * @param {string} role - The app-specific role ARN.
  * @returns {string} created token.
  * @throws {Error} Throws errors related to bad configuration
  */
-export function createToken(pid: string, clientFingerprint: string, actionList: string[]): string {
+export function createToken(pid: string, clientFingerprint: string, actionList: string[], role: string | undefined, audience: string): string {
     if (!RSA_PRIVATE_KEY_B64) throw new Error(TOKEN_ERROR_CODES.CONFIG_ERROR + ': Missing API_RSA_PRIVATE');
     const privateKey = Buffer.from(RSA_PRIVATE_KEY_B64, 'base64').toString('utf-8');
     if (!privateKey) throw new Error(TOKEN_ERROR_CODES.CONFIG_ERROR + ': Invalid API_RSA_PRIVATE');
     if (!JWT_ISSUER) throw new Error(TOKEN_ERROR_CODES.CONFIG_ERROR + ': Missing JWT_ISSUER_NAME in environment');
 
-    const accessTokenPayload = { issuer: JWT_ISSUER, type: JWT_TOKEN_TYPE_ACCESS, version: JWT_VERSION, pid: pid, fingerprint: clientFingerprint, actions: actionList };
+    const accessTokenPayload = {
+        issuer: JWT_ISSUER,
+        type: JWT_TOKEN_TYPE_ACCESS,
+        version: JWT_VERSION,
+        pid: pid,
+        fingerprint: clientFingerprint,
+        actions: actionList,
+        role: role, // Include role in payload
+        aud: audience // Include audience in payload
+    };
     const accessToken = jwt.sign(accessTokenPayload, privateKey, { algorithm: 'RS256', expiresIn: ACCESS_TOKEN_DURATION_JWT });
     return accessToken;
 }
@@ -285,10 +288,10 @@ export function createToken(pid: string, clientFingerprint: string, actionList: 
  * @param {string} clientFingerprint - The client's browser fingerprint (can be null/undefined).
  * @param {string} operation - Operation this token would like to be used for.
  * @param {string} token - The JWT to verify.
- * @returns {VerifyResult} The verification result.
+ * @returns {VerifyResult | { status: VerifyResult, payload: any }} The verification result or object with payload.
  * @throws {Error} Throws errors related to bad configuration
  */
-function verifyToken(token: string, pid: string, clientFingerprint: string, operation: string): VerifyResult {
+function verifyToken(token: string, pid: string, clientFingerprint: string, operation: string, expectedAudience: string): VerifyResult | { status: VerifyResult, payload: any } {
     if (!RSA_PUBLIC_KEY_B64) throw new Error(TOKEN_ERROR_CODES.CONFIG_ERROR + ': Missing API_RSA_PUBLIC');
     const publicKey = Buffer.from(RSA_PUBLIC_KEY_B64, 'base64').toString('utf-8');
     if (!publicKey) throw new Error(TOKEN_ERROR_CODES.CONFIG_ERROR + ': Invalid API_RSA_PUBLIC');
@@ -318,6 +321,10 @@ function verifyToken(token: string, pid: string, clientFingerprint: string, oper
     if (decoded.issuer !== JWT_ISSUER) {
         console.log("TOKEN ERR: issuer mismatch");
         return VerifyResult.VERIFY_ERR_ISSUER_MISMATCH;
+    }
+    if (decoded.aud !== expectedAudience) {
+        console.log(`TOKEN ERR: audience mismatch. Expected ${expectedAudience}, got ${decoded.aud}`);
+        return VerifyResult.VERIFY_ERR_AUDIENCE_MISMATCH;
     }
     if (decoded.version !== JWT_VERSION) {
         console.log("TOKEN ERR: version mismatch");
@@ -363,7 +370,7 @@ function verifyToken(token: string, pid: string, clientFingerprint: string, oper
         console.log("TOKEN ERR: operation not allowed:", operation, actionsArray);
         return VerifyResult.VERIFY_ERR_OPERATION_NOT_FOUND;
     }
-    return VerifyResult.VERIFY_OK;
+    return { status: VerifyResult.VERIFY_OK, payload: decoded };
 }
 
 /**
@@ -414,10 +421,10 @@ async function authGetLink(studentId: string, linkHost: string, oidcToken?: stri
 
     // Check if student has access to this domain
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, studentId, process.env.AUTH_ROLE_ARN, oidcToken);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, studentId, process.env.AUTH_ROLE_ARN!, oidcToken);
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN, oidcToken);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN!, oidcToken);
         if (!data) {
             throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
         }
@@ -482,10 +489,10 @@ export async function linkEmailSend(pid: string, hash: string, host: string, lin
 
     // Does the originating user have access to the originating host
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN, oidcToken);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN!, oidcToken);
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN, oidcToken);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN!, oidcToken);
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
 
@@ -494,10 +501,10 @@ export async function linkEmailSend(pid: string, hash: string, host: string, lin
     if (!hasPermission) throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
 
     // Does the target user have access to the link host?
-    data = await getOne(tableCfg.tableName, tableCfg.pk, targetUserPid, process.env.AUTH_ROLE_ARN, oidcToken);
+    data = await getOne(tableCfg.tableName, tableCfg.pk, targetUserPid, process.env.AUTH_ROLE_ARN!, oidcToken);
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN, oidcToken);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN!, oidcToken);
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
 
@@ -609,10 +616,10 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
 
     // Does this user have access?
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN, oidcToken);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN!, oidcToken);
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN, oidcToken);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN!, oidcToken);
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
 
@@ -623,7 +630,7 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
 
     // Check for rate limiting - look for recent verification emails sent
     tableCfg = tableGetConfig('verification-tokens');
-    const recentEmails = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AUTH_ROLE_ARN, oidcToken);
+    const recentEmails = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AUTH_ROLE_ARN!, oidcToken);
     const recentVerificationEmails = recentEmails.filter((token: any) =>
         token.pid === pid &&
         token.deviceFingerprint === deviceFingerprint &&
@@ -697,7 +704,7 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
             deviceFingerprint: deviceFingerprint,
             createdAt: Date.now(),
             ttl: Math.floor((Date.now() + VERIFICATION_DURATION_MS) / 1000) // TTL in seconds for DynamoDB
-        }, process.env.AUTH_ROLE_ARN, oidcToken);
+        }, process.env.AUTH_ROLE_ARN!, oidcToken);
     } catch (e) {
         console.error("verificationEmailSend: Failed to create verification token:", e);
         throw new Error('AUTH_VERIFICATION_TOKEN_CREATION_FAILED');
@@ -792,10 +799,10 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
 
     // Does this user have access?
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN, oidcToken);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN!, oidcToken);
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN, oidcToken);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN!, oidcToken);
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
 
@@ -809,7 +816,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
 
     // Check for rate limiting - look for recent failed attempts
     tableCfg = tableGetConfig('verification-tokens');
-    const recentFailedAttempts = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AUTH_ROLE_ARN, oidcToken);
+    const recentFailedAttempts = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AUTH_ROLE_ARN!, oidcToken);
     const failedAttempts = recentFailedAttempts.filter((token: any) =>
         token.pid === pid &&
         token.deviceFingerprint === deviceFingerprint &&
@@ -822,7 +829,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
     }
 
     // User has access to this host, so if we can find the verification record we're good to go
-    const verificationToken = await getOne(tableCfg.tableName, tableCfg.pk, verificationTokenId, process.env.AUTH_ROLE_ARN, oidcToken);
+    const verificationToken = await getOne(tableCfg.tableName, tableCfg.pk, verificationTokenId, process.env.AUTH_ROLE_ARN!, oidcToken);
 
     if (!verificationToken) {
         // Record failed attempt
@@ -836,7 +843,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
                 failedAttempt: true,
                 createdAt: Date.now(),
                 ttl: Math.floor((Date.now() + (10 * 60 * 1000)) / 1000) // 10 minutes TTL in seconds for DynamoDB
-            }, process.env.AUTH_ROLE_ARN, oidcToken);
+            }, process.env.AUTH_ROLE_ARN!, oidcToken);
         } catch (e) {
             console.error("verificationEmailCallback: Failed to record failed attempt:", e);
         }
@@ -855,7 +862,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
                 failedAttempt: true,
                 createdAt: Date.now(),
                 ttl: Math.floor((Date.now() + (10 * 60 * 1000)) / 1000) // 10 minutes TTL in seconds for DynamoDB
-            }, process.env.AUTH_ROLE_ARN, oidcToken);
+            }, process.env.AUTH_ROLE_ARN!, oidcToken);
         } catch (e) {
             console.error("verificationEmailCallback: Failed to record failed attempt:", e);
         }
@@ -874,7 +881,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
                 failedAttempt: true,
                 createdAt: Date.now(),
                 ttl: Math.floor((Date.now() + (10 * 60 * 1000)) / 1000) // 10 minutes TTL in seconds for DynamoDB
-            }, process.env.AUTH_ROLE_ARN);
+            }, process.env.AUTH_ROLE_ARN!);
         } catch (e) {
             console.error("verificationEmailCallback: Failed to record failed attempt:", e);
         }
@@ -894,20 +901,21 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
                 failedAttempt: true,
                 createdAt: Date.now(),
                 ttl: Math.floor((Date.now() + (10 * 60 * 1000)) / 1000) // 10 minutes TTL in seconds for DynamoDB
-            }, process.env.AUTH_ROLE_ARN);
+            }, process.env.AUTH_ROLE_ARN!);
         } catch (e) {
             console.error("verificationEmailCallback: Failed to record failed attempt:", e);
         }
         throw new Error('AUTH_VERIFICATION_TOKEN_DEVICE_FINGERPRINT_MISMATCH');
     }
 
-    // Get all actions for all apps the user has access to (design improvement)
-    console.log("verificationEmailCallback: getting all actions for user across all permitted hosts");
-    const allActionsList = await getAllActionsForUser(permittedHosts);
+    // Get app actions and role for this host
+    console.log("verificationEmailCallback: getting app actions and role for user on host", host);
+    const { actions: allActionsList, role } = await getAppActions(host, oidcToken);
     console.log("verificationEmailCallback: allActionsList:", allActionsList);
+    console.log("verificationEmailCallback: role:", role);
 
     // Delete the current verification record
-    await deleteOne(tableCfg.tableName, tableCfg.pk, verificationTokenId, process.env.AUTH_ROLE_ARN);
+    await deleteOne(tableCfg.tableName, tableCfg.pk, verificationTokenId, process.env.AUTH_ROLE_ARN!, oidcToken);
 
     // Verification token is valid, so we can create a session
     tableCfg = tableGetConfig('sessions');
@@ -929,15 +937,17 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
             id: pid,
             fingerprint: deviceFingerprint,
             createdAt: sessionCreatedAt,
-            ttl: sessionTTL // TTL in seconds for DynamoDB
-        }, process.env.AUTH_ROLE_ARN, oidcToken);
+            ttl: sessionTTL, // TTL in seconds for DynamoDB
+            // Sessions created via email verification are always trusted as email-verified.
+            trustLevel: 'email-verified' as SessionTrustLevel
+        }, process.env.AUTH_ROLE_ARN!, oidcToken);
         console.log(`SESSION CREATION [pid=${pid}]: Successfully created session in DynamoDB`);
     } catch (e) {
         console.error("verificationEmailCallback: Failed to create session:", e);
         throw new Error('AUTH_SESSION_CREATION_FAILED');
     }
 
-    const newAccessToken = createToken(pid, deviceFingerprint, allActionsList);
+    const newAccessToken = createToken(pid, deviceFingerprint, allActionsList, role, host);
     return {
         status: 'authenticated',
         accessToken: newAccessToken,
@@ -960,7 +970,7 @@ export async function verificationCheck(pid: string, hash: string, host: string,
             verificationTokensCfg.tableName,
             'pid',
             pid,
-            process.env.AUTH_ROLE_ARN
+            process.env.AUTH_ROLE_ARN!
         );
 
         const currentTimeSeconds = Math.floor(Date.now() / 1000);
@@ -1009,6 +1019,10 @@ export async function verificationCheck(pid: string, hash: string, host: string,
         throw new Error('UNKNOWN_HOST');
     }
 
+    // Determine session behavior for this host (used to decide whether to accept silent sessions).
+    const sessionMode = entry.sessionMode || 'email-verification';
+    const usesSilentSessions = sessionMode === 'silent';
+
     if (entry.secret !== 'none') {
         const expectedHash = generateAuthHash(pid, entry.secret);
         if (expectedHash !== hash) {
@@ -1017,10 +1031,10 @@ export async function verificationCheck(pid: string, hash: string, host: string,
     }
 
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN!);
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN!);
         if (!data) {
             throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
         }
@@ -1038,12 +1052,14 @@ export async function verificationCheck(pid: string, hash: string, host: string,
         pid,
         tableCfg.sk,
         deviceFingerprint,
-        process.env.AUTH_ROLE_ARN
+        process.env.AUTH_ROLE_ARN!
     );
 
     if (session) {
         const currentTimeSeconds = Math.floor(Date.now() / 1000);
         const sessionTTL = session.ttl;
+        const trustLevel = (session as any).trustLevel as SessionTrustLevel | undefined;
+        const isEmailVerifiedSession = trustLevel === 'email-verified' || typeof trustLevel === 'undefined';
 
         if (sessionTTL <= currentTimeSeconds) {
             console.log(`VERIFICATION CHECK [pid=${pid}]: Session expired, deleting and returning pending state`);
@@ -1053,14 +1069,24 @@ export async function verificationCheck(pid: string, hash: string, host: string,
                 pid,
                 tableCfg.sk,
                 deviceFingerprint,
-                process.env.AUTH_ROLE_ARN
+                process.env.AUTH_ROLE_ARN!
             );
             return await determineVerificationStatusResponse();
         }
 
+        // For apps that require email verification, only accept sessions that are explicitly
+        // email-verified (or legacy sessions with no trust level set).
+        if (!usesSilentSessions && !isEmailVerifiedSession) {
+            console.log(`VERIFICATION CHECK [pid=${pid}]: Session present but not email-verified for host requiring verification, treating as unauthenticated`);
+            return await determineVerificationStatusResponse();
+        }
+
+
         console.log(`VERIFICATION CHECK [pid=${pid}]: Active session found, returning authenticated state`);
-        const allActionsList = await getAllActionsForUser(permittedHosts);
-        const accessToken = createToken(pid, deviceFingerprint, allActionsList);
+        const { actions: allActionsList, role } = await getAppActions(host);
+
+        // Use the host as audience for strict scoping
+        const accessToken = createToken(pid, deviceFingerprint, allActionsList, role, host);
         return {
             status: 'authenticated',
             accessToken
@@ -1136,6 +1162,11 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     const entry = accessList.find((e: any) => e.host === host);
     if (!entry) throw new Error('UNKNOWN_HOST');
 
+    // Determine session behavior for this host.
+    // Default is email verification; "silent" enables silent session creation/refresh.
+    const sessionMode = entry.sessionMode || 'email-verification';
+    const usesSilentSessions = sessionMode === 'silent';
+
     // If secret found, verify hash
     // TODO: do all apps need a hash?
     if (entry.secret !== 'none') {
@@ -1145,20 +1176,32 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
         if (expectedHash !== hash) throw new Error('AUTHUSER_ACCESS_NOT_ALLOWED_BAD_HASH');
     }
 
-    let tokenVerificationResult = VerifyResult.VERIFY_ERR_UNKNOWN;
+    let tokenVerificationResult: VerifyResult | { status: VerifyResult, payload: any } = VerifyResult.VERIFY_ERR_UNKNOWN;
     if (token) {
         console.log(`TOKEN CHECK [pid=${pid}]: Access token provided, attempting verification for operation: ${operation}`);
-        tokenVerificationResult = verifyToken(token, pid, deviceFingerprint, operation);
-        console.log(`TOKEN CHECK [pid=${pid}]: Verification result: ${tokenVerificationResult}`);
+        tokenVerificationResult = verifyToken(token, pid, deviceFingerprint, operation, host);
+        // Safely log status
+        const status = typeof tokenVerificationResult === 'object' ? tokenVerificationResult.status : tokenVerificationResult;
+        console.log(`TOKEN CHECK [pid=${pid}]: Verification result: ${status}`);
     } else {
         console.log(`TOKEN CHECK [pid=${pid}]: No access token provided in request`);
     }
 
+    let role: string | undefined;
+
     // The verify token function which includes operation permission along with
     // the the pre-check of the hash means we're good to go
     // We don't need to return the token because the client already has it
-    if (tokenVerificationResult === VerifyResult.VERIFY_OK) {
+    if (typeof tokenVerificationResult === 'object' && tokenVerificationResult.status === VerifyResult.VERIFY_OK) {
         console.log(`TOKEN CHECK [pid=${pid}]: Token valid and operation permitted, user authenticated`);
+        role = tokenVerificationResult.payload.role;
+        return {
+            status: 'authenticated',
+            role
+        };
+    } else if (tokenVerificationResult === VerifyResult.VERIFY_OK) {
+        // Fallback for logic where it was just an enum (should catch object above)
+        console.log(`TOKEN CHECK [pid=${pid}]: Token valid and operation permitted, user authenticated (legacy return)`);
         return {
             status: 'authenticated'
         };
@@ -1166,11 +1209,14 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
 
     // Token verification failed, will check for valid session to refresh token
     if (token) {
-        console.log(`TOKEN CHECK [pid=${pid}]: Token verification failed (${tokenVerificationResult}), checking session for token refresh`);
+        const status = typeof tokenVerificationResult === 'object' ? tokenVerificationResult.status : tokenVerificationResult;
+        console.log(`TOKEN CHECK [pid=${pid}]: Token verification failed (${status}), checking session for token refresh`);
     }
 
     // Check if token is valid but operation not found, and if it's a verification operation
-    if (tokenVerificationResult === VerifyResult.VERIFY_ERR_OPERATION_NOT_FOUND && verificationActionList.includes(operation)) {
+    const status = typeof tokenVerificationResult === 'object' ? tokenVerificationResult.status : tokenVerificationResult;
+
+    if (status === VerifyResult.VERIFY_ERR_OPERATION_NOT_FOUND && verificationActionList.includes(operation)) {
         // Token is valid but operation not found, and this is a verification operation
         // This means the user is already authenticated and trying to perform verification
         return {
@@ -1183,11 +1229,11 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
 
     // Does this user have access?
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN, oidcToken);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN!, oidcToken);
 
     let permittedHosts: PermittedHost[] = [];
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN, oidcToken);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN!, oidcToken);
         if (!data) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
     }
     permittedHosts = data['permitted-hosts'] || [];
@@ -1198,8 +1244,9 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
         throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
     }
 
-    // Get all actions for all apps the user has access to (design improvement)
-    const allActionsList = await getAllActionsForUser(permittedHosts, oidcToken);
+    // Get app actions and role for this host
+    const { actions: allActionsList, role: newRole } = await getAppActions(host, oidcToken);
+    role = newRole;
 
     // Add verification actions to the allowed actions list
     const allActionsWithVerification = [...allActionsList, ...verificationActionList];
@@ -1207,34 +1254,102 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     // Check if the requested operation is allowed
     if (!allActionsWithVerification.includes(operation)) {
         console.log("checkAccess: operation not allowed:", operation, "allowed actions:", allActionsWithVerification);
-        throw new Error(`AUTH_OPERATION_NOT_ALLOWED: Operation '${operation}' is not permitted for user across all apps`);
+        throw new Error(`AUTH_OPERATION_NOT_ALLOWED: Operation '${operation}' is not permitted for this app`);
     }
 
-    // SECURITY FIX: Distinguish between NO TOKEN (new login) and EXPIRED TOKEN (refresh attempt)
-    // If NO token was provided, this is a new login attempt and should ALWAYS require verification,
-    // regardless of whether a valid session exists. This prevents session reuse without proper authentication.
     tableCfg = tableGetConfig('sessions');
     if (!token) {
-        console.log(`SECURITY CHECK [pid=${pid}]: NO TOKEN PROVIDED - treating as new login attempt`);
+        console.log(`SECURITY CHECK [pid=${pid}]: NO TOKEN PROVIDED`);
 
         // Look for any existing session for this user/device
-        const existingSession = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN, oidcToken);
+        const existingSession = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN!, oidcToken);
+        const currentTimeSeconds = Math.floor(Date.now() / 1000);
 
+        if (usesSilentSessions) {
+            // SILENT SESSION MODE:
+            // Auto-manage sessions for this host without email verification.
+            let activeSession = existingSession;
+
+            if (activeSession) {
+                const sessionTTL = activeSession.ttl;
+                if (sessionTTL <= currentTimeSeconds) {
+                    console.log(`SILENT SESSION [pid=${pid}]: Existing session expired, deleting`);
+                    await deleteOneWithSort(
+                        tableCfg.tableName,
+                        tableCfg.pk,
+                        pid,
+                        tableCfg.sk,
+                        deviceFingerprint,
+                        process.env.AUTH_ROLE_ARN!,
+                        oidcToken
+                    );
+                    activeSession = null;
+                } else {
+                    console.log(`SILENT SESSION [pid=${pid}]: Reusing valid existing session`);
+                }
+            } else {
+                console.log(`SILENT SESSION [pid=${pid}]: No existing session found, creating new one`);
+            }
+
+            if (!activeSession) {
+                const sessionCreatedAt = Date.now();
+                const newSessionTTL = Math.floor((sessionCreatedAt + SESSION_DURATION_MS) / 1000);
+                const existingTrustLevel = existingSession && (existingSession as any).trustLevel as SessionTrustLevel | undefined;
+                const newTrustLevel: SessionTrustLevel = existingTrustLevel === 'email-verified' ? 'email-verified' : 'silent';
+
+                console.log(`SILENT SESSION [pid=${pid}]: Creating new session`);
+                await putOne(
+                    tableCfg.tableName,
+                    {
+                        id: pid,
+                        fingerprint: deviceFingerprint,
+                        createdAt: sessionCreatedAt,
+                        ttl: newSessionTTL, // TTL in seconds for DynamoDB
+                        trustLevel: newTrustLevel
+                    },
+                    process.env.AUTH_ROLE_ARN!,
+                    oidcToken
+                );
+            }
+
+            const { actions: appActions, role: appRole } = await getAppActions(host, oidcToken);
+            const accessToken = createToken(pid, deviceFingerprint, appActions, appRole, host);
+            return {
+                status: 'authenticated',
+                accessToken,
+                role: appRole,
+            };
+        }
+
+        // DEFAULT (email verification) MODE:
+        // Force user into verification flow for no-token requests.
         if (existingSession) {
-            // Delete the existing session even if it's not expired
-            // This forces the user through verification flow for new login attempts
-            console.log(`SECURITY CHECK [pid=${pid}]: Deleting existing session - no token provided requires new verification`);
-            console.log(`  - Session was created: ${new Date(existingSession.createdAt || 0).toISOString()}`);
-            console.log(`  - Session TTL: ${existingSession.ttl} (expires: ${new Date((existingSession.ttl || 0) * 1000).toISOString()})`);
+            const sessionTTL = existingSession.ttl;
+            const trustLevel = (existingSession as any).trustLevel as SessionTrustLevel | undefined;
+            const isEmailVerifiedSession = trustLevel === 'email-verified' || typeof trustLevel === 'undefined';
 
-            await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN, oidcToken);
+            if (sessionTTL > currentTimeSeconds && isEmailVerifiedSession) {
+                console.log(`SECURITY CHECK [pid=${pid}]: Valid global session found for SSO - minting new token for ${host}`);
+                const { actions: appActions, role: appRole } = await getAppActions(host, oidcToken);
+                const accessToken = createToken(pid, deviceFingerprint, appActions, appRole, host);
+                return {
+                    status: 'authenticated',
+                    accessToken,
+                    role: appRole
+                };
+            } else if (sessionTTL <= currentTimeSeconds) {
+                // Session expired, remove it and require verification
+                console.log(`SECURITY CHECK [pid=${pid}]: Expired session found - removing and forcing verification`);
+                await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN!, oidcToken);
+            } else {
+                console.log(`SECURITY CHECK [pid=${pid}]: Session present but not email-verified for host requiring verification, forcing verification flow`);
+            }
         } else {
             console.log(`SECURITY CHECK [pid=${pid}]: No existing session found - proceeding to verification flow`);
         }
 
-        // Force user into verification flow - do not allow session-based refresh
         console.log(`SECURITY CHECK [pid=${pid}]: Forcing verification flow for no-token request`);
-        const verificationAccessToken = createToken(pid, deviceFingerprint, verificationActionList);
+        const verificationAccessToken = createToken(pid, deviceFingerprint, verificationActionList, undefined, host);
         return {
             status: verificationActionList.includes(operation) ? 'expired-auth-flow' : 'needs-verification',
             accessToken: verificationAccessToken,
@@ -1246,8 +1361,8 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     console.log(`TOKEN REFRESH CHECK [pid=${pid}]: Token was provided but invalid/expired - checking for valid session to refresh`);
 
     // Check for existing session which is only created after email verification
-    // Sessions records use a primary key of pid-deviceFingerprint
-    const session = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN, oidcToken);
+    // (or silently for selected apps). Sessions records use a primary key of pid-deviceFingerprint
+    const session = await getOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN!, oidcToken);
 
     // If session found, generate fresh access token if the session isn't expired
     if (session) {
@@ -1256,6 +1371,8 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
         const sessionCreatedAt = session.createdAt || 0;
         const sessionAgeSeconds = currentTimeSeconds - Math.floor(sessionCreatedAt / 1000);
         const timeUntilExpirySeconds = sessionTTL - currentTimeSeconds;
+        const trustLevel = (session as any).trustLevel as SessionTrustLevel | undefined;
+        const isEmailVerifiedSession = trustLevel === 'email-verified' || typeof trustLevel === 'undefined';
 
         console.log(`SESSION CHECK [pid=${pid}]:`);
         console.log(`  - Session found: YES`);
@@ -1268,26 +1385,92 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
         console.log(`  - Is expired: ${sessionTTL <= currentTimeSeconds}`);
 
         if (sessionTTL <= currentTimeSeconds) {
-            // Session is expired, delete it and fall through to the verification process
-            console.log(`SESSION EXPIRED [pid=${pid}]: Deleting session and requiring re-verification`);
+            // Session is expired
+            console.log(`SESSION EXPIRED [pid=${pid}]: Session TTL <= current time`);
             console.log(`  - Reason: TTL (${sessionTTL}) <= current time (${currentTimeSeconds})`);
             console.log(`  - Session was valid for: ${sessionAgeSeconds} seconds instead of expected ${SESSION_DURATION_SECONDS || 'unknown'} seconds`);
-            await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, session.id, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN, oidcToken);
+            await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, session.id, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN!, oidcToken);
+
+            if (usesSilentSessions) {
+                // SILENT SESSION MODE:
+                // Automatically create a new session and mint a fresh access token instead of requiring verification.
+                const sessionCreatedAtNew = Date.now();
+                const sessionTTLNew = Math.floor((sessionCreatedAtNew + SESSION_DURATION_MS) / 1000);
+                 // Preserve email-verified trust if it was previously set; otherwise, remain silent.
+                const newTrustLevel: SessionTrustLevel = trustLevel === 'email-verified' ? 'email-verified' : 'silent';
+
+                console.log(`SILENT SESSION [pid=${pid}]: Creating new session after expiry`);
+                await putOne(
+                    tableCfg.tableName,
+                    {
+                        id: pid,
+                        fingerprint: deviceFingerprint,
+                        createdAt: sessionCreatedAtNew,
+                        ttl: sessionTTLNew,
+                        trustLevel: newTrustLevel
+                    },
+                    process.env.AUTH_ROLE_ARN!,
+                    oidcToken
+                );
+
+                const { actions: appActions, role: refreshRole } = await getAppActions(host, oidcToken);
+                return {
+                    status: 'authenticated',
+                    accessToken: createToken(pid, deviceFingerprint, appActions, refreshRole, host),
+                    role: refreshRole
+                };
+            }
         } else {
-            // Session is valid, generate fresh access token with all actions
-            console.log(`SESSION VALID [pid=${pid}]: Refreshing access token`);
-            console.log(`  - ${timeUntilExpirySeconds} seconds remaining on session`);
-            const allActionsList = await getAllActionsForUser(permittedHosts, oidcToken);
-            return {
-                status: 'authenticated',
-                accessToken: createToken(pid, deviceFingerprint, allActionsList)
-            };
+            // Session is valid
+            if (!usesSilentSessions && !isEmailVerifiedSession) {
+                console.log(`SESSION CHECK [pid=${pid}]: Session valid but not email-verified for host requiring verification, falling back to verification flow`);
+                // Fall through to verification token creation below
+            } else {
+                // Session is valid and acceptable, generate fresh access token with all actions
+                console.log(`SESSION VALID [pid=${pid}]: Refreshing access token`);
+                console.log(`  - ${timeUntilExpirySeconds} seconds remaining on session`);
+                const { actions: allActionsList, role: refreshRole } = await getAppActions(host, oidcToken);
+                return {
+                    status: 'authenticated',
+                    accessToken: createToken(pid, deviceFingerprint, allActionsList, refreshRole, host),
+                    role: refreshRole
+                };
+            }
         }
     } else {
         console.log(`SESSION CHECK [pid=${pid}]:`);
         console.log(`  - Session found: NO`);
         console.log(`  - Reason: No session record exists for pid=${pid} with fingerprint=${deviceFingerprint}`);
-        console.log(`  - User will need to complete email verification to create a new session`);
+        console.log(`  - User will need to complete email verification to create a new session (unless silent mode is enabled)`);
+
+        if (usesSilentSessions) {
+            // SILENT SESSION MODE:
+            // No session exists; create a new one and mint a fresh access token.
+            const sessionCreatedAtNew = Date.now();
+            const sessionTTLNew = Math.floor((sessionCreatedAtNew + SESSION_DURATION_MS) / 1000);
+            const newTrustLevel: SessionTrustLevel = 'silent';
+
+            console.log(`SILENT SESSION [pid=${pid}]: Creating new session with no prior record`);
+            await putOne(
+                tableCfg.tableName,
+                {
+                    id: pid,
+                    fingerprint: deviceFingerprint,
+                    createdAt: sessionCreatedAtNew,
+                    ttl: sessionTTLNew,
+                    trustLevel: newTrustLevel
+                },
+                process.env.AUTH_ROLE_ARN!,
+                oidcToken
+            );
+
+            const { actions: appActions, role: refreshRole } = await getAppActions(host, oidcToken);
+            return {
+                status: 'authenticated',
+                accessToken: createToken(pid, deviceFingerprint, appActions, refreshRole, host),
+                role: refreshRole
+            };
+        }
     }
 
     // No existing session - begin verification process
@@ -1300,7 +1483,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     // Note: Verification tokens are managed via DynamoDB TTL to prevent race conditions
     // between multiple open apps. Tokens expire automatically after VERIFICATION_DURATION.
 
-    const verificationAccessToken = createToken(pid, deviceFingerprint, verificationActionList);
+    const verificationAccessToken = createToken(pid, deviceFingerprint, verificationActionList, role, host);
     return {
         status: verificationActionList.includes(operation) ? 'expired-auth-flow' : 'needs-verification',
         accessToken: verificationAccessToken,
@@ -1323,11 +1506,11 @@ export async function getConfigValue(pid: string, host: string, key: string, oid
 
     // Does this user have access to the host they're trying to get the config value for?
     let tableCfg = tableGetConfig('auth');
-    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN, oidcToken);
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN!, oidcToken);
     let usingDefaultData = false;
 
     if (!data) {
-        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN, oidcToken);
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN!, oidcToken);
         usingDefaultData = true;
         if (!data) {
             throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
@@ -1348,7 +1531,7 @@ export async function getConfigValue(pid: string, host: string, key: string, oid
 
     // Key not found in user's record and possibly in default record
     if (!usingDefaultData) {
-        const defaultData = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN, oidcToken);
+        const defaultData = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN!, oidcToken);
         if (!defaultData) {
             throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
         }
@@ -1371,7 +1554,7 @@ export async function getConfigValue(pid: string, host: string, key: string, oid
  */
 export async function getActionsProfiles(oidcToken?: string): Promise<string[]> {
     const tableCfg = tableGetConfig('actions-profile');
-    const allProfiles = await listAllFiltered(tableCfg.tableName, 'profile', 'profile', process.env.AUTH_ROLE_ARN, oidcToken);
+    const allProfiles = await listAllFiltered(tableCfg.tableName, 'profile', 'profile', process.env.AUTH_ROLE_ARN!, oidcToken);
 
     // Extract just the profile names from the results
     const profileNames = allProfiles.map((item: any) => item.profile).filter(Boolean);
@@ -1388,7 +1571,7 @@ export async function getActionsProfiles(oidcToken?: string): Promise<string[]> 
  */
 export async function getAuthList(oidcToken?: string): Promise<any[]> {
     const tableCfg = tableGetConfig('auth');
-    const allAuthRecords = await listAll(tableCfg.tableName, process.env.AUTH_ROLE_ARN, oidcToken);
+    const allAuthRecords = await listAll(tableCfg.tableName, process.env.AUTH_ROLE_ARN!, oidcToken);
 
     return allAuthRecords;
 }
@@ -1404,7 +1587,7 @@ export async function getAuthList(oidcToken?: string): Promise<any[]> {
  */
 export async function putAuthItem(id: string, authRecord: any, oidcToken?: string): Promise<void> {
     const tableCfg = tableGetConfig('auth');
-    await putOne(tableCfg.tableName, authRecord, process.env.AUTH_ROLE_ARN, oidcToken);
+    await putOne(tableCfg.tableName, authRecord, process.env.AUTH_ROLE_ARN!, oidcToken);
 }
 
 /**

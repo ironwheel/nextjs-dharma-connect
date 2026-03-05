@@ -38,6 +38,7 @@ type VerificationSendOutcome =
 interface AuthVerificationProps {
     pid: string | null;
     hash: string | null;
+    eventCode?: string;
 }
 
 /**
@@ -46,7 +47,7 @@ interface AuthVerificationProps {
  * @param {AuthVerificationProps} props - The props for the component.
  * @returns {React.FC} The AuthVerification component.
  */
-const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
+const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash, eventCode }) => {
     const [isSending, setIsSending] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isSent, setIsSent] = useState(false);
@@ -63,9 +64,12 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash }) => {
             return;
         }
         setIsRedirecting(true);
-        const redirectUrl = `/?pid=${pid}&hash=${hash}`;
+        let redirectUrl = `/?pid=${pid}&hash=${hash}`;
+        if (eventCode) {
+            redirectUrl += `&eventCode=${eventCode}`;
+        }
         window.location.href = redirectUrl;
-    }, [pid, hash]);
+    }, [pid, hash, eventCode]);
 
     const deriveErrorMessage = useCallback((err: unknown, fallback: string) => {
         if (err instanceof Error && err.message) {

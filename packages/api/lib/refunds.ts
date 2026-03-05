@@ -22,6 +22,7 @@ export interface RefundRequest {
     reason: string;
     requestPid: string;
     refundAmount?: number; // Amount in cents
+    roleArn: string;
     oidcToken?: string;
 }
 
@@ -42,7 +43,7 @@ export async function createRefundRequest(request: RefundRequest) {
 
     // Using simple loop for serial execution, parallel Promise.all map could be faster if list is long
     for (const pid of approverPids) {
-        const student = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, pid, undefined, request.oidcToken);
+        const student = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, pid, request.roleArn, request.oidcToken);
         if (student && student.email) {
             emails.push(student.email);
         }
@@ -62,7 +63,7 @@ export async function createRefundRequest(request: RefundRequest) {
 
     // Using listAll (Scan) for now as we transition to GSI. 
     // This is acceptable for checking the guard rail on a per-tenant table.
-    const allRefunds = await import('./dynamoClient').then(mod => mod.listAll(tableCfg.tableName, undefined, request.oidcToken));
+    const allRefunds = await import('./dynamoClient').then(mod => mod.listAll(tableCfg.tableName, request.roleArn, request.oidcToken));
     const recentRefunds = allRefunds.filter((r: any) => r.createdAt > oneDayAgo);
 
     if (recentRefunds.length >= 4) {
@@ -134,7 +135,7 @@ export async function createRefundRequest(request: RefundRequest) {
         refundRecord,
         'attribute_not_exists(stripePaymentIntent)',
         undefined,
-        undefined,
+        request.roleArn,
         request.oidcToken
     );
 
@@ -143,11 +144,9 @@ export async function createRefundRequest(request: RefundRequest) {
 }
 
 /**
- * @function checkRefundRequests
- * @description Checks a list of payment intent IDs to see which ones already have refund requests.
  * @returns List of payment intent IDs that exist in the refunds table.
  */
-export async function checkRefundRequests(paymentIntentIds: string[], oidcToken?: string): Promise<Record<string, { approvalState: string, approverName?: string }>> {
+export async function checkRefundRequests(paymentIntentIds: string[], roleArn: string, oidcToken?: string): Promise<Record<string, { approvalState: string, approverName?: string }>> {
     const tableCfg = tableGetConfig('refunds');
     const studentTableCfg = tableGetConfig('students');
 
@@ -155,7 +154,7 @@ export async function checkRefundRequests(paymentIntentIds: string[], oidcToken?
     const uniqueIds = Array.from(new Set(paymentIntentIds));
 
     // Batch get supports up to 100 items
-    const items = await batchGetItems(tableCfg.tableName, tableCfg.pk, uniqueIds, undefined, oidcToken);
+    const items = await batchGetItems(tableCfg.tableName, tableCfg.pk, uniqueIds, roleArn, oidcToken);
 
     const resultMap: Record<string, { approvalState: string, approverName?: string }> = {};
 
@@ -168,7 +167,7 @@ export async function checkRefundRequests(paymentIntentIds: string[], oidcToken?
     // Resolve approver names
     const approverNames: Record<string, string> = {};
     if (approverPids.size > 0) {
-        const approvers = await batchGetItems(studentTableCfg.tableName, studentTableCfg.pk, Array.from(approverPids), undefined, oidcToken);
+        const approvers = await batchGetItems(studentTableCfg.tableName, studentTableCfg.pk, Array.from(approverPids), roleArn, oidcToken);
         approvers.forEach(a => {
             approverNames[a.id] = `${a.first} ${a.last}`;
         });
@@ -217,7 +216,7 @@ async function sendRefundRequestNotifications(request: RefundRequest, emails: st
     const studentsTableCfg = tableGetConfig('students');
     let studentName = request.pid;
     try {
-        const student = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, request.pid, undefined, request.oidcToken);
+        const student = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, request.pid, request.roleArn, request.oidcToken);
         if (student && student.first && student.last) {
             studentName = `${student.first} ${student.last}`;
         }
@@ -228,7 +227,7 @@ async function sendRefundRequestNotifications(request: RefundRequest, emails: st
     // Fetch Requester Name
     let requesterName = request.requestPid;
     try {
-        const requester = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, request.requestPid, undefined, request.oidcToken);
+        const requester = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, request.requestPid, request.roleArn, request.oidcToken);
         if (requester && requester.first && requester.last) {
             requesterName = `${requester.first} ${requester.last}`;
         }
@@ -240,7 +239,7 @@ async function sendRefundRequestNotifications(request: RefundRequest, emails: st
     const eventsTableCfg = tableGetConfig('events');
     let eventName = request.eventCode;
     try {
-        const event = await getOne(eventsTableCfg.tableName, eventsTableCfg.pk, request.eventCode, undefined, request.oidcToken);
+        const event = await getOne(eventsTableCfg.tableName, eventsTableCfg.pk, request.eventCode, request.roleArn, request.oidcToken);
         if (event && event.name) {
             eventName = event.name;
         }
@@ -277,11 +276,9 @@ async function sendRefundRequestNotifications(request: RefundRequest, emails: st
 }
 
 /**
- * @function listRefunds
- * @description lists the top 10 most recent refund requests.
  * @returns {Promise<{ items: any[], total: number }>} List of refund requests.
  */
-export async function listRefunds(limit: number = 20, offset: number = 0, oidcToken?: string): Promise<{ items: any[], total: number }> {
+export async function listRefunds(limit: number = 20, offset: number = 0, roleArn: string, oidcToken?: string): Promise<{ items: any[], total: number }> {
     const tableCfg = tableGetConfig('refunds');
     // Since we don't have a GSI on createdAt, we'll scan and sort. 
     // Ideally, for scale, we should have a GSI or index.
@@ -290,7 +287,7 @@ export async function listRefunds(limit: number = 20, offset: number = 0, oidcTo
     // Given the request "top 10 decending order records sorted by createdAt", we scan all.
 
     // Using listAll from dynamoClient (which is a scan)
-    const allRefunds = await import('./dynamoClient').then(mod => mod.listAll(tableCfg.tableName, undefined, oidcToken));
+    const allRefunds = await import('./dynamoClient').then(mod => mod.listAll(tableCfg.tableName, roleArn, oidcToken));
 
     // Sort by createdAt descending
     allRefunds.sort((a: any, b: any) => {
@@ -314,7 +311,7 @@ export async function listRefunds(limit: number = 20, offset: number = 0, oidcTo
         // Resolve Student
         if (r.pid) {
             try {
-                const s = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.pid, undefined, oidcToken);
+                const s = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.pid, roleArn, oidcToken);
                 if (s) {
                     if (s.first && s.last) {
                         studentName = `${s.first} ${s.last}`;
@@ -379,7 +376,7 @@ export async function listRefunds(limit: number = 20, offset: number = 0, oidcTo
             // Update variable init too? No, I'll fix the property access here.
 
             try {
-                const req = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.requesterPid, undefined, oidcToken);
+                const req = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.requesterPid, roleArn, oidcToken);
                 if (req) {
                     if (req.first && req.last) {
                         requesterName = `${req.first} ${req.last}`;
@@ -396,7 +393,7 @@ export async function listRefunds(limit: number = 20, offset: number = 0, oidcTo
         } else if (r.requestPid) {
             // Fallback if field name was inconsistent in old records
             try {
-                const req = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.requestPid, undefined, oidcToken);
+                const req = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.requestPid, roleArn, oidcToken);
                 if (req && req.first && req.last) requesterName = `${req.first} ${req.last}`;
                 else requesterName = r.requestPid;
             } catch (e) { console.error('Failed to resolve requester (legacy)', e); }
@@ -405,7 +402,7 @@ export async function listRefunds(limit: number = 20, offset: number = 0, oidcTo
         // Resolve Approver
         if (r.approverPid) {
             try {
-                const app = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.approverPid, undefined, oidcToken);
+                const app = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, r.approverPid, roleArn, oidcToken);
                 if (app) {
                     if (app.first && app.last) {
                         approverName = `${app.first} ${app.last}`;
@@ -419,7 +416,7 @@ export async function listRefunds(limit: number = 20, offset: number = 0, oidcTo
         // Resolve Event
         if (r.eventCode) {
             try {
-                const ev = await getOne(eventsTableCfg.tableName, eventsTableCfg.pk, r.eventCode, undefined, oidcToken);
+                const ev = await getOne(eventsTableCfg.tableName, eventsTableCfg.pk, r.eventCode, roleArn, oidcToken);
                 if (ev && ev.name) eventName = ev.name;
             } catch (e) { console.error('Failed to resolve event', e); }
         }
@@ -447,13 +444,14 @@ export async function processRefund(
     action: 'APPROVE' | 'DENY',
     approverPid: string,
     host: string,
+    roleArn: string,
     oidcToken?: string
 ) {
     const refundsTableCfg = tableGetConfig('refunds');
     const studentsTableCfg = tableGetConfig('students');
 
     // 1. Fetch Refund Request
-    const refundRequest = await getOne(refundsTableCfg.tableName, refundsTableCfg.pk, stripePaymentIntent, undefined, oidcToken);
+    const refundRequest = await getOne(refundsTableCfg.tableName, refundsTableCfg.pk, stripePaymentIntent, roleArn, oidcToken);
     if (!refundRequest) {
         throw new Error('Refund request not found');
     }
@@ -489,7 +487,7 @@ export async function processRefund(
         // Then set status = REFUNDED and refundedAt = timestamp.
         const transactionsTableCfg = tableGetConfig('transactions');
         try {
-            const txRecord = await getOne(transactionsTableCfg.tableName, transactionsTableCfg.pk, stripePaymentIntent, undefined, oidcToken);
+            const txRecord = await getOne(transactionsTableCfg.tableName, transactionsTableCfg.pk, stripePaymentIntent, roleArn, oidcToken);
             if (!txRecord) {
                 const msg = `Transaction record not found for intent ${stripePaymentIntent}`;
                 // If the user wants this to be a BLOCKER, we throw error.
@@ -513,7 +511,7 @@ export async function processRefund(
                     '#status': 'status',
                     '#refundedAt': 'refundedAt'
                 },
-                undefined,
+                roleArn,
                 oidcToken
             );
 
@@ -546,7 +544,7 @@ export async function processRefund(
                     '#approver': 'approverPid',
                     '#err': 'errMsg'
                 },
-                undefined,
+                roleArn,
                 oidcToken
             );
             throw new Error(`Stripe refund failed: ${stripeErr.message}`);
@@ -559,7 +557,7 @@ export async function processRefund(
 
         try {
             // First, fetch the student record to find ALL occurrences of this payment intent
-            const student = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, studentPid, undefined, oidcToken);
+            const student = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, studentPid, roleArn, oidcToken);
 
             if (student && student.programs) {
                 const updateActions: string[] = [];
@@ -608,7 +606,7 @@ export async function processRefund(
                         updateExpr,
                         { ':trueVal': true },
                         expressionAttributeNames,
-                        undefined,
+                        roleArn,
                         oidcToken
                     );
                 } else {
@@ -622,7 +620,7 @@ export async function processRefund(
 
         // C. Send Email to Student
         try {
-            await sendRefundEmail(studentPid, eventCode, subEvent, stripePaymentIntent, refundResult?.amount, oidcToken);
+            await sendRefundEmail(studentPid, eventCode, subEvent, stripePaymentIntent, refundResult?.amount, roleArn, oidcToken);
         } catch (emailErr) {
             console.error('Failed to send student refund email:', emailErr);
             // Non-fatal

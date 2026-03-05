@@ -13,6 +13,7 @@
     "dev:translation-manager": "pnpm --filter translation-manager dev",
     "dev:refund-request": "pnpm --filter refund-request dev",
     "dev:refund-approve": "pnpm --filter refund-approve dev",
+    "dev:register": "pnpm --filter register dev",
     "build:api": "pnpm --filter api build",
     "build:student-manager": "pnpm --filter student-manager build",
     "build:student-dashboard": "pnpm --filter student-dashboard build",

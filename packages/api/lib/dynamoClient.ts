@@ -41,21 +41,19 @@ const docClientInstances: Record<string, CachedClient> = {};
  * @async
  * @function getDocClient
  * @description Initializes and returns a singleton DynamoDBDocumentClient instance.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @returns {Promise<DynamoDBDocumentClient>} The initialized document client.
  * @throws {Error} If essential AWS configuration environment variables are not set or client fails to initialize.
  */
-async function getDocClient(roleArnOverride?: string, oidcToken?: string): Promise<DynamoDBDocumentClient> {
+async function getDocClient(appSpecificRoleArn: string, oidcToken?: string): Promise<DynamoDBDocumentClient> {
   const REGION = getAwsRegion();
   if (!REGION) {
     console.error("db-client: AWS_REGION environment variable is not set.");
     throw new Error("Server configuration error: Missing AWS Region.");
   }
 
-  const cacheKey = roleArnOverride || 'default';
+  const cacheKey = appSpecificRoleArn;
 
-  // Return cached instance if exists
-  // Return cached instance if exists and valid
   // Return cached instance if exists and valid
   const cached = docClientInstances[cacheKey];
   if (cached) {
@@ -83,54 +81,48 @@ async function getDocClient(roleArnOverride?: string, oidcToken?: string): Promi
     const tokenToUse = oidcToken;
 
     if (tokenToUse) {
-      const defaultRoleArn = process.env.DEFAULT_GUEST_ROLE_ARN;
-      if (!defaultRoleArn) {
-        throw new Error("Server configuration error: Missing DEFAULT_GUEST_ROLE_ARN.");
+      const proxyRoleArn = process.env.OIDC_PROXY_ROLE_ARN;
+      if (!proxyRoleArn) {
+        throw new Error("Server configuration error: Missing OIDC_PROXY_ROLE_ARN.");
       }
-      console.log("db-client: OIDC Token detected. Using fromWebToken.");
+      // console.log("db-client: OIDC Token detected. Using fromWebToken with proxy role.");
       baseCredentials = fromWebToken({
-        roleArn: defaultRoleArn,
+        roleArn: proxyRoleArn,
         webIdentityToken: tokenToUse,
-        roleSessionName: "VercelSession"
+        roleSessionName: "DharmaConnectProxySession"
       });
     }
 
     let ddbBaseClient: DynamoDBClient;
     let expiration: number | null = null;
 
-    if (roleArnOverride) {
-      // Assume the specified role (Auth Role) using the Base Credentials (Guest Role)
-      const stsClient = new STSClient({
-        region: REGION,
-        credentials: baseCredentials // Use OIDC credentials if available, otherwise default chain
-      });
-      const assumeRoleCommand = new AssumeRoleCommand({
-        RoleArn: roleArnOverride,
-        RoleSessionName: 'DharmaConnectSession',
-      });
-      const { Credentials } = await stsClient.send(assumeRoleCommand);
+    // Assume the specified app role using the Base Credentials (Proxy Role or Default Chain)
+    const stsClient = new STSClient({
+      region: REGION,
+      credentials: baseCredentials // Use OIDC proxy credentials if available, otherwise default chain
+    });
 
-      if (!Credentials || !Credentials.AccessKeyId || !Credentials.SecretAccessKey || !Credentials.SessionToken) {
-        throw new Error("Failed to obtain temporary credentials from STS.");
-      }
+    // We assume the app specific role is ALWAYS required and usually assumed from the proxy role
+    const assumeRoleCommand = new AssumeRoleCommand({
+      RoleArn: appSpecificRoleArn,
+      RoleSessionName: 'AppActionSession',
+    });
+    const { Credentials } = await stsClient.send(assumeRoleCommand);
 
-      ddbBaseClient = new DynamoDBClient({
-        region: REGION,
-        credentials: {
-          accessKeyId: Credentials.AccessKeyId,
-          secretAccessKey: Credentials.SecretAccessKey,
-          sessionToken: Credentials.SessionToken,
-        },
-      });
-      if (Credentials.Expiration) {
-        expiration = Credentials.Expiration.getTime();
-      }
-    } else {
-      // Use default credential provider chain or explicit OIDC
-      ddbBaseClient = new DynamoDBClient({
-        region: REGION,
-        credentials: baseCredentials
-      });
+    if (!Credentials || !Credentials.AccessKeyId || !Credentials.SecretAccessKey || !Credentials.SessionToken) {
+      throw new Error("Failed to obtain temporary credentials from STS.");
+    }
+
+    ddbBaseClient = new DynamoDBClient({
+      region: REGION,
+      credentials: {
+        accessKeyId: Credentials.AccessKeyId,
+        secretAccessKey: Credentials.SecretAccessKey,
+        sessionToken: Credentials.SessionToken,
+      },
+    });
+    if (Credentials.Expiration) {
+      expiration = Credentials.Expiration.getTime();
     }
 
     const docClientInstance = DynamoDBDocumentClient.from(ddbBaseClient);
@@ -157,12 +149,12 @@ async function getDocClient(roleArnOverride?: string, oidcToken?: string): Promi
  * @function listAll
  * @description Scan entire table and return all items.
  * @param {string} tableName - The name of the table to scan.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @returns {Promise<any[]>} A promise that resolves to an array of items.
  * @throws {Error} When AWS operation fails or table cannot be scanned.
  */
-export async function listAll(tableName: string, roleArnOverride?: string, oidcToken?: string) {
-  const client = await getDocClient(roleArnOverride, oidcToken);
+export async function listAll(tableName: string, appSpecificRoleArn: string, oidcToken?: string) {
+  const client = await getDocClient(appSpecificRoleArn, oidcToken);
   const items: any[] = [];
   let ExclusiveStartKey;
   try {
@@ -191,12 +183,12 @@ export async function listAll(tableName: string, roleArnOverride?: string, oidcT
  * @function countAll
  * @description Count all items in a table efficiently without loading them into memory.
  * @param {string} tableName - The name of the table to count.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @returns {Promise<number>} A promise that resolves to the total number of items.
  * @throws {Error} When AWS operation fails or table cannot be counted.
  */
-export async function countAll(tableName: string, roleArnOverride?: string, oidcToken?: string) {
-  const client = await getDocClient(roleArnOverride, oidcToken);
+export async function countAll(tableName: string, appSpecificRoleArn: string, oidcToken?: string) {
+  const client = await getDocClient(appSpecificRoleArn, oidcToken);
   let totalCount = 0;
   let ExclusiveStartKey;
   try {
@@ -229,7 +221,7 @@ export async function countAll(tableName: string, roleArnOverride?: string, oidc
  * @param {Record<string, any>} scanParams - Optional scan parameters.
  * @param {Record<string, any>} lastEvaluatedKey - Optional last evaluated key for pagination.
  * @param {number} limit - Optional limit for the number of items to return.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @param {string} projectionExpression - Optional projection expression.
  * @param {Record<string, string>} expressionAttributeNames - Optional expression attribute names.
  * @returns {Promise<any>} A promise that resolves to an object containing the items and the last evaluated key.
@@ -240,12 +232,12 @@ export async function listAllChunked(
   scanParams: Record<string, any> = {},
   lastEvaluatedKey?: Record<string, any>,
   limit?: number,
-  roleArnOverride?: string,
+  appSpecificRoleArn?: string,
   projectionExpression?: string,
   expressionAttributeNames?: Record<string, string>,
   oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride, oidcToken);
+  const client = await getDocClient(appSpecificRoleArn!, oidcToken);
   const baseParams = {
     TableName: tableName,
     ...scanParams,
@@ -283,7 +275,7 @@ export async function listAllChunked(
  * @param {string} tableName - The name of the table to scan.
  * @param {string} fieldName - The name of the field to filter on.
  * @param {string} fieldValue - The value of the field to filter on.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @returns {Promise<any[]>} A promise that resolves to an array of matching items.
  * @throws {Error} When AWS operation fails or table cannot be filtered.
  */
@@ -291,10 +283,10 @@ export async function listAllFiltered(
   tableName: string,
   fieldName: string,
   fieldValue: string,
-  roleArnOverride?: string,
+  appSpecificRoleArn: string,
   oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride, oidcToken);
+  const client = await getDocClient(appSpecificRoleArn, oidcToken);
   const items: any[] = [];
   let ExclusiveStartKey;
   console.log("listAllFiltered: tableName:", tableName);
@@ -333,7 +325,7 @@ export async function listAllFiltered(
  * @param {string} tableName - The name of the table to get the item from.
  * @param {string} pkName - The name of the partition key.
  * @param {string} id - The ID of the item to get.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @returns {Promise<any>} A promise that resolves to the item.
  * @throws {Error} When AWS operation fails or item cannot be retrieved from the table.
  */
@@ -341,10 +333,10 @@ export async function getOne(
   tableName: string,
   pkName: string,
   id: string,
-  roleArnOverride?: string,
+  appSpecificRoleArn: string,
   oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride, oidcToken);
+  const client = await getDocClient(appSpecificRoleArn, oidcToken);
   try {
     const { Item } = await client.send(
       new GetCommand({
@@ -371,7 +363,7 @@ export async function getOne(
  * @param {string} pkValue - The value of the partition key.
  * @param {string} skName - The name of the sort key.
  * @param {string} skValue - The value of the sort key.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @returns {Promise<any>} A promise that resolves to the item.
  * @throws {Error} When AWS operation fails or item cannot be retrieved from the table.
  */
@@ -381,10 +373,10 @@ export async function getOneWithSort(
   pkValue: string,
   skName: string,
   skValue: string,
-  roleArnOverride?: string,
+  appSpecificRoleArn: string,
   oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride, oidcToken);
+  const client = await getDocClient(appSpecificRoleArn, oidcToken);
   try {
     const { Item } = await client.send(
       new GetCommand({
@@ -411,17 +403,17 @@ export async function getOneWithSort(
  * @description Put a single item into the table.
  * @param {string} tableName - The name of the table to put the item into.
  * @param {Record<string, any>} item - The item to put into the table.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @returns {Promise<void>}
  * @throws {Error} When AWS operation fails or item cannot be put into the table.
  */
 export async function putOne(
   tableName: string,
   item: Record<string, any>,
-  roleArnOverride?: string,
+  appSpecificRoleArn: string,
   oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride, oidcToken);
+  const client = await getDocClient(appSpecificRoleArn, oidcToken);
   try {
     await client.send(
       new PutCommand({
@@ -446,7 +438,7 @@ export async function putOne(
  * @param {Record<string, any>} item - The item to put into the table.
  * @param {string} conditionExpression - The condition expression to evaluate.
  * @param {Record<string, any>} expressionAttributeValues - Optional expression attribute values.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @returns {Promise<void>}
  * @throws {Error} When AWS operation fails or item cannot be put into the table.
  */
@@ -455,10 +447,10 @@ export async function putOneWithCondition(
   item: Record<string, any>,
   conditionExpression: string,
   expressionAttributeValues?: Record<string, any>,
-  roleArnOverride?: string,
+  appSpecificRoleArn?: string,
   oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride, oidcToken);
+  const client = await getDocClient(appSpecificRoleArn!, oidcToken);
   try {
     const params: any = {
       TableName: tableName,
@@ -492,7 +484,7 @@ export async function putOneWithCondition(
  * @param {string} updateExpression - The update expression.
  * @param {Record<string, any>} expressionAttributeValues - The expression attribute values.
  * @param {Record<string, string>} expressionAttributeNames - The expression attribute names.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @returns {Promise<void>}
  * @throws {Error} When AWS operation fails or item cannot be updated in the table.
  */
@@ -502,10 +494,10 @@ export async function updateItem(
   updateExpression: string,
   expressionAttributeValues: Record<string, any>,
   expressionAttributeNames?: Record<string, string>,
-  roleArnOverride?: string,
+  appSpecificRoleArn?: string,
   oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride, oidcToken);
+  const client = await getDocClient(appSpecificRoleArn!, oidcToken);
   try {
     const updateParams: any = {
       TableName: tableName,
@@ -542,7 +534,7 @@ export async function updateItem(
  * @param {string} updateExpression - The update expression.
  * @param {Record<string, any>} expressionAttributeValues - The expression attribute values.
  * @param {Record<string, string>} expressionAttributeNames - The expression attribute names.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @returns {Promise<void>}
  * @throws {Error} When AWS operation fails, item cannot be updated, or condition expression fails.
  */
@@ -552,10 +544,10 @@ export async function updateItemWithCondition(
   updateExpression: string,
   expressionAttributeValues: Record<string, any>,
   expressionAttributeNames?: Record<string, string>,
-  roleArnOverride?: string,
+  appSpecificRoleArn?: string,
   oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride, oidcToken);
+  const client = await getDocClient(appSpecificRoleArn!, oidcToken);
   try {
     const updateParams: any = {
       TableName: tableName,
@@ -595,7 +587,7 @@ export async function updateItemWithCondition(
  * @param {string} tableName - The name of the table to delete the item from.
  * @param {string} pkName - The name of the partition key.
  * @param {string} id - The ID of the item to delete.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @returns {Promise<void>}
  * @throws {Error} When AWS operation fails or item cannot be deleted from the table.
  */
@@ -603,10 +595,10 @@ export async function deleteOne(
   tableName: string,
   pkName: string,
   id: string,
-  roleArnOverride?: string,
+  appSpecificRoleArn: string,
   oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride, oidcToken);
+  const client = await getDocClient(appSpecificRoleArn, oidcToken);
   try {
     await client.send(
       new DeleteCommand({
@@ -632,7 +624,7 @@ export async function deleteOne(
  * @param {string} pkValue - The value of the partition key.
  * @param {string} skName - The name of the sort key.
  * @param {string} skValue - The value of the sort key.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @returns {Promise<void>}
  * @throws {Error} When AWS operation fails or item cannot be deleted from the table.
  */
@@ -642,10 +634,10 @@ export async function deleteOneWithSort(
   pkValue: string,
   skName: string,
   skValue: string,
-  roleArnOverride?: string,
+  appSpecificRoleArn: string,
   oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride, oidcToken);
+  const client = await getDocClient(appSpecificRoleArn, oidcToken);
   try {
     await client.send(
       new DeleteCommand({
@@ -672,7 +664,7 @@ export async function deleteOneWithSort(
  * @param {string} tableName - The name of the table to get the items from.
  * @param {string} pkName - The name of the primary key.
  * @param {string[]} ids - An array of IDs to get.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @returns {Promise<any[]>} A promise that resolves to an array of items.
  * @throws {Error} When AWS operation fails or items cannot be retrieved from the table.
  */
@@ -680,10 +672,10 @@ export async function batchGetItems(
   tableName: string,
   pkName: string,
   ids: string[],
-  roleArnOverride?: string,
+  appSpecificRoleArn: string,
   oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride, oidcToken);
+  const client = await getDocClient(appSpecificRoleArn, oidcToken);
   const items: any[] = [];
 
   // DynamoDB BatchGet has a limit of 100 items per request
@@ -730,7 +722,7 @@ export async function batchGetItems(
  * @param {string} primaryKeyValue - The value of the primary key.
  * @param {string} sortKeyName - The name of the sort key.
  * @param {string} sortKeyValue - The value the sort key should begin with.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @returns {Promise<any[]>} A promise that resolves to an array of items.
  * @throws {Error} When AWS operation fails or table cannot be queried.
  */
@@ -740,10 +732,10 @@ async function listAllQueryBeginsWithSortKey(
   primaryKeyValue: string,
   sortKeyName: string,
   sortKeyValue: string,
-  roleArnOverride?: string,
+  appSpecificRoleArn: string,
   oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride, oidcToken);
+  const client = await getDocClient(appSpecificRoleArn, oidcToken);
   const items: any[] = [];
   let ExclusiveStartKey;
 
@@ -783,7 +775,7 @@ async function listAllQueryBeginsWithSortKey(
  * @param {string} primaryKeyValues - A comma-separated string of primary key values.
  * @param {string} sortKeyName - The name of the sort key.
  * @param {string} sortKeyValue - The value the sort key should begin with.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @returns {Promise<Record<string, any[]>>} A promise that resolves to a record of items, where the keys are the primary key values.
  * @throws {Error} When AWS operation fails or table cannot be queried.
  */
@@ -793,7 +785,7 @@ export async function listAllQueryBeginsWithSortKeyMultiple(
   primaryKeyValues: string,
   sortKeyName: string,
   sortKeyValue: string,
-  roleArnOverride?: string,
+  appSpecificRoleArn: string,
   oidcToken?: string
 ) {
   const primaryKeyList = primaryKeyValues.split(',');
@@ -806,7 +798,7 @@ export async function listAllQueryBeginsWithSortKeyMultiple(
       pk.trim(),
       sortKeyName,
       sortKeyValue,
-      roleArnOverride,
+      appSpecificRoleArn,
       oidcToken
     );
     results[pk] = items;
@@ -823,7 +815,7 @@ export async function listAllQueryBeginsWithSortKeyMultiple(
  * @param {string} indexName - The name of the index to query.
  * @param {string} pkName - The name of the partition key for the index.
  * @param {string} pkValue - The value of the partition key.
- * @param {string} roleArnOverride - Optional role ARN to assume.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
  * @returns {Promise<any[]>} A promise that resolves to an array of items.
  * @throws {Error} When AWS operation fails or index cannot be queried.
  */
@@ -832,10 +824,10 @@ export async function queryIndex(
   indexName: string,
   pkName: string,
   pkValue: string,
-  roleArnOverride?: string,
+  appSpecificRoleArn: string,
   oidcToken?: string
 ) {
-  const client = await getDocClient(roleArnOverride, oidcToken);
+  const client = await getDocClient(appSpecificRoleArn, oidcToken);
   const items: any[] = [];
   let ExclusiveStartKey;
 

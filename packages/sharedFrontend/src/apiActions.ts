@@ -479,6 +479,43 @@ export async function deleteTableItem(
 
 /**
  * @async
+ * @function deleteTableItemWithSortKey
+ * @description Delete a single item by partition key and sort key (for tables with composite keys).
+ * @param {string} resource - The resource (e.g. 'prompts').
+ * @param {string} pkName - Partition key attribute name (e.g. 'prompt').
+ * @param {string} pkValue - Partition key value.
+ * @param {string} skName - Sort key attribute name (e.g. 'language').
+ * @param {string} skValue - Sort key value.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<any>}
+ */
+export async function deleteTableItemWithSortKey(
+    resource: string,
+    pkName: string,
+    pkValue: string,
+    skName: string,
+    skValue: string,
+    pid: string,
+    hash: string
+): Promise<any> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/table/${resource}/delete-one`, pid, hash, {
+            [pkName]: pkValue,
+            [skName]: skValue,
+        });
+        if (response && response.redirected) {
+            return { redirected: true };
+        }
+        return response;
+    } catch (error: any) {
+        console.error(`[API] deleteTableItemWithSortKey failed for ${resource}:`, error);
+        throw new Error(error.message || 'Failed to delete table item');
+    }
+}
+
+/**
+ * @async
  * @function updateTableItem
  * @description Update an item by id in a table.
  * @param {string} resource - The resource to update the item in.
@@ -913,6 +950,39 @@ export async function getVimeoShowcaseVideos(
         console.error(`[API] getVimeoShowcaseVideos failed for showcase ${showcaseId}:`, error);
         throw new Error(error.message || 'Failed to extract showcase videos');
     }
+}
+
+/**
+ * @async
+ * @function translatePromptText
+ * @description Translate English prompt text to Czech, French, German, Italian, Portuguese, and Spanish via AWS Translate.
+ * @param {string} englishText - The English text to translate.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<Record<string, string> | RedirectedResponse>} A promise that resolves to a map of language name -> text (including English).
+ */
+export async function translatePromptText(
+  englishText: string,
+  pid: string,
+  hash: string
+): Promise<Record<string, string> | RedirectedResponse> {
+  try {
+    const response = await api.post(`${API_BASE_URL}/translate/prompt`, pid, hash, {
+      text: englishText,
+    });
+
+    if (response && response.redirected) {
+      return { redirected: true };
+    }
+
+    return response?.translations ?? {};
+  } catch (error: any) {
+    console.error('[API] translatePromptText failed:', error);
+    if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+      return { redirected: true };
+    }
+    throw new Error(error.message || 'Failed to translate prompt text');
+  }
 }
 
 /**
