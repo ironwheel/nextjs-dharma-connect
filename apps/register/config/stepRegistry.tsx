@@ -96,7 +96,7 @@ export const stepRegistry: Record<string, ScriptStep> = {
             const eventCode = context.event?.aid;
             if (!eventCode) return null;
             const vyOnlineSeries = value?.[eventCode]?.vyOnlineSeries;
-            if (typeof vyOnlineSeries !== 'boolean') return promptLookup(context, 'vyOnlineSeriesRequired');
+            if (typeof vyOnlineSeries !== 'boolean') return promptLookup(context, 'yesNoRequired');
             return null;
         }
     },
@@ -121,7 +121,7 @@ export const stepRegistry: Record<string, ScriptStep> = {
             const eventCode = context.event?.aid;
             if (!eventCode) return null;
             const inPersonTeachings = value?.[eventCode]?.inPersonTeachings;
-            if (typeof inPersonTeachings !== 'boolean') return promptLookup(context, 'inPersonTeachingsRequired');
+            if (typeof inPersonTeachings !== 'boolean') return promptLookup(context, 'yesNoRequired');
             return null;
         }
     },
@@ -165,7 +165,7 @@ export const stepRegistry: Record<string, ScriptStep> = {
             const eventCode = context.event?.aid;
             if (!eventCode) return null;
             const interestedInTakedown = value?.[eventCode]?.interestedInTakedown;
-            if (typeof interestedInTakedown !== 'boolean') return promptLookup(context, 'takedownRequired');
+            if (typeof interestedInTakedown !== 'boolean') return promptLookup(context, 'yesNoRequired');
             return null;
         }
     },
@@ -176,7 +176,11 @@ export const stepRegistry: Record<string, ScriptStep> = {
         field: 'student.healthcareProfessional',
         promptKey: 'healthcareProfessional',
         validation: (value: any, context: ScriptContext): string | null => {
-            if (typeof value !== 'boolean') return promptLookup(context, 'healthcareRequired');
+            if (typeof value !== 'boolean') return promptLookup(context, 'yesNoRequired');
+            if (value === true) {
+                const training = typeof context.student?.healthcareTraining === 'string' ? context.student.healthcareTraining.trim() : '';
+                if (!training) return promptLookup(context, 'trainingRequired');
+            }
             return null;
         }
     },
@@ -190,7 +194,13 @@ export const stepRegistry: Record<string, ScriptStep> = {
             const eventCode = context.event?.aid;
             if (!eventCode) return null;
             const serviceAlready = value?.[eventCode]?.serviceAlready;
-            if (typeof serviceAlready !== 'boolean') return promptLookup(context, 'volunteerAlreadyRequired');
+            if (typeof serviceAlready !== 'boolean') return promptLookup(context, 'yesNoRequired');
+            if (serviceAlready === true) {
+                const role = typeof value?.[eventCode]?.serviceAlreadyResponse === 'string'
+                    ? value[eventCode].serviceAlreadyResponse.trim()
+                    : '';
+                if (!role) return promptLookup(context, 'roleRequired');
+            }
             return null;
         }
     },

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from 'next/router';
 import { Container, Row, Col, Form, Button, Spinner, Modal, Badge, Accordion, Card as BootstrapCard } from "react-bootstrap";
 import { ToastContainer, toast } from 'react-toastify';
@@ -611,6 +611,7 @@ const Home = () => {
     const [promptsOriginalData, setPromptsOriginalData] = useState<Prompt[]>([]);
     const [promptsFindText, setPromptsFindText] = useState<string>('');
     const [promptsReplaceText, setPromptsReplaceText] = useState<string>('');
+    const [promptsFilterText, setPromptsFilterText] = useState<string>('');
     // Create prompts state
     const [createPromptsAid, setCreatePromptsAid] = useState<string>('');
     const [createPromptsTemplate, setCreatePromptsTemplate] = useState<string>('basicSupplication');
@@ -626,6 +627,28 @@ const Home = () => {
     const [deletePromptMatches, setDeletePromptMatches] = useState<Prompt[] | null>(null);
     const [deletePromptSaving, setDeletePromptSaving] = useState<boolean>(false);
     const [viewsProfileKeys, setViewsProfileKeys] = useState<string[]>([]);
+
+    const filteredPromptsForDisplay = useMemo(() => {
+        const q = promptsFilterText.trim().toLowerCase();
+
+        return promptsEditData
+            .map((prompt, originalIndex) => {
+                const promptParts = (prompt.prompt || '').split('-');
+                const promptName = promptParts.slice(1).join('-');
+                // Keep display logic consistent with the table below
+                const displayPrompt = `${promptsEditAid}-${promptName}`;
+                return { prompt, originalIndex, displayPrompt };
+            })
+            .filter(({ prompt, displayPrompt }) => {
+                if (!q) return true;
+                return (
+                    (displayPrompt || '').toLowerCase().includes(q) ||
+                    (prompt.prompt || '').toLowerCase().includes(q) ||
+                    (prompt.language || '').toLowerCase().includes(q) ||
+                    (prompt.text || '').toLowerCase().includes(q)
+                );
+            });
+    }, [promptsEditAid, promptsEditData, promptsFilterText]);
 
     const initialLoadStarted = useRef(false);
     const jsonTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1190,6 +1213,7 @@ const Home = () => {
         setPromptsEditData(deepCopy);
         setPromptsFindText('');
         setPromptsReplaceText('');
+        setPromptsFilterText('');
         setShowPromptsModal(true);
     };
 
@@ -1244,6 +1268,7 @@ const Home = () => {
         setPromptsEditData(duplicatedPrompts);
         setPromptsFindText('');
         setPromptsReplaceText('');
+        setPromptsFilterText('');
         setShowPromptsModal(true);
         toast.info(`Duplicating prompts from "${promptGroup.aid}". Review and modify before saving.`);
     };
@@ -1254,8 +1279,15 @@ const Home = () => {
             return;
         }
 
+        const restrictedIndices = promptsFilterText.trim()
+            ? new Set(filteredPromptsForDisplay.map(p => p.originalIndex))
+            : null;
+
         let replacementCount = 0;
-        const updatedPrompts = promptsEditData.map(prompt => {
+        const updatedPrompts = promptsEditData.map((prompt, index) => {
+            if (restrictedIndices && !restrictedIndices.has(index)) {
+                return prompt;
+            }
             if (prompt.text && prompt.text.includes(promptsFindText)) {
                 const occurrences = (prompt.text.match(new RegExp(promptsFindText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
                 replacementCount += occurrences;
@@ -4773,7 +4805,9 @@ const Home = () => {
                                 </Col>
                                 <Col md={6}>
                                     <div style={{ marginTop: '2rem', color: '#aaa' }}>
-                                        {promptsEditData.length} prompts total
+                                        {promptsFilterText.trim()
+                                            ? `${filteredPromptsForDisplay.length} shown / ${promptsEditData.length} total`
+                                            : `${promptsEditData.length} prompts total`}
                                     </div>
                                 </Col>
                             </Row>
@@ -4821,6 +4855,36 @@ const Home = () => {
                             </Form.Text>
                         </div>
 
+                        <div className="card" style={{ backgroundColor: 'rgba(34, 197, 94, 0.08)', border: '1px solid rgba(34, 197, 94, 0.25)' }}>
+                            <Row>
+                                <Col md={10}>
+                                    <Form.Group className="mb-2">
+                                        <Form.Label>Find prompts (filter)</Form.Label>
+                                        <Form.Control
+                                            type="text"
+                                            value={promptsFilterText}
+                                            onChange={(e) => setPromptsFilterText(e.target.value)}
+                                            placeholder="Type to filter by Prompt, Lang, or Text"
+                                            style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                                        />
+                                    </Form.Group>
+                                </Col>
+                                <Col md={2} style={{ display: 'flex', alignItems: 'end' }}>
+                                    <Button
+                                        variant="outline-secondary"
+                                        onClick={() => setPromptsFilterText('')}
+                                        disabled={!promptsFilterText.trim()}
+                                        style={{ marginBottom: '0.5rem', width: '100%' }}
+                                    >
+                                        Clear
+                                    </Button>
+                                </Col>
+                            </Row>
+                            <Form.Text className="text-muted">
+                                Filters the prompts table below by Prompt, Lang, and Text.
+                            </Form.Text>
+                        </div>
+
                         <div className="card">
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                                 <h5 style={{ color: '#ffc107', margin: 0 }}>Prompts</h5>
@@ -4853,13 +4917,7 @@ const Home = () => {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {promptsEditData.map((prompt, index) => {
-                                            // Extract prompt name from original prompt field
-                                            const promptParts = prompt.prompt.split('-');
-                                            const promptName = promptParts.slice(1).join('-');
-                                            // Dynamically show current aid + promptName
-                                            const displayPrompt = `${promptsEditAid}-${promptName}`;
-
+                                        {filteredPromptsForDisplay.map(({ prompt, originalIndex, displayPrompt }) => {
                                             return (
                                                 <tr key={`${prompt.prompt}-${prompt.language}`} style={{ borderBottom: '1px solid #333' }}>
                                                     <td style={{ padding: '0.75rem', color: 'white', fontSize: '0.85rem' }}>
@@ -4875,7 +4933,7 @@ const Home = () => {
                                                             value={prompt.text || ''}
                                                             onChange={(e) => {
                                                                 const newData = [...promptsEditData];
-                                                                newData[index] = { ...newData[index], text: e.target.value };
+                                                                newData[originalIndex] = { ...newData[originalIndex], text: e.target.value };
                                                                 setPromptsEditData(newData);
                                                             }}
                                                             style={{
