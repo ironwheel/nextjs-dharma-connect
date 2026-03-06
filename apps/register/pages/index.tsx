@@ -402,7 +402,7 @@ export default function Home() {
 
             <main className="container mx-auto py-8 px-4">
                 <h1 className="text-3xl font-bold mb-8 text-center text-teal-400">
-                    {titleLines.map((line, i) => (
+                    {titleLines.map((line: string, i: number) => (
                         <React.Fragment key={i}>
                             {i > 0 && <br />}
                             {line}
