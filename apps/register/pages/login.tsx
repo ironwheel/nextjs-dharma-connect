@@ -5,12 +5,15 @@ import React from 'react';
 import { AuthVerification } from 'sharedFrontend';
 import { useRouter } from 'next/router';
 
+// Cast for React 19 JSX compatibility (sharedFrontend uses React 18 FC types)
+const Auth = AuthVerification as React.ComponentType<{ pid: string; hash: string; eventCode: string }>;
+
 function Login() {
     const router = useRouter();
     const { pid, hash, eventCode } = router.query;
 
     return (
-        <AuthVerification pid={pid as string} hash={hash as string} eventCode={eventCode as string} />
+        <Auth pid={pid as string} hash={hash as string} eventCode={eventCode as string} />
     );
 }
 
