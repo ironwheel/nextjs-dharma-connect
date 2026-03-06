@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ScriptDefinition, ScriptStep, ScriptContext } from './types';
 import { promptLookup } from './StepComponents';
 import { evaluateStepCondition } from './stepConditions';
@@ -31,6 +31,7 @@ interface ScriptEngineProps {
 export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Promise<void> }> = ({ definition, context, onChange, onComplete }) => {
     const [currentStepIndex, setCurrentStepIndex] = useState(0);
     const [history, setHistory] = useState<number[]>([]); // Track history for Back button
+    const saveStepRef = useRef<{ save: () => Promise<void> } | null>(null);
 
     // Helper to find next valid step
     const getNextValidStepIndex = (startIndex: number, direction: 'forward' | 'backward'): number => {
@@ -53,13 +54,12 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
 
     const handleNext = () => {
         if (validationError) return; // block until step is valid
-        const nextIndex = getNextValidStepIndex(currentStepIndex, 'forward');
+        const nextIndex = getNextValidStepIndex(effectiveStepIndex, 'forward');
         if (nextIndex !== -1 && nextIndex < definition.steps.length) {
-            setHistory([...history, currentStepIndex]);
+            setHistory([...history, effectiveStepIndex]);
             setCurrentStepIndex(nextIndex);
-        } else if (onComplete) {
-            onComplete();
         }
+        // When no next step (isLast), last-step action is handled by the button's onClick (onLastStepNext or onComplete)
     };
 
     const handleBack = () => {
@@ -70,7 +70,38 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
         }
     };
 
-    const step = definition.steps[currentStepIndex];
+    // If the current step should be hidden (showWhen/condition false), skip it so we never show an empty step
+    const stepShouldBeVisible = (idx: number): boolean => {
+        const s = definition.steps[idx];
+        if (!s) return false;
+        const conditionOk = !s.condition || s.condition(context);
+        const showWhenOk = !s.showWhen || evaluateStepCondition(s.showWhen, context);
+        return conditionOk && showWhenOk;
+    };
+
+    const [effectiveStepIndex, setEffectiveStepIndex] = useState(currentStepIndex);
+    useEffect(() => {
+        if (stepShouldBeVisible(currentStepIndex)) {
+            setEffectiveStepIndex(currentStepIndex);
+            return;
+        }
+        // Current step is hidden (showWhen/condition false): skip to another step so we never show an empty step.
+        // Prefer previous valid step (e.g. user clicked Back into a now-hidden step); else next valid.
+        const prevIdx = getNextValidStepIndex(currentStepIndex, 'backward');
+        if (prevIdx >= 0) {
+            setHistory((h) => h.slice(0, -1));
+            setCurrentStepIndex(prevIdx);
+            setEffectiveStepIndex(prevIdx);
+            return;
+        }
+        const nextIdx = getNextValidStepIndex(currentStepIndex, 'forward');
+        if (nextIdx >= 0) {
+            setCurrentStepIndex(nextIdx);
+            setEffectiveStepIndex(nextIdx);
+        }
+    }, [currentStepIndex, context.student, definition.steps]);
+
+    const step = definition.steps[effectiveStepIndex];
 
     if (!step) {
         return <div>No active step.</div>;
@@ -83,12 +114,14 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
 
     const renderCurrentStep = () => {
         switch (step.type) {
-            case 'custom':
+            case 'custom': {
                 const CustomComponent = step.component as any;
                 if (CustomComponent) {
-                    return <CustomComponent context={context} value={value} engineOnChange={onChange} />;
+                    const refProp = step.id === 'save' ? { ref: saveStepRef } : {};
+                    return <CustomComponent {...refProp} context={context} value={value} engineOnChange={onChange} />;
                 }
                 return <div>Custom component missing for {step.id}</div>;
+            }
 
             case 'text':
                 return (
@@ -147,13 +180,27 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
     };
 
     const isFirst = history.length === 0;
-    const isLast = getNextValidStepIndex(currentStepIndex, 'forward') === -1 || getNextValidStepIndex(currentStepIndex, 'forward') >= definition.steps.length;
+    const isLast = getNextValidStepIndex(effectiveStepIndex, 'forward') === -1;
 
     const stepTitle = step.promptKey ? promptLookup(context, step.promptKey) : step.id.replace(/([A-Z])/g, ' $1').trim();
+    const showStepTitle = step.id !== 'introduction';
+    const rawEventImage = context.config?.eventImage;
+    const eventImageUrl =
+        typeof rawEventImage === 'string' && (rawEventImage.startsWith('http://') || rawEventImage.startsWith('https://'))
+            ? rawEventImage
+            : null;
 
     return (
-        <div className="script-engine max-w-2xl mx-auto p-6 bg-slate-900 text-white rounded-lg shadow-xl border border-slate-800">
-            <h2 className="text-xl font-semibold mb-6 text-teal-400">{stepTitle}</h2>
+        <div className="script-engine max-w-2xl mx-auto bg-slate-900 text-white rounded-lg shadow-xl border border-slate-800 overflow-hidden">
+            {eventImageUrl && (
+                <img
+                    src={eventImageUrl}
+                    alt={context.event?.name ? `Event: ${context.event.name}` : 'Event'}
+                    className="w-full h-auto block"
+                />
+            )}
+            <div className="p-6">
+            {showStepTitle && <h2 className="text-xl font-semibold mb-6 text-teal-400">{stepTitle}</h2>}
 
             <div className="step-content min-h-[200px]">
                 {renderCurrentStep()}
@@ -162,21 +209,42 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
                 <p className="mt-4 text-amber-400 text-sm" role="alert">{validationError}</p>
             )}
 
-            <div className="mt-8 flex justify-between">
+            <div className="mt-8 flex justify-between items-center flex-wrap gap-3">
                 <button
                     onClick={handleBack}
                     disabled={isFirst}
                     className={`px-4 py-2 rounded ${isFirst ? 'bg-slate-700 text-slate-500 cursor-not-allowed' : 'bg-slate-700 text-white hover:bg-slate-600 transition-colors'}`}
                 >
-                    Back
+                    {promptLookup(context, 'back')}
                 </button>
-                <button
-                    onClick={handleNext}
-                    disabled={!!validationError}
-                    className={`px-6 py-2 rounded font-medium transition-colors shadow-lg ${validationError ? 'bg-slate-600 text-slate-400 cursor-not-allowed shadow-slate-900/20' : 'bg-teal-600 text-white hover:bg-teal-500 shadow-teal-900/20'}`}
-                >
-                    {isLast ? 'Complete Registration' : 'Next'}
-                </button>
+                <span className="text-slate-400 text-sm flex-1 text-center">
+                    {promptLookup(context, 'regProgress')
+                        .replace(/\|\|currentStep\|\|/g, String(effectiveStepIndex + 1))
+                        .replace(/\|\|totalSteps\|\|/g, String(definition.steps.length))}
+                </span>
+                <div className="flex gap-3">
+                    {step.id === 'save' && (
+                        <button
+                            type="button"
+                            onClick={() => (context as any).onCancel?.()}
+                            className="px-4 py-2 rounded bg-slate-600 text-white hover:bg-slate-500 transition-colors"
+                        >
+                            {promptLookup(context, 'cancel')}
+                        </button>
+                    )}
+                    <button
+                        onClick={isLast
+                            ? async () => { await ((context as any).onLastStepNext ?? (context as any).onComplete)?.(); }
+                            : step.id === 'save'
+                                ? async () => { await saveStepRef.current?.save(); }
+                                : handleNext}
+                        disabled={!!validationError}
+                        className={`px-6 py-2 rounded font-medium transition-colors shadow-lg ${validationError ? 'bg-slate-600 text-slate-400 cursor-not-allowed shadow-slate-900/20' : 'bg-teal-600 text-white hover:bg-teal-500 shadow-teal-900/20'}`}
+                    >
+                        {promptLookup(context, 'next')}
+                    </button>
+                </div>
+            </div>
             </div>
         </div>
     );

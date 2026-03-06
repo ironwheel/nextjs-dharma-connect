@@ -4,6 +4,11 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faGlobe } from "@fortawesome/free-solid-svg-icons";
 import { checkEligibility } from 'sharedFrontend';
 
+/** Use context.checkEligibility when provided (e.g. test mode oath override), otherwise sharedFrontend checkEligibility. */
+function getCheckEligibility(context: ScriptContext) {
+    return context.checkEligibility ?? checkEligibility;
+}
+
 // Look up prompt text: event-specific first, then default (language or 'universal'), then
 // decorated fallback. Uses student.writtenLangPref for language (default "English").
 // Expects context.prompts as array of { prompt, language, text } (or object values treated as list).
@@ -122,9 +127,10 @@ const CheckboxMap = ({
     const mapName = configKey.replace('Config', '');
     const map = context.student?.programs?.[eventCode]?.[mapName] as Record<string, boolean> | undefined;
     const safeMap = map && typeof map === 'object' ? map : {};
+    const checkElig = getCheckEligibility(context);
     const entries = Object.entries(config)
         .filter(([, obj]) => {
-            if (obj?.pool && eventCode && !checkEligibility(obj.pool, context.student, eventCode, pools)) {
+            if (obj?.pool && eventCode && !checkElig(obj.pool, context.student, eventCode, pools)) {
                 return false;
             }
             if (obj?.retreatRequired && !whichRetreats[obj.retreatRequired]) return false;
@@ -148,6 +154,89 @@ const CheckboxMap = ({
                 ))}
             </div>
         </div>
+    );
+};
+
+// Exclusive checkbox list: at most one option can be checked at a time (but none is allowed).
+const ExclusiveCheckboxMap = ({
+    context,
+    configKey,
+    basePath,
+    engineOnChange,
+    label,
+}: {
+    context: ScriptContext;
+    configKey: string;
+    basePath: string; // e.g. student.programs.VTInPerson2025
+    engineOnChange: (path: string, val: any) => void;
+    label?: string;
+}) => {
+    const config = context.config?.[configKey] as Record<string, { prompt: string; order?: number; retreatRequired?: string; pool?: string }> | undefined;
+    const eventCode = context.event?.aid;
+    if (!config) return <div className="text-slate-400 text-sm">No options configured ({configKey})</div>;
+    const whichRetreats = context.student?.programs?.[eventCode]?.whichRetreats || {};
+    const pools = Array.isArray((context as any).pools) ? (context as any).pools : [];
+    const mapName = configKey.replace('Config', '');
+    const map = context.student?.programs?.[eventCode]?.[mapName] as Record<string, boolean> | undefined;
+    const safeMap = map && typeof map === 'object' ? map : {};
+    const checkElig = getCheckEligibility(context);
+    const entries = Object.entries(config)
+        .filter(([, obj]) => {
+            if (obj?.pool && eventCode && !checkElig(obj.pool, context.student, eventCode, pools)) {
+                return false;
+            }
+            if (obj?.retreatRequired && !whichRetreats[obj.retreatRequired]) return false;
+            return true;
+        })
+        .sort((a, b) => ((a[1]?.order ?? 0) - (b[1]?.order ?? 0)));
+
+    const selectedKey = entries.find(([key]) => safeMap[key])?.[0] ?? null;
+
+    const toggle = (key: string, checked: boolean) => {
+        const next: Record<string, boolean> = {};
+        if (checked) {
+            // set only this key true
+            next[key] = true;
+        }
+        engineOnChange(`${basePath}.${mapName}`, next);
+    };
+
+    return (
+        <div className="mb-4">
+            {label ? <label className="block text-sm font-medium mb-2 text-slate-300">{label}</label> : null}
+            <div className="space-y-2 border border-slate-700 rounded p-3 bg-slate-800/50">
+                {entries.map(([key, obj]) => (
+                    <label key={key} className="flex items-center text-slate-300">
+                        <input
+                            type="checkbox"
+                            checked={selectedKey === key}
+                            onChange={(e) => toggle(key, e.target.checked)}
+                            className="mr-2 rounded text-teal-500"
+                        />
+                        <span>{typeof obj?.prompt === 'string' ? promptLookup(context, obj.prompt) : key}</span>
+                    </label>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+// --- Introduction (first step; prompt 'introduction' with HTML; macros: ||title||, ||coord-email-href||, ||coord-email||) ---
+// Use ||coord-email-href|| in href (e.g. <a href="||coord-email-href||">) and ||coord-email|| for link text.
+export const RenderIntroduction: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context }) => {
+    let text = promptLookup(context, 'introduction') || '';
+    const title = promptLookup(context, 'title') || '';
+    const coordEmail = context.event?.config?.coordEmailAmericas ?? '';
+    const coordEmailHref = coordEmail ? `mailto:${coordEmail.replace(/"/g, '&quot;').replace(/&/g, '&amp;')}` : '';
+    const coordEmailText = coordEmail ? coordEmail.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
+    text = text.replace(/\|\|title\|\|/g, title);
+    text = text.replace(/\|\|coord-email-href\|\|/g, coordEmailHref);
+    text = text.replace(/\|\|coord-email\|\|/g, coordEmailText);
+    return (
+        <div
+            className="prose prose-invert max-w-none text-slate-200 introduction-html"
+            dangerouslySetInnerHTML={{ __html: text }}
+        />
     );
 };
 
@@ -317,8 +406,9 @@ export const RenderPreferenceNecessity: React.FC<{ context: ScriptContext; engin
     if (!config) return <div className="text-slate-400 text-sm">No prefNecConfig configured.</div>;
 
     const pools = Array.isArray((context as any).pools) ? (context as any).pools : [];
+    const checkElig = getCheckEligibility(context);
     const entries = Object.entries(config)
-        .filter(([, obj]) => !obj?.pool || (eventCode && checkEligibility(obj.pool, context.student, eventCode, pools)))
+        .filter(([, obj]) => !obj?.pool || (eventCode && checkElig(obj.pool, context.student, eventCode, pools)))
         .sort((a, b) => ((a[1]?.order ?? 0) - (b[1]?.order ?? 0)))
         .map(([key, obj]) => ({ key, prompt: obj?.prompt ?? key }));
 
@@ -368,11 +458,11 @@ export const RenderMobilePhone: React.FC<{ context: ScriptContext; engineOnChang
     );
 };
 
-// --- In-person teachings ---
-export const RenderInPersonTeachings: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
-    const eventCode = context.event?.aid;
-    return <RadioYesNo context={context} path={`student.programs.${eventCode}.inPersonTeachings`} label={promptLookup(context, 'inPersonTeachings')} engineOnChange={engineOnChange} />;
-};
+// --- In-person teachings (stored at student root; applies to all events) ---
+// Step title from promptKey only; no duplicate label above Yes/No
+export const RenderInPersonTeachings: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => (
+    <RadioYesNo context={context} path="student.inPersonTeachings" label="" engineOnChange={engineOnChange} />
+);
 
 // --- Interested in setup (setupConfig: "no" mutually exclusive with {setup1, setup2, setup3}; setup1/2/3 can be checked in any combination) ---
 export const RenderInterestedInSetup: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
@@ -381,8 +471,9 @@ export const RenderInterestedInSetup: React.FC<{ context: ScriptContext; engineO
     if (!config) return <div className="text-slate-400 text-sm">No setupConfig configured.</div>;
 
     const pools = Array.isArray((context as any).pools) ? (context as any).pools : [];
+    const checkElig = getCheckEligibility(context);
     const allEntries = Object.entries(config)
-        .filter(([, obj]) => !obj?.pool || (eventCode && checkEligibility(obj.pool, context.student, eventCode, pools)))
+        .filter(([, obj]) => !obj?.pool || (eventCode && checkElig(obj.pool, context.student, eventCode, pools)))
         .sort((a, b) => ((a[1]?.order ?? 0) - (b[1]?.order ?? 0)))
         .map(([key, obj]) => ({ key, prompt: obj?.prompt ?? key, radioGroups: obj?.radioGroups }));
 
@@ -498,14 +589,76 @@ export const RenderServiceAlready: React.FC<{ context: ScriptContext; engineOnCh
     );
 };
 
-// --- Service no question (service map; only when serviceAlready is false) ---
+// --- Service no question (service map; only when serviceAlready is false). "happy" is mutually exclusive; other options can be combined. ---
 export const RenderServiceNoQuestion: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
     const eventCode = context.event?.aid;
     const serviceAlready = context.student?.programs?.[eventCode]?.serviceAlready;
     if (serviceAlready === true) return <div className="text-slate-400 text-sm">Skipped (you indicated you already serve).</div>;
+
+    const config = context.config?.serviceConfig as Record<string, { prompt: string; order?: number; retreatRequired?: string; pool?: string }> | undefined;
+    if (!config) return <div className="text-slate-400 text-sm">No options configured (serviceConfig)</div>;
+
+    const whichRetreats = context.student?.programs?.[eventCode]?.whichRetreats || {};
+    const pools = Array.isArray((context as any).pools) ? (context as any).pools : [];
     const basePath = `student.programs.${eventCode}`;
+    const mapName = 'service';
+    const map = context.student?.programs?.[eventCode]?.[mapName] as Record<string, boolean> | undefined;
+    const safeMap = map && typeof map === 'object' ? map : {};
+    const checkElig = getCheckEligibility(context);
+
+    const entries = Object.entries(config)
+        .filter(([, obj]) => {
+            if (obj?.pool && eventCode && !checkElig(obj.pool, context.student, eventCode, pools)) {
+                return false;
+            }
+            if (obj?.retreatRequired && !whichRetreats[obj.retreatRequired]) return false;
+            return true;
+        })
+        .sort((a, b) => ((a[1]?.order ?? 0) - (b[1]?.order ?? 0)));
+
+    const happyKey = 'happy';
+    const happyChecked = !!safeMap[happyKey];
+
+    const toggleHappy = (checked: boolean) => {
+        const next: Record<string, boolean> = {};
+        if (checked) {
+            next[happyKey] = true;
+        }
+        // when happy is (re)selected, clear all other flags
+        engineOnChange(`${basePath}.${mapName}`, next);
+    };
+
+    const toggleOther = (key: string, checked: boolean) => {
+        const next: Record<string, boolean> = { ...safeMap };
+        // any non-happy selection clears happy
+        delete next[happyKey];
+        if (checked) next[key] = true;
+        else delete next[key];
+        engineOnChange(`${basePath}.${mapName}`, next);
+    };
+
     return (
-        <CheckboxMap context={context} configKey="serviceConfig" basePath={basePath} engineOnChange={engineOnChange} />
+        <div className="mb-4">
+            <div className="space-y-2 border border-slate-700 rounded p-3 bg-slate-800/50">
+                {entries.map(([key, obj]) => {
+                    const isHappy = key === happyKey;
+                    const checked = !!safeMap[key];
+                    const onChange = (e: React.ChangeEvent<HTMLInputElement>) =>
+                        isHappy ? toggleHappy(e.target.checked) : toggleOther(key, e.target.checked);
+                    return (
+                        <label key={key} className="flex items-center text-slate-300">
+                            <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={onChange}
+                                className="mr-2 rounded text-teal-500"
+                            />
+                            <span>{typeof obj?.prompt === 'string' ? promptLookup(context, obj.prompt) : key}</span>
+                        </label>
+                    );
+                })}
+            </div>
+        </div>
     );
 };
 
@@ -514,7 +667,7 @@ export const RenderServiceContact: React.FC<{ context: ScriptContext; engineOnCh
     const eventCode = context.event?.aid;
     const basePath = `student.programs.${eventCode}`;
     return (
-        <CheckboxMap context={context} configKey="serviceContactConfig" basePath={basePath} engineOnChange={engineOnChange} />
+        <ExclusiveCheckboxMap context={context} configKey="serviceContactConfig" basePath={basePath} engineOnChange={engineOnChange} />
     );
 };
 
@@ -526,7 +679,7 @@ export const RenderAccessibility: React.FC<{ context: ScriptContext; engineOnCha
 
     return (
         <div className="space-y-4">
-            <RadioYesNo context={context} path="student.accessibility" label={promptLookup(context, 'accessibility')} engineOnChange={engineOnChange} />
+            <RadioYesNo context={context} path="student.accessibility" label="" engineOnChange={engineOnChange} />
             {accessibility && !noDetails && (
                 <InputField label={promptLookup(context, 'accessibilityDetails')} value={details} onChange={(v: string) => engineOnChange('student.accessibilityDetails', v)} />
             )}
@@ -534,32 +687,65 @@ export const RenderAccessibility: React.FC<{ context: ScriptContext; engineOnCha
     );
 };
 
-// --- Supplication (read-only text; retreat-specific). signers from context.signers or empty ---
-export const RenderSupplication: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void; titleKey: string; bodyKey: string; retreat?: string }> = ({ context, titleKey, bodyKey, retreat }) => {
+// --- Supplication: body text + all current signers appended at bottom; list updates when user adds/removes name via visible question ---
+export const RenderSupplication: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void; titleKey: string; bodyKey: string; retreat?: string; joinKey: string }> = ({ context, bodyKey, retreat, joinKey, engineOnChange }) => {
     const eventCode = context.event?.aid;
     const whichRetreats = context.student?.programs?.[eventCode]?.whichRetreats || {};
     if (retreat && !objKeysInc(whichRetreats, retreat)) return null;
-    const title = promptLookup(context, titleKey);
     const body = promptLookup(context, bodyKey);
-    const signers = (context as any).signers ?? [];
+    const signersByAid = context.signers ?? {};
+    const aidKey = eventCode
+        ? eventCode + (retreat === 'mahayana' ? '-my' : retreat === 'vajrayana' ? '-vy' : '')
+        : '';
+    const signers: string[] = aidKey ? (signersByAid[aidKey] ?? []) : [];
     const signerText = signers.length ? '\n\n' + signers.map((s: string) => s + '\n').join('') : '';
 
+    const programsForEvent = eventCode ? context.student?.programs?.[eventCode] || {} : {};
+    const joinPath = eventCode ? `student.programs.${eventCode}.${joinKey}` : '';
+    const visiblePath = eventCode ? `student.programs.${eventCode}.visible` : '';
+    const joinVal = eventCode ? programsForEvent?.[joinKey] : undefined;
+
     return (
-        <div className="p-4 bg-slate-800/50 rounded border border-slate-700">
-            <p className="italic text-slate-300 mb-2">{title}</p>
-            <textarea readOnly rows={10} className="w-full p-2 rounded bg-slate-800 border border-slate-700 text-white font-mono text-sm" value={body + signerText} />
+        <div className="p-4 bg-slate-800/50 rounded border border-slate-700 space-y-4">
+            <textarea
+                readOnly
+                rows={10}
+                className="w-full p-3 rounded bg-slate-900 border border-slate-700 text-slate-100 text-sm leading-relaxed"
+                value={body + signerText}
+            />
+            {eventCode && (
+                <div>
+                    <RadioYesNo
+                        context={context}
+                        path={joinPath}
+                        label={promptLookup(context, joinKey)}
+                        engineOnChange={engineOnChange}
+                    />
+                </div>
+            )}
+            {eventCode && joinVal === true && (
+                <div>
+                    <RadioYesNo
+                        context={context}
+                        path={visiblePath}
+                        label={promptLookup(context, 'visible')}
+                        engineOnChange={engineOnChange}
+                    />
+                </div>
+            )}
         </div>
     );
 };
 
 export const RenderSupplicationMY: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = (props) => (
-    <RenderSupplication {...props} titleKey="supplicationTitleMY" bodyKey="supplicationBodyMY" retreat="mahayana" />
+    <RenderSupplication {...props} titleKey="supplicationTitleMY" bodyKey="supplicationBodyMY" retreat="mahayana" joinKey="joinMY" />
 );
 export const RenderSupplicationVY: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = (props) => (
-    <RenderSupplication {...props} titleKey="supplicationTitleVY" bodyKey="supplicationBodyVY" retreat="vajrayana" />
+    <RenderSupplication {...props} titleKey="supplicationTitleVY" bodyKey="supplicationBodyVY" retreat="vajrayana" joinKey="joinVY" />
 );
 
 // --- Join (retreat-specific: joinMY, joinVY) ---
+// (Now handled inside RenderSupplication; these remain defined but are hidden via step conditions.)
 export const RenderJoinMY: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => (
     <RadioYesNo context={context} path={`student.programs.${context.event?.aid}.joinMY`} label={promptLookup(context, 'joinMY')} engineOnChange={engineOnChange} />
 );
@@ -568,12 +754,13 @@ export const RenderJoinVY: React.FC<{ context: ScriptContext; engineOnChange: (p
 );
 
 // --- Visible signature ---
+// (Now handled inside RenderSupplication; this export remains for compatibility if referenced elsewhere.)
 export const RenderVisibleSignature: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
     const eventCode = context.event?.aid;
     return <RadioYesNo context={context} path={`student.programs.${eventCode}.visible`} label={promptLookup(context, 'visible')} engineOnChange={engineOnChange} />;
 };
 
-// --- Social media ---
+// --- Social media (title from promptKey; checkbox shows agree prompt; agreeRequired validation) ---
 export const RenderSocialMedia: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
     const eventCode = context.event?.aid;
     const checked = !!context.student?.programs?.[eventCode]?.socialMedia;
@@ -587,14 +774,17 @@ export const RenderSocialMedia: React.FC<{ context: ScriptContext; engineOnChang
                     checked={checked}
                     onChange={(e) => engineOnChange(`student.programs.${eventCode}.socialMedia`, e.target.checked)}
                 />
-                <span>{promptLookup(context, 'socialMedia')}</span>
+                <span>{promptLookup(context, 'agree')}</span>
             </label>
         </div>
     );
 };
 
-// --- Save (persist student and call onComplete from context) ---
-export const RenderSave: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context }) => {
+// --- Save (persist student and call onComplete from context). Title from mustSave; Cancel/Save in engine footer. ---
+export const RenderSave = React.forwardRef<
+    { save: () => Promise<void> },
+    { context: ScriptContext; engineOnChange: (path: string, val: any) => void }
+>(({ context }, ref) => {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const onComplete = (context as any).onComplete;
@@ -602,6 +792,10 @@ export const RenderSave: React.FC<{ context: ScriptContext; engineOnChange: (pat
     const hash = (context as any).hash;
 
     const handleSave = async () => {
+        if ((context as any).student?.debug?.registerTest === true) {
+            (context as any).onDebugTableRequest?.();
+            return;
+        }
         if (!pid || !hash || !onComplete) {
             setError('Missing save configuration (pid, hash, or onComplete).');
             return;
@@ -627,20 +821,11 @@ export const RenderSave: React.FC<{ context: ScriptContext; engineOnChange: (pat
         }
     };
 
-    const handleCancel = () => {
-        if ((context as any).onCancel) (context as any).onCancel();
-    };
+    React.useImperativeHandle(ref, () => ({ save: handleSave }));
 
-    return (
-        <div className="p-4 border border-slate-700 rounded bg-slate-800/50">
-            <p className="mb-4 text-slate-300 font-medium">{promptLookup(context, 'mustSave')}</p>
-            <button type="button" onClick={handleSave} disabled={saving} className="px-4 py-2 rounded bg-teal-600 text-white hover:bg-teal-500 disabled:opacity-50 mr-4">
-                {saving ? 'Saving...' : (context.prompts?.enter?.text ?? 'Submit')}
-            </button>
-            <button type="button" onClick={handleCancel} className="px-4 py-2 rounded bg-slate-600 text-white hover:bg-slate-500">
-                {promptLookup(context, 'cancel')}
-            </button>
-            {error && <p className="mt-2 text-red-400 text-sm">{error}</p>}
-        </div>
-    );
-};
+    if (error) {
+        return <p className="text-red-400 text-sm">{error}</p>;
+    }
+    return null;
+});
+RenderSave.displayName = 'RenderSave';

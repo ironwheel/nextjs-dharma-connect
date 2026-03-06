@@ -2,6 +2,7 @@ import React from 'react';
 import { ScriptStep, StepConditionConfig, ScriptContext } from '../components/script/types';
 import { promptLookup } from '../components/script/StepComponents';
 import {
+    RenderIntroduction,
     RenderWrittenTranslation,
     RenderJoin,
     RenderMotivation,
@@ -32,6 +33,12 @@ import {
 // Use showWhen to show a step only when a previous answer matches (e.g. fieldEquals for yes/no,
 // fieldExactlyOneOf for "exactly one of these options selected"). Field paths can use {{eventCode}}.
 export const stepRegistry: Record<string, ScriptStep> = {
+    'introduction': {
+        id: 'introduction',
+        type: 'custom',
+        component: RenderIntroduction as any,
+        field: null as any
+    },
     'writtenTranslation': {
         id: 'writtenTranslation',
         type: 'custom',
@@ -115,13 +122,10 @@ export const stepRegistry: Record<string, ScriptStep> = {
         id: 'inPersonTeachings',
         type: 'custom',
         component: RenderInPersonTeachings as any,
-        field: 'student.programs',
+        field: 'student.inPersonTeachings',
         promptKey: 'inPersonTeachings',
         validation: (value: any, context: ScriptContext): string | null => {
-            const eventCode = context.event?.aid;
-            if (!eventCode) return null;
-            const inPersonTeachings = value?.[eventCode]?.inPersonTeachings;
-            if (typeof inPersonTeachings !== 'boolean') return promptLookup(context, 'yesNoRequired');
+            if (typeof value !== 'boolean') return promptLookup(context, 'yesNoRequired');
             return null;
         }
     },
@@ -209,71 +213,161 @@ export const stepRegistry: Record<string, ScriptStep> = {
         type: 'custom',
         component: RenderServiceNoQuestion as any,
         field: 'student.programs',
-        promptKey: 'serviceNoQuestion',
-        showWhen: { type: 'fieldEquals', field: 'programs.{{eventCode}}.serviceAlready', value: false }
+        promptKey: 'service',
+        showWhen: { type: 'fieldEquals', field: 'programs.{{eventCode}}.serviceAlready', value: false },
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const service = value?.[eventCode]?.service;
+            if (!service || typeof service !== 'object') return promptLookup(context, 'serviceNoQuestionRequired');
+            const happySelected = service.happy === true;
+            const otherCount = Object.entries(service).filter(
+                ([key, v]) => key !== 'happy' && v === true
+            ).length;
+            // happy is mutually exclusive; state with happy + others is invalid
+            if (happySelected && otherCount > 0) return promptLookup(context, 'serviceNoQuestionRequired');
+            // either happy OR at least 4 non-happy options must be selected
+            if (!happySelected && otherCount < 4) return promptLookup(context, 'serviceNoQuestionRequired');
+            return null;
+        }
     },
     'serviceContact': {
         id: 'serviceContact',
         type: 'custom',
         component: RenderServiceContact as any,
         field: 'student.programs',
-        promptKey: 'serviceContact'
+        promptKey: 'serviceContact',
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const contact = value?.[eventCode]?.serviceContact;
+            if (!contact || typeof contact !== 'object') return promptLookup(context, 'serviceContactRequired');
+            const selected = Object.values(contact).filter((v) => v === true).length;
+            return selected === 1 ? null : promptLookup(context, 'serviceContactRequired');
+        }
     },
     'accessiblity': {
         id: 'accessiblity',
         type: 'custom',
         component: RenderAccessibility as any,
         field: 'student.accessibility',
-        promptKey: 'accessiblity'
+        promptKey: 'accessibility',
+        validation: (value: any, context: ScriptContext): string | null => {
+            if (typeof value !== 'boolean') return promptLookup(context, 'yesNoRequired');
+            if (value === true && !context.config?.noAccessibilityDetails) {
+                const details = context.student?.accessibilityDetails;
+                if (details == null || String(details).trim() === '') {
+                    return promptLookup(context, 'accessibilityDetailsRequired');
+                }
+            }
+            return null;
+        }
     },
     'supplicationMY': {
         id: 'supplicationMY',
         type: 'custom',
         component: RenderSupplicationMY as any,
         field: null as any,
-        promptKey: 'supplicationMY'
+        promptKey: 'supplicationTitleMY',
+        showWhen: {
+            type: 'fieldOneOf',
+            field: 'programs.{{eventCode}}.whichRetreats',
+            keys: ['mahayana']
+        },
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const prog = context.student?.programs?.[eventCode] || {};
+            const joinVal = prog.joinMY;
+            const visible = prog.visible;
+
+            if (joinVal !== true) {
+                // Join must be explicitly confirmed "Yes" to proceed, but does NOT use yesNoRequired prompt key.
+                return promptLookup(context, 'joinRequired');
+            }
+
+            if (typeof visible !== 'boolean') {
+                // Only the visibleSignature prompt uses the generic yes/no required message.
+                return promptLookup(context, 'yesNoRequired');
+            }
+
+            return null;
+        }
     },
     'joinMY': {
         id: 'joinMY',
         type: 'custom',
         component: RenderJoinMY as any,
         field: 'student.programs',
-        promptKey: 'joinMY'
+        promptKey: 'joinMY',
+        // Now rendered as part of the supplicationMY step; hide this standalone step.
+        condition: () => false
     },
     'supplicationVY': {
         id: 'supplicationVY',
         type: 'custom',
         component: RenderSupplicationVY as any,
         field: null as any,
-        promptKey: 'supplicationVY'
+        promptKey: 'supplicationTitleVY',
+        showWhen: {
+            type: 'fieldOneOf',
+            field: 'programs.{{eventCode}}.whichRetreats',
+            keys: ['vajrayana1', 'vajrayana2']
+        },
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const prog = context.student?.programs?.[eventCode] || {};
+            const joinVal = prog.joinVY;
+            const visible = prog.visible;
+
+            if (joinVal !== true) {
+                return promptLookup(context, 'joinRequired');
+            }
+
+            if (typeof visible !== 'boolean') {
+                return promptLookup(context, 'yesNoRequired');
+            }
+
+            return null;
+        }
     },
     'joinVY': {
         id: 'joinVY',
         type: 'custom',
         component: RenderJoinVY as any,
         field: 'student.programs',
-        promptKey: 'joinVY'
+        promptKey: 'joinVY',
+        condition: () => false
     },
     'visibleSignature': {
         id: 'visibleSignature',
         type: 'custom',
         component: RenderVisibleSignature as any,
         field: 'student.programs',
-        promptKey: 'visibleSignature'
+        promptKey: 'visibleSignature',
+        condition: () => false
     },
     'socialMedia': {
         id: 'socialMedia',
         type: 'custom',
         component: RenderSocialMedia as any,
         field: 'student.programs',
-        promptKey: 'socialMedia'
+        promptKey: 'socialMedia',
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const checked = value?.[eventCode]?.socialMedia === true;
+            if (!checked) return promptLookup(context, 'agreeRequired');
+            return null;
+        }
     },
     'save': {
         id: 'save',
         type: 'custom',
         component: RenderSave as any,
         field: null as any,
-        promptKey: 'save'
+        promptKey: 'mustSave'
     },
     'join': {
         id: 'join',

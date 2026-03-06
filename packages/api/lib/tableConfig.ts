@@ -42,6 +42,7 @@ export const tables: TableConfig[] = [
   { resource: 'transactions', envVar: 'DYNAMODB_TABLE_TRANSACTIONS', pk: 'transaction', sk: '', ops: ['get', 'update', 'list', 'query', 'count', 'query-index'] },
   { resource: 'transactions-cache', envVar: 'DYNAMODB_TABLE_TRANSACTIONS_CACHE', pk: 'id', sk: '', ops: ['get', 'list', 'put', 'delete'] },
   { resource: 'auditors', envVar: 'DYNAMODB_TABLE_AUDITORS', pk: 'id', sk: '', ops: ['get', 'put', 'list', 'count', 'update'] },
+  { resource: 'signers', envVar: 'DYNAMODB_TABLE_SIGNERS', pk: 'name', sk: 'aid', ops: ['list', 'put', 'delete'] },
 ];
 
 /**

@@ -41,6 +41,10 @@ export interface ScriptContext {
     student: any;
     event: any;
     config: any;
+    /** Signers by aid (e.g. eventCode, eventCode-my, eventCode-vy) for supplication body display. */
+    signers?: Record<string, string[]>;
+    /** When set (e.g. test mode oath override), used instead of sharedFrontend checkEligibility for eligibility checks. */
+    checkEligibility?: (poolName: string, studentData: any, currentAid: string, allPoolsData: any[]) => boolean;
     [key: string]: any;
 }
 

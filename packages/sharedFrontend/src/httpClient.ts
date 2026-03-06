@@ -133,10 +133,9 @@ async function apiFetch(
     throw error;
   }
 
-  // Handle 204 No Content by redirecting to the root page
+  // 204 No Content is a normal success response (e.g. DELETE, delete-one); do not redirect
   if (res.status === 204) {
-    Router.replace(`/?pid=${pid}&hash=${hash}`);
-    return Promise.resolve({ redirected: true });
+    return Promise.resolve(null);
   }
   const text = await res.text();
   if (!text) {
