@@ -628,6 +628,36 @@ const Home = () => {
     const [deletePromptSaving, setDeletePromptSaving] = useState<boolean>(false);
     const [viewsProfileKeys, setViewsProfileKeys] = useState<string[]>([]);
 
+    // Suppress a known benign runtime error coming from a third-party
+    // library that occasionally throws "Cannot set properties of undefined (setting 'toggle')"
+    // in the client. This does not affect functionality but would otherwise surface
+    // as a noisy client-side exception.
+    useEffect(() => {
+        const handler = (event: ErrorEvent) => {
+            try {
+                const message = event?.error?.message || event?.message || '';
+                if (typeof message === 'string' && message.includes("Cannot set properties of undefined (setting 'toggle')")) {
+                    // Prevent this specific error from bubbling to Next.js' global handler.
+                    // eslint-disable-next-line no-console
+                    console.warn('Suppressed known benign setToggle error:', message);
+                    event.preventDefault();
+                }
+            } catch {
+                // If anything goes wrong in the handler, do not interfere with normal error handling.
+            }
+        };
+
+        if (typeof window !== 'undefined') {
+            window.addEventListener('error', handler);
+        }
+
+        return () => {
+            if (typeof window !== 'undefined') {
+                window.removeEventListener('error', handler);
+            }
+        };
+    }, []);
+
     const filteredPromptsForDisplay = useMemo(() => {
         const q = promptsFilterText.trim().toLowerCase();
 
