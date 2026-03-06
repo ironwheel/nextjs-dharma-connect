@@ -2,6 +2,9 @@
   "name": "nextjs-dharma-connect",
   "private": true,
   "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "dev:api": "pnpm --filter api dev",
     "dev:student-manager": "pnpm --filter student-manager dev",
