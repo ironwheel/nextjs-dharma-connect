@@ -14,6 +14,6 @@ function Login() {
     );
 }
 
-// Type assertion for Next.js PagesPageConfig (React 19 / Next 16 type mismatch with ReactNode)
-export default Login as React.ComponentType;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Next.js PagesPageConfig conflicts with React 19 types
+export default Login as any;
 
