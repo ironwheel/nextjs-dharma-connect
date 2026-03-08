@@ -7,6 +7,7 @@ import { promptLookup } from '../components/script/StepComponents';
 import { getScriptSteps, stepRegistry } from '../config/stepRegistry';
 import { ScriptDefinition, ScriptContext, ScriptStep } from '../components/script/types';
 import { Offer } from '../components/Offer';
+import { useTheme, type ThemeId } from '../context/ThemeContext';
 
 /** One row per storage field for debug table. displayPath uses "events"; storagePath is path into student (no "student." prefix). */
 function getStepStorageRows(stepId: string, eventCode: string): Array<{ scriptStep: string; displayPath: string; storagePath: string | null }> {
@@ -52,7 +53,12 @@ function getStepStorageRows(stepId: string, eventCode: string): Array<{ scriptSt
         joinVY: [{ scriptStep: 'joinVY', displayPath: `${ev}.joinVY`, storagePath: `programs.${eventCode}.joinVY` }],
         visibleSignature: [{ scriptStep: 'visibleSignature', displayPath: `${ev}.visible`, storagePath: `programs.${eventCode}.visible` }],
         socialMedia: [{ scriptStep: 'socialMedia', displayPath: `${ev}.socialMedia`, storagePath: `programs.${eventCode}.socialMedia` }],
-        save: [{ scriptStep: 'save', displayPath: `${ev} (metadata: join, submitCount, submitTime, saved)`, storagePath: null }],
+        save: [
+            { scriptStep: 'save', displayPath: `${ev}.join`, storagePath: `programs.${eventCode}.join` },
+            { scriptStep: 'save', displayPath: `${ev}.submitCount`, storagePath: `programs.${eventCode}.submitCount` },
+            { scriptStep: 'save', displayPath: `${ev}.submitTime`, storagePath: `programs.${eventCode}.submitTime` },
+            { scriptStep: 'save', displayPath: `${ev}.saved`, storagePath: `programs.${eventCode}.saved` },
+        ],
     };
     return rows[stepId] ?? [{ scriptStep: stepId, displayPath: '—', storagePath: null }];
 }
@@ -80,8 +86,15 @@ function formatDisplayValue(val: any): string {
     }
 }
 
+const THEMES: { id: ThemeId; label: string; subtitle: string }[] = [
+    { id: 'light', label: 'Light', subtitle: 'clean, neutral' },
+    { id: 'meadow', label: 'Meadow', subtitle: 'warm, natural' },
+    { id: 'dark', label: 'Dark', subtitle: 'immersive, elegant' },
+];
+
 export default function Home() {
     const router = useRouter();
+    const { theme, setTheme } = useTheme();
     const { pid, hash, eventCode, aid, ...rest } = router.query;
 
     const [loading, setLoading] = useState(true);
@@ -169,7 +182,7 @@ export default function Home() {
     }, [router.isReady, activeEventCode, studentPid, studentHash]);
 
     // Determine Initial Phase
-    const [phase, setPhase] = useState<'loading' | 'testModeConfig' | 'join' | 'offer' | 'stripeCapture' | 'debugTable'>('loading');
+    const [phase, setPhase] = useState<'loading' | 'testModeConfig' | 'join' | 'offer' | 'stripeCapture' | 'debugTable' | 'acceptanceThankYouWarm' | 'acceptanceThankYouCold'>('loading');
 
     // Test mode config: clear student data options, oath pool eligibility override
     const [testModeClearStudent, setTestModeClearStudent] = useState(false);
@@ -197,15 +210,29 @@ export default function Home() {
         // Check if already joined
         const prog = student.programs?.[activeEventCode];
         const isJoined = prog?.join;
+        const accepted = prog?.accepted;
         const offerOnly = event.config?.offerOnly;
+        const needAcceptance = event.config?.needAcceptance === true;
 
-        if (offerOnly || isJoined) {
+        if (offerOnly) {
             setPhase('offer');
-        } else {
-            setPhase('join');
+            return;
         }
-
-    }, [data, router.query, activeEventCode, testModeConfigAccepted]);
+        if (isJoined) {
+            if (needAcceptance) {
+                if (accepted === true) {
+                    setPhase('offer');
+                } else if (phase !== 'acceptanceThankYouWarm' && phase !== 'debugTable') {
+                    // Cold = returning visitor (join true, not yet accepted). Don't overwrite warm when we just landed there from save, or when user opened Test Mode Summary.
+                    setPhase('acceptanceThankYouCold');
+                }
+            } else {
+                setPhase('offer');
+            }
+            return;
+        }
+        setPhase('join');
+    }, [data, router.query, activeEventCode, testModeConfigAccepted, phase]);
 
     const handleScriptChange = (path: string, value: any) => {
         if (!data) return;
@@ -321,21 +348,26 @@ export default function Home() {
 
     const handleLastStepNext = async () => {
         if (!data) return;
-        if (data.student?.debug?.registerTest === true) {
-            setPhase('debugTable');
+        const student = JSON.parse(JSON.stringify(data.student));
+        student.programs = student.programs || {};
+        if (!student.programs[activeEventCode]) student.programs[activeEventCode] = {};
+        student.programs[activeEventCode].join = true;
+        student.programs[activeEventCode].submitCount = (student.programs[activeEventCode].submitCount ?? 0) + 1;
+        student.programs[activeEventCode].submitTime = new Date().toISOString();
+        student.programs[activeEventCode].saved = true;
+
+        const needAcceptance = data.event?.config?.needAcceptance === true;
+        const isTestMode = data.student?.debug?.registerTest === true;
+
+        if (isTestMode) {
+            setData({ ...data, student });
+            setPhase(needAcceptance ? 'acceptanceThankYouWarm' : 'offer');
             return;
         }
         try {
-            const student = JSON.parse(JSON.stringify(data.student));
-            student.programs = student.programs || {};
-            if (!student.programs[activeEventCode]) student.programs[activeEventCode] = {};
-            student.programs[activeEventCode].join = true;
-            student.programs[activeEventCode].submitCount = (student.programs[activeEventCode].submitCount ?? 0) + 1;
-            student.programs[activeEventCode].submitTime = new Date().toISOString();
-            student.programs[activeEventCode].saved = true;
             await putTableItem('students', studentPid, student, studentPid, studentHash);
             setData({ ...data, student });
-            setPhase('offer');
+            setPhase(needAcceptance ? 'acceptanceThankYouWarm' : 'offer');
         } catch (err: any) {
             console.error('Save failed on last step', err);
         }
@@ -343,8 +375,8 @@ export default function Home() {
 
     if (error) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-slate-950 text-red-400">
-                <div className="p-4 border border-red-800 rounded bg-red-900/10">
+            <div className="min-h-screen flex items-center justify-center bg-reg-page text-reg-error">
+                <div className="p-4 border border-reg-error rounded bg-reg-error-bg">
                     <h1 className="text-xl font-bold mb-2">Error</h1>
                     <p>{error}</p>
                 </div>
@@ -354,7 +386,7 @@ export default function Home() {
 
     if (loading || phase === 'loading') {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white">
+            <div className="min-h-screen flex items-center justify-center bg-reg-page text-reg-text">
                 <div className="animate-pulse">Loading Registration...</div>
             </div>
         );
@@ -395,13 +427,13 @@ export default function Home() {
     const isEligibleForEvent = !eventPool || checkEligForEvent(eventPool, data.student, activeEventCode, data.pools || []);
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
+        <div className="min-h-screen bg-reg-page text-reg-text font-sans">
             <Head>
                 <title>{titleText.replace(/<br\s*\/?>/gi, ' ') || 'Registration'}</title>
             </Head>
 
             <main className="container mx-auto py-8 px-4">
-                <h1 className="text-3xl font-bold mb-8 text-center text-teal-400">
+                <h1 className="text-3xl font-bold mb-8 text-center text-reg-accent">
                     {titleLines.map((line: string, i: number) => (
                         <React.Fragment key={i}>
                             {i > 0 && <br />}
@@ -411,17 +443,46 @@ export default function Home() {
                 </h1>
 
                 {phase === 'testModeConfig' && data && (
-                    <div className="max-w-xl mx-auto space-y-6 p-6 rounded-lg border border-slate-700 bg-slate-800/50">
-                        <h2 className="text-xl font-semibold text-teal-400">Registration Test</h2>
-                        <p className="text-slate-300">
+                    <div className="max-w-xl mx-auto space-y-6 p-6 rounded-lg border border-reg-border bg-reg-card-muted">
+                        <h2 className="text-xl font-semibold text-reg-accent">Registration Test</h2>
+                        <div>
+                            <p className="text-reg-muted mb-2">Choose a theme for the registration flow:</p>
+                            <div className="flex flex-wrap gap-3">
+                                {THEMES.map((t) => (
+                                    <label
+                                        key={t.id}
+                                        className={`flex flex-col p-3 rounded-lg border-2 cursor-pointer transition-colors ${
+                                            theme === t.id
+                                                ? 'border-reg-accent bg-reg-card'
+                                                : 'border-reg-border bg-reg-card-muted hover:border-reg-border-light'
+                                        }`}
+                                    >
+                                        <input
+                                            type="radio"
+                                            name="theme"
+                                            value={t.id}
+                                            checked={theme === t.id}
+                                            onChange={() => setTheme(t.id)}
+                                            className="sr-only"
+                                        />
+                                        <span className="font-medium text-reg-text">{t.label}</span>
+                                        <span className="text-sm text-reg-muted">{t.subtitle}</span>
+                                    </label>
+                                ))}
+                            </div>
+                            <p className="text-reg-muted text-sm mt-2">
+                                Light uses a cool grey page and bright white cards; Meadow uses a warm parchment background and a deeper teal-green accent for a softer, more natural look.
+                            </p>
+                        </div>
+                        <p className="text-reg-muted">
                             The data this test is using comes from student{' '}
-                            <span className="font-medium text-white">
+                            <span className="font-medium text-reg-text">
                                 {[data.student?.first, data.student?.last].filter(Boolean).join(' ') || '(no name)'}
                             </span>
                             .
                         </p>
                         <div className="space-y-4">
-                            <label className="flex items-start gap-3 text-slate-300">
+                            <label className="flex items-start gap-3 text-reg-muted">
                                 <input
                                     type="checkbox"
                                     checked={testModeClearStudent}
@@ -429,11 +490,11 @@ export default function Home() {
                                         setTestModeClearStudent(e.target.checked);
                                         if (e.target.checked) setTestModeClearStudentKeepPrograms(false);
                                     }}
-                                    className="mt-1 rounded text-teal-500"
+                                    className="mt-1 rounded text-reg-accent"
                                 />
                                 <span>Clear ALL student data to impersonate a first encounter student.</span>
                             </label>
-                            <label className="flex items-start gap-3 text-slate-300">
+                            <label className="flex items-start gap-3 text-reg-muted">
                                 <input
                                     type="checkbox"
                                     checked={testModeClearStudentKeepPrograms}
@@ -441,40 +502,40 @@ export default function Home() {
                                         setTestModeClearStudentKeepPrograms(e.target.checked);
                                         if (e.target.checked) setTestModeClearStudent(false);
                                     }}
-                                    className="mt-1 rounded text-teal-500"
+                                    className="mt-1 rounded text-reg-accent"
                                 />
                                 <span>Clear student data, but leave event attendance history.</span>
                             </label>
                             <div>
-                                <p className="text-slate-300 mb-2">Test student&apos;s eligibility in the &apos;oath&apos; pool (override for this run):</p>
+                                <p className="text-reg-muted mb-2">Test student&apos;s eligibility in the &apos;oath&apos; pool (override for this run):</p>
                                 <div className="flex flex-wrap gap-4">
-                                    <label className="flex items-center gap-2 text-slate-300">
+                                    <label className="flex items-center gap-2 text-reg-muted">
                                         <input
                                             type="radio"
                                             name="oathEligibility"
                                             checked={testModeOathEligibility === 'actual'}
                                             onChange={() => setTestModeOathEligibility('actual')}
-                                            className="text-teal-500"
+                                            className="text-reg-accent"
                                         />
                                         Use actual
                                     </label>
-                                    <label className="flex items-center gap-2 text-slate-300">
+                                    <label className="flex items-center gap-2 text-reg-muted">
                                         <input
                                             type="radio"
                                             name="oathEligibility"
                                             checked={testModeOathEligibility === 'false'}
                                             onChange={() => setTestModeOathEligibility('false')}
-                                            className="text-teal-500"
+                                            className="text-reg-accent"
                                         />
                                         Override: false
                                     </label>
-                                    <label className="flex items-center gap-2 text-slate-300">
+                                    <label className="flex items-center gap-2 text-reg-muted">
                                         <input
                                             type="radio"
                                             name="oathEligibility"
                                             checked={testModeOathEligibility === 'true'}
                                             onChange={() => setTestModeOathEligibility('true')}
-                                            className="text-teal-500"
+                                            className="text-reg-accent"
                                         />
                                         Override: true
                                     </label>
@@ -484,7 +545,7 @@ export default function Home() {
                         <button
                             type="button"
                             onClick={handleTestModeConfigContinue}
-                            className="px-4 py-2 rounded bg-teal-600 text-white hover:bg-teal-500"
+                            className="px-4 py-2 rounded bg-reg-accent-button text-reg-accent-button-text hover:bg-reg-accent-button-hover"
                         >
                             Start Registration Test
                         </button>
@@ -492,8 +553,8 @@ export default function Home() {
                 )}
 
                 {phase === 'join' && !isEligibleForEvent && (
-                    <div className="max-w-xl mx-auto p-6 rounded-lg border border-slate-700 bg-slate-800/50">
-                        <h2 className="text-xl font-semibold text-teal-400">
+                    <div className="max-w-xl mx-auto p-6 rounded-lg border border-reg-border bg-reg-card-muted">
+                        <h2 className="text-xl font-semibold text-reg-accent">
                             {promptLookup(context, 'notEligible') || 'Not eligible'}
                         </h2>
                     </div>
@@ -507,6 +568,31 @@ export default function Home() {
                     />
                 )}
 
+                {(phase === 'acceptanceThankYouWarm' || phase === 'acceptanceThankYouCold') && (
+                    <div className="max-w-xl mx-auto p-6 rounded-lg border border-reg-border bg-reg-card-muted">
+                        <div
+                            className="text-reg-text"
+                            dangerouslySetInnerHTML={{
+                                __html: promptLookup(
+                                    context,
+                                    phase === 'acceptanceThankYouWarm' ? 'applyThankYouWarm' : 'applyThankYouCold'
+                                ) || '',
+                            }}
+                        />
+                        {data?.student?.debug?.registerTest === true && (
+                            <div className="mt-6">
+                                <button
+                                    type="button"
+                                    onClick={() => setPhase('debugTable')}
+                                    className="px-4 py-2 rounded bg-reg-accent-button text-reg-accent-button-text hover:bg-reg-accent-button-hover"
+                                >
+                                    Test Mode Summary
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {phase === 'offer' && (
                     <Offer context={context} onComplete={() => console.log("Offer complete")} />
                 )}
@@ -518,23 +604,23 @@ export default function Home() {
 
                 {phase === 'debugTable' && scriptDef && data && (
                     <div className="max-w-4xl mx-auto">
-                        <h2 className="text-xl font-semibold mb-4 text-teal-400">Test Mode - Data not saved.</h2>
-                        <div className="overflow-x-auto rounded border border-slate-700">
+                        <h2 className="text-xl font-semibold mb-4 text-reg-accent">Test Mode - Data not saved.</h2>
+                        <div className="overflow-x-auto rounded border border-reg-border">
                             <table className="w-full border-collapse text-left">
                                 <thead>
-                                    <tr className="border-b border-slate-600 bg-slate-800/80">
-                                        <th className="px-4 py-3 text-teal-400 font-medium">Script step</th>
-                                        <th className="px-4 py-3 text-teal-400 font-medium">Data will be stored to</th>
-                                        <th className="px-4 py-3 text-teal-400 font-medium">Value</th>
+                                    <tr className="border-b border-reg-border-light bg-reg-card">
+                                        <th className="px-4 py-3 text-reg-accent font-medium">Script step</th>
+                                        <th className="px-4 py-3 text-reg-accent font-medium">Data will be stored to</th>
+                                        <th className="px-4 py-3 text-reg-accent font-medium">Value</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {scriptDef.steps.flatMap((step) =>
+                                    {[...scriptDef.steps, { id: 'save' }].flatMap((step) =>
                                         getStepStorageRows(step.id, activeEventCode).map((row, i) => (
-                                            <tr key={`${step.id}-${i}`} className="border-b border-slate-700/80">
-                                                <td className="px-4 py-2 text-slate-200">{row.scriptStep}</td>
-                                                <td className="px-4 py-2 text-slate-300 font-mono text-sm">{row.displayPath}</td>
-                                                <td className="px-4 py-2 text-slate-300 font-mono text-sm max-w-xs truncate" title={formatDisplayValue(getValue(data.student, row.storagePath))}>
+                                            <tr key={`${step.id}-${i}`} className="border-b border-reg-border">
+                                                <td className="px-4 py-2 text-reg-text">{row.scriptStep}</td>
+                                                <td className="px-4 py-2 text-reg-muted font-mono text-sm">{row.displayPath}</td>
+                                                <td className="px-4 py-2 text-reg-muted font-mono text-sm max-w-xs truncate" title={formatDisplayValue(getValue(data.student, row.storagePath))}>
                                                     {formatDisplayValue(getValue(data.student, row.storagePath))}
                                                 </td>
                                             </tr>
@@ -547,7 +633,7 @@ export default function Home() {
                             <button
                                 type="button"
                                 onClick={() => window.location.reload()}
-                                className="px-4 py-2 rounded bg-teal-600 text-white hover:bg-teal-500"
+                                className="px-4 py-2 rounded bg-reg-accent-button text-reg-accent-button-text hover:bg-reg-accent-button-hover"
                             >
                                 Test Again
                             </button>

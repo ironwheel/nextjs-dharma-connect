@@ -54,10 +54,10 @@ export function promptLookup(context: ScriptContext, key: string): string {
 // Helper for inputs (omit label to avoid duplicating step title)
 const InputField = ({ label, value, onChange, type = "text", placeholder = "" }: any) => (
     <div className="mb-4">
-        {label ? <label className="block text-sm font-medium mb-1 text-slate-300">{label}</label> : null}
+        {label ? <label className="block text-sm font-medium mb-1 text-reg-muted">{label}</label> : null}
         <input
             type={type}
-            className="w-full p-2 rounded bg-slate-800 border border-slate-700 focus:border-blue-500 text-white placeholder-slate-500"
+            className="w-full p-2 rounded bg-reg-input border border-reg-border focus:border-reg-focus-ring text-reg-text placeholder-reg"
             value={value || ''}
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder}
@@ -67,9 +67,9 @@ const InputField = ({ label, value, onChange, type = "text", placeholder = "" }:
 
 const SelectField = ({ label, value, onChange, options }: any) => (
     <div className="mb-4">
-        {label ? <label className="block text-sm font-medium mb-1 text-slate-300">{label}</label> : null}
+        {label ? <label className="block text-sm font-medium mb-1 text-reg-muted">{label}</label> : null}
         <select
-            className="w-full p-2 rounded bg-slate-800 border border-slate-700 focus:border-blue-500 text-white"
+            className="w-full p-2 rounded bg-reg-input border border-reg-border focus:border-reg-focus-ring text-reg-text"
             value={value || ''}
             onChange={(e) => onChange(e.target.value)}
         >
@@ -89,14 +89,14 @@ const RadioYesNo = ({ context, path, label, engineOnChange }: { context: ScriptC
     const isNo = val === false;
     return (
         <div className="mb-4">
-            {label ? <label className="block text-sm font-medium mb-2 text-slate-300">{label}</label> : null}
+            {label ? <label className="block text-sm font-medium mb-2 text-reg-muted">{label}</label> : null}
             <div className="flex gap-4">
-                <label className="flex items-center text-slate-300">
-                    <input type="radio" name={path} checked={isYes} onChange={() => engineOnChange(path, true)} className="mr-2 text-teal-500" />
+                <label className="flex items-center text-reg-muted">
+                    <input type="radio" name={path} checked={isYes} onChange={() => engineOnChange(path, true)} className="mr-2 text-reg-accent" />
                     <span>{context.prompts?.yes?.text ?? 'Yes'}</span>
                 </label>
-                <label className="flex items-center text-slate-300">
-                    <input type="radio" name={path} checked={isNo} onChange={() => engineOnChange(path, false)} className="mr-2 text-teal-500" />
+                <label className="flex items-center text-reg-muted">
+                    <input type="radio" name={path} checked={isNo} onChange={() => engineOnChange(path, false)} className="mr-2 text-reg-accent" />
                     <span>{context.prompts?.no?.text ?? 'No'}</span>
                 </label>
             </div>
@@ -121,7 +121,7 @@ const CheckboxMap = ({
 }) => {
     const config = context.config?.[configKey] as Record<string, { prompt: string; order?: number; retreatRequired?: string; pool?: string }> | undefined;
     const eventCode = context.event?.aid;
-    if (!config) return <div className="text-slate-400 text-sm">No options configured ({configKey})</div>;
+    if (!config) return <div className="text-reg-muted text-sm">No options configured ({configKey})</div>;
     const whichRetreats = context.student?.programs?.[eventCode]?.whichRetreats || {};
     const pools = Array.isArray((context as any).pools) ? (context as any).pools : [];
     const mapName = configKey.replace('Config', '');
@@ -139,15 +139,15 @@ const CheckboxMap = ({
         .sort((a, b) => ((a[1]?.order ?? 0) - (b[1]?.order ?? 0)));
     return (
         <div className="mb-4">
-            {label ? <label className="block text-sm font-medium mb-2 text-slate-300">{label}</label> : null}
-            <div className="space-y-2 border border-slate-700 rounded p-3 bg-slate-800/50">
+            {label ? <label className="block text-sm font-medium mb-2 text-reg-muted">{label}</label> : null}
+            <div className="space-y-2 border border-reg-border rounded p-3 bg-reg-card-muted">
                 {entries.map(([key, obj]) => (
-                    <label key={key} className="flex items-center text-slate-300">
+                    <label key={key} className="flex items-center text-reg-muted">
                         <input
                             type="checkbox"
                             checked={!!safeMap[key]}
                             onChange={(e) => engineOnChange(`${basePath}.${mapName}.${key}`, e.target.checked)}
-                            className="mr-2 rounded text-teal-500"
+                            className="mr-2 rounded text-reg-accent"
                         />
                         <span>{typeof obj?.prompt === 'string' ? promptLookup(context, obj.prompt) : key}</span>
                     </label>
@@ -173,7 +173,7 @@ const ExclusiveCheckboxMap = ({
 }) => {
     const config = context.config?.[configKey] as Record<string, { prompt: string; order?: number; retreatRequired?: string; pool?: string }> | undefined;
     const eventCode = context.event?.aid;
-    if (!config) return <div className="text-slate-400 text-sm">No options configured ({configKey})</div>;
+    if (!config) return <div className="text-reg-muted text-sm">No options configured ({configKey})</div>;
     const whichRetreats = context.student?.programs?.[eventCode]?.whichRetreats || {};
     const pools = Array.isArray((context as any).pools) ? (context as any).pools : [];
     const mapName = configKey.replace('Config', '');
@@ -203,15 +203,15 @@ const ExclusiveCheckboxMap = ({
 
     return (
         <div className="mb-4">
-            {label ? <label className="block text-sm font-medium mb-2 text-slate-300">{label}</label> : null}
-            <div className="space-y-2 border border-slate-700 rounded p-3 bg-slate-800/50">
+            {label ? <label className="block text-sm font-medium mb-2 text-reg-muted">{label}</label> : null}
+            <div className="space-y-2 border border-reg-border rounded p-3 bg-reg-card-muted">
                 {entries.map(([key, obj]) => (
-                    <label key={key} className="flex items-center text-slate-300">
+                    <label key={key} className="flex items-center text-reg-muted">
                         <input
                             type="checkbox"
                             checked={selectedKey === key}
                             onChange={(e) => toggle(key, e.target.checked)}
-                            className="mr-2 rounded text-teal-500"
+                            className="mr-2 rounded text-reg-accent"
                         />
                         <span>{typeof obj?.prompt === 'string' ? promptLookup(context, obj.prompt) : key}</span>
                     </label>
@@ -234,7 +234,7 @@ export const RenderIntroduction: React.FC<{ context: ScriptContext; engineOnChan
     text = text.replace(/\|\|coord-email\|\|/g, coordEmailText);
     return (
         <div
-            className="prose prose-invert max-w-none text-slate-200 introduction-html"
+            className="prose prose-invert max-w-none text-reg-text introduction-html"
             dangerouslySetInnerHTML={{ __html: text }}
         />
     );
@@ -254,8 +254,8 @@ export const RenderWrittenTranslation: React.FC<{ context: ScriptContext, engine
     ];
 
     return (
-        <div className="p-4 bg-slate-800/50 rounded border border-slate-700">
-            <div className="flex items-center mb-4 text-teal-400">
+        <div className="p-4 bg-reg-card-muted rounded border border-reg-border">
+            <div className="flex items-center mb-4 text-reg-accent">
                 <FontAwesomeIcon icon={faGlobe} className="mr-2" />
                 <h3 className="text-lg font-medium">{promptLookup(context, 'selectLanguage')}</h3>
             </div>
@@ -302,10 +302,10 @@ export const RenderMotivation: React.FC<{ context: ScriptContext, engineOnChange
 
     return (
         <div className="mb-4">
-            <label className="block text-sm font-medium mb-1 text-slate-300">Motivation</label>
-            <p className="text-xs text-slate-400 mb-2">Please briefly describe your motivation for attending this event.</p>
+            <label className="block text-sm font-medium mb-1 text-reg-muted">Motivation</label>
+            <p className="text-xs text-reg-muted mb-2">Please briefly describe your motivation for attending this event.</p>
             <textarea
-                className="w-full p-2 rounded bg-slate-800 border border-slate-700 focus:border-blue-500 text-white h-32"
+                className="w-full p-2 rounded bg-reg-input border border-reg-border focus:border-reg-focus-ring text-reg-text h-32"
                 value={motivation || ''}
                 onChange={(e) => engineOnChange(`student.programs.${eventCode}.motivation`, e.target.value)}
             />
@@ -319,16 +319,16 @@ export const RenderOath: React.FC<{ context: ScriptContext, engineOnChange: (pat
     const oath = context.student.programs?.[eventCode]?.oath;
 
     return (
-        <div className="p-4 bg-teal-900/20 border border-teal-800 rounded">
-            <p className="mb-4 text-slate-300 italic">"I agree to maintain the confidentiality of the teachings..." (Placeholder Oath Text)</p>
+        <div className="p-4 bg-reg-card-muted border border-reg-border rounded">
+            <p className="mb-4 text-reg-muted italic">"I agree to maintain the confidentiality of the teachings..." (Placeholder Oath Text)</p>
             <div className="flex items-center">
                 <input
                     type="checkbox"
-                    className="mr-2 rounded bg-slate-800 border border-slate-700 text-teal-500 focus:ring-teal-500"
+                    className="mr-2 rounded bg-reg-input border border-reg-border text-reg-accent focus:ring-reg-focus-ring"
                     checked={!!oath}
                     onChange={(e) => engineOnChange(`student.programs.${eventCode}.oath`, e.target.checked)}
                 />
-                <label className="text-sm font-medium text-white">I Agree</label>
+                <label className="text-sm font-medium text-reg-text">I Agree</label>
             </div>
         </div>
     );
@@ -348,9 +348,9 @@ export const RenderLocation: React.FC<{ context: ScriptContext; engineOnChange: 
     return (
         <div className="space-y-4">
             <div className="mb-4">
-                <label className="block text-sm font-medium mb-1 text-slate-300">{promptLookup(context, 'selectCountry')}</label>
+                <label className="block text-sm font-medium mb-1 text-reg-muted">{promptLookup(context, 'selectCountry')}</label>
                 <select
-                    className="w-full p-2 rounded bg-slate-800 border border-slate-700 focus:border-blue-500 text-white"
+                    className="w-full p-2 rounded bg-reg-input border border-reg-border focus:border-reg-focus-ring text-reg-text"
                     value={country || ''}
                     onChange={(e) => engineOnChange('student.country', e.target.value)}
                 >
@@ -360,9 +360,9 @@ export const RenderLocation: React.FC<{ context: ScriptContext; engineOnChange: 
             </div>
             {(country === 'United States' || country === 'Canada') && (
                 <div className="mb-4">
-                    <label className="block text-sm font-medium mb-1 text-slate-300">{promptLookup(context, 'selectStateProvince')}</label>
+                    <label className="block text-sm font-medium mb-1 text-reg-muted">{promptLookup(context, 'selectStateProvince')}</label>
                     <select
-                        className="w-full p-2 rounded bg-slate-800 border border-slate-700 focus:border-blue-500 text-white"
+                        className="w-full p-2 rounded bg-reg-input border border-reg-border focus:border-reg-focus-ring text-reg-text"
                         value={stateProvince || ''}
                         onChange={(e) => engineOnChange('student.stateProvince', e.target.value)}
                     >
@@ -400,10 +400,10 @@ export const RenderPreferenceNecessity: React.FC<{ context: ScriptContext; engin
     const hasVY1 = objKeysInc(whichRetreats, 'vajrayana1');
     const hasVY2 = objKeysInc(whichRetreats, 'vajrayana2');
     const oneVY = hasVY && !(hasVY1 && hasVY2);
-    if (!oneVY) return <div className="text-slate-400 text-sm">This step applies when you have selected exactly one Vajrayana retreat.</div>;
+    if (!oneVY) return <div className="text-reg-muted text-sm">This step applies when you have selected exactly one Vajrayana retreat.</div>;
 
     const config = context.config?.prefNecConfig as Record<string, { prompt: string; order?: number; pool?: string; radioGroups?: string[] }> | undefined;
-    if (!config) return <div className="text-slate-400 text-sm">No prefNecConfig configured.</div>;
+    if (!config) return <div className="text-reg-muted text-sm">No prefNecConfig configured.</div>;
 
     const pools = Array.isArray((context as any).pools) ? (context as any).pools : [];
     const checkElig = getCheckEligibility(context);
@@ -423,15 +423,15 @@ export const RenderPreferenceNecessity: React.FC<{ context: ScriptContext; engin
 
     return (
         <div className="mb-4">
-            <div className="space-y-2 border border-slate-700 rounded p-3 bg-slate-800/50">
+            <div className="space-y-2 border border-reg-border rounded p-3 bg-reg-card-muted">
                 {entries.map(({ key, prompt }) => (
-                    <label key={key} className="flex items-center text-slate-300">
+                    <label key={key} className="flex items-center text-reg-muted">
                         <input
                             type="radio"
                             name="prefNec"
                             checked={selectedKey === key}
                             onChange={() => handleSelect(key)}
-                            className="mr-2 rounded text-teal-500"
+                            className="mr-2 rounded text-reg-accent"
                         />
                         <span>{promptLookup(context, prompt)}</span>
                     </label>
@@ -445,7 +445,7 @@ export const RenderPreferenceNecessity: React.FC<{ context: ScriptContext; engin
 export const RenderVyOnlineSeries: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
     const eventCode = context.event?.aid;
     const path = `student.programs.${eventCode}.vyOnlineSeries`;
-    return <RadioYesNo context={context} path={path} label={promptLookup(context, 'vyOnlineSeries')} engineOnChange={engineOnChange} />;
+    return <RadioYesNo context={context} path={path} label="" engineOnChange={engineOnChange} />;
 };
 
 // --- Mobile phone ---
@@ -468,7 +468,7 @@ export const RenderInPersonTeachings: React.FC<{ context: ScriptContext; engineO
 export const RenderInterestedInSetup: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
     const eventCode = context.event?.aid;
     const config = context.config?.setupConfig as Record<string, { prompt: string; order?: number; pool?: string; radioGroups?: string[] }> | undefined;
-    if (!config) return <div className="text-slate-400 text-sm">No setupConfig configured.</div>;
+    if (!config) return <div className="text-reg-muted text-sm">No setupConfig configured.</div>;
 
     const pools = Array.isArray((context as any).pools) ? (context as any).pools : [];
     const checkElig = getCheckEligibility(context);
@@ -516,16 +516,16 @@ export const RenderInterestedInSetup: React.FC<{ context: ScriptContext; engineO
 
     return (
         <div className="mb-4">
-            <div className="space-y-2 border border-slate-700 rounded p-3 bg-slate-800/50">
+            <div className="space-y-2 border border-reg-border rounded p-3 bg-reg-card-muted">
                 {allEntries.map((entry) => {
                     if (entry.key === exclusiveKey && noEntry) {
                         return (
-                            <label key={entry.key} className="flex items-center text-slate-300">
+                            <label key={entry.key} className="flex items-center text-reg-muted">
                                 <input
                                     type="checkbox"
                                     checked={noChecked}
                                     onChange={(e) => handleNoChange(e.target.checked)}
-                                    className="mr-2 rounded text-teal-500"
+                                    className="mr-2 rounded text-reg-accent"
                                 />
                                 <span>{promptLookup(context, noEntry.prompt)}</span>
                             </label>
@@ -533,12 +533,12 @@ export const RenderInterestedInSetup: React.FC<{ context: ScriptContext; engineO
                     }
                     if (multiGroupKeys.has(entry.key)) {
                         return (
-                            <label key={entry.key} className="flex items-center text-slate-300">
+                            <label key={entry.key} className="flex items-center text-reg-muted">
                                 <input
                                     type="checkbox"
                                     checked={multiChecked(entry.key)}
                                     onChange={(e) => handleMultiChange(entry.key, e.target.checked)}
-                                    className="mr-2 rounded text-teal-500"
+                                    className="mr-2 rounded text-reg-accent"
                                 />
                                 <span>{promptLookup(context, entry.prompt)}</span>
                             </label>
@@ -593,10 +593,10 @@ export const RenderServiceAlready: React.FC<{ context: ScriptContext; engineOnCh
 export const RenderServiceNoQuestion: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
     const eventCode = context.event?.aid;
     const serviceAlready = context.student?.programs?.[eventCode]?.serviceAlready;
-    if (serviceAlready === true) return <div className="text-slate-400 text-sm">Skipped (you indicated you already serve).</div>;
+    if (serviceAlready === true) return <div className="text-reg-muted text-sm">Skipped (you indicated you already serve).</div>;
 
     const config = context.config?.serviceConfig as Record<string, { prompt: string; order?: number; retreatRequired?: string; pool?: string }> | undefined;
-    if (!config) return <div className="text-slate-400 text-sm">No options configured (serviceConfig)</div>;
+    if (!config) return <div className="text-reg-muted text-sm">No options configured (serviceConfig)</div>;
 
     const whichRetreats = context.student?.programs?.[eventCode]?.whichRetreats || {};
     const pools = Array.isArray((context as any).pools) ? (context as any).pools : [];
@@ -639,19 +639,19 @@ export const RenderServiceNoQuestion: React.FC<{ context: ScriptContext; engineO
 
     return (
         <div className="mb-4">
-            <div className="space-y-2 border border-slate-700 rounded p-3 bg-slate-800/50">
+            <div className="space-y-2 border border-reg-border rounded p-3 bg-reg-card-muted">
                 {entries.map(([key, obj]) => {
                     const isHappy = key === happyKey;
                     const checked = !!safeMap[key];
                     const onChange = (e: React.ChangeEvent<HTMLInputElement>) =>
                         isHappy ? toggleHappy(e.target.checked) : toggleOther(key, e.target.checked);
                     return (
-                        <label key={key} className="flex items-center text-slate-300">
+                        <label key={key} className="flex items-center text-reg-muted">
                             <input
                                 type="checkbox"
                                 checked={checked}
                                 onChange={onChange}
-                                className="mr-2 rounded text-teal-500"
+                                className="mr-2 rounded text-reg-accent"
                             />
                             <span>{typeof obj?.prompt === 'string' ? promptLookup(context, obj.prompt) : key}</span>
                         </label>
@@ -706,11 +706,11 @@ export const RenderSupplication: React.FC<{ context: ScriptContext; engineOnChan
     const joinVal = eventCode ? programsForEvent?.[joinKey] : undefined;
 
     return (
-        <div className="p-4 bg-slate-800/50 rounded border border-slate-700 space-y-4">
+        <div className="p-4 bg-reg-card-muted rounded border border-reg-border space-y-4">
             <textarea
                 readOnly
                 rows={10}
-                className="w-full p-3 rounded bg-slate-900 border border-slate-700 text-slate-100 text-sm leading-relaxed"
+                className="w-full p-3 rounded bg-reg-panel border border-reg-border text-reg-text text-sm leading-relaxed"
                 value={body + signerText}
             />
             {eventCode && (
@@ -767,10 +767,10 @@ export const RenderSocialMedia: React.FC<{ context: ScriptContext; engineOnChang
 
     return (
         <div className="mb-4">
-            <label className="flex items-center text-slate-300">
+            <label className="flex items-center text-reg-muted">
                 <input
                     type="checkbox"
-                    className="mr-2 rounded text-teal-500"
+                    className="mr-2 rounded text-reg-accent"
                     checked={checked}
                     onChange={(e) => engineOnChange(`student.programs.${eventCode}.socialMedia`, e.target.checked)}
                 />
@@ -824,7 +824,7 @@ export const RenderSave = React.forwardRef<
     React.useImperativeHandle(ref, () => ({ save: handleSave }));
 
     if (error) {
-        return <p className="text-red-400 text-sm">{error}</p>;
+        return <p className="text-reg-error text-sm">{error}</p>;
     }
     return null;
 });

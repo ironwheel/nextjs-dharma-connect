@@ -8,6 +8,83 @@
     --background-end-rgb: 255, 255, 255;
 }
 
+/* Registration app semantic theme variables (default = dark) */
+:root,
+[data-theme="dark"] {
+    --reg-bg-page: #020617;
+    --reg-bg-panel: #0f172a;
+    --reg-bg-card: #1e293b;
+    --reg-bg-card-muted: rgba(30, 41, 59, 0.5);
+    --reg-bg-input: #1e293b;
+    --reg-bg-button: #334155;
+    --reg-bg-button-hover: #475569;
+    --reg-bg-button-disabled: #334155;
+    --reg-border: #334155;
+    --reg-border-light: #475569;
+    --reg-text: #f1f5f9;
+    --reg-text-muted: #94a3b8;
+    --reg-text-disabled: #64748b;
+    --reg-accent: #2dd4bf;
+    --reg-accent-hover: #14b8a6;
+    --reg-accent-button: #0d9488;
+    --reg-accent-button-hover: #14b8a6;
+    --reg-accent-button-text: #e2e8f0;
+    --reg-error: #f87171;
+    --reg-error-bg: rgba(248, 113, 113, 0.1);
+    --reg-focus-ring: #3b82f6;
+    --reg-placeholder: #64748b;
+}
+
+[data-theme="light"] {
+    --reg-bg-page: #f5f7fa;
+    --reg-bg-panel: #ffffff;
+    --reg-bg-card: #ffffff;
+    --reg-bg-card-muted: rgba(241, 245, 249, 0.8);
+    --reg-bg-input: #ffffff;
+    --reg-bg-button: #e2e8f0;
+    --reg-bg-button-hover: #cbd5e1;
+    --reg-bg-button-disabled: #e2e8f0;
+    --reg-border: #cbd5e1;
+    --reg-border-light: #e2e8f0;
+    --reg-text: #333333;
+    --reg-text-muted: #6c757d;
+    --reg-text-disabled: #94a3b8;
+    --reg-accent: #2f9c8b;
+    --reg-accent-hover: #268f85;
+    --reg-accent-button: #2f9c8b;
+    --reg-accent-button-hover: #268f85;
+    --reg-accent-button-text: #e2e8f0;
+    --reg-error: #ff0000;
+    --reg-error-bg: rgba(255, 0, 0, 0.08);
+    --reg-focus-ring: #2f9c8b;
+    --reg-placeholder: #94a3b8;
+}
+
+[data-theme="meadow"] {
+    --reg-bg-page: #f7f6f2;
+    --reg-bg-panel: #ffffff;
+    --reg-bg-card: #ffffff;
+    --reg-bg-card-muted: rgba(226, 232, 240, 0.65);
+    --reg-bg-input: #ffffff;
+    --reg-bg-button: #e5e7eb;
+    --reg-bg-button-hover: #d1d5db;
+    --reg-bg-button-disabled: #e5e7eb;
+    --reg-border: #d1d5db;
+    --reg-border-light: #e5e7eb;
+    --reg-text: #111827;
+    --reg-text-muted: #4b5563;
+    --reg-text-disabled: #9ca3af;
+    --reg-accent: #0f766e;
+    --reg-accent-hover: #115e59;
+    --reg-accent-button: #0f766e;
+    --reg-accent-button-hover: #115e59;
+    --reg-accent-button-text: #f8fafc;
+    --reg-error: #dc2626;
+    --reg-error-bg: rgba(220, 38, 38, 0.08);
+    --reg-focus-ring: #0f766e;
+    --reg-placeholder: #9ca3af;
+}
+
 @media (prefers-color-scheme: dark) {
     :root {
         --foreground-rgb: 255, 255, 255;

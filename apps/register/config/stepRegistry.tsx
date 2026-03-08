@@ -226,8 +226,8 @@ export const stepRegistry: Record<string, ScriptStep> = {
             ).length;
             // happy is mutually exclusive; state with happy + others is invalid
             if (happySelected && otherCount > 0) return promptLookup(context, 'serviceNoQuestionRequired');
-            // either happy OR at least 4 non-happy options must be selected
-            if (!happySelected && otherCount < 4) return promptLookup(context, 'serviceNoQuestionRequired');
+            // either happy OR at least 3 non-happy options must be selected
+            if (!happySelected && otherCount < 3) return promptLookup(context, 'serviceNoQuestionRequired');
             return null;
         }
     },
