@@ -93,11 +93,11 @@ const RadioYesNo = ({ context, path, label, engineOnChange }: { context: ScriptC
             <div className="flex gap-4">
                 <label className="flex items-center text-reg-muted">
                     <input type="radio" name={path} checked={isYes} onChange={() => engineOnChange(path, true)} className="mr-2 text-reg-accent" />
-                    <span>{context.prompts?.yes?.text ?? 'Yes'}</span>
+                    <span>{promptLookup(context, 'yes') || 'Yes'}</span>
                 </label>
                 <label className="flex items-center text-reg-muted">
                     <input type="radio" name={path} checked={isNo} onChange={() => engineOnChange(path, false)} className="mr-2 text-reg-accent" />
-                    <span>{context.prompts?.no?.text ?? 'No'}</span>
+                    <span>{promptLookup(context, 'no') || 'No'}</span>
                 </label>
             </div>
         </div>
