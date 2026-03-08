@@ -126,10 +126,10 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
             case 'text':
                 return (
                     <div className="mb-4">
-                        <label className="block text-sm font-medium mb-1 text-slate-300">{step.promptKey || step.id}</label>
+                        <label className="block text-sm font-medium mb-1 text-reg-muted">{step.promptKey || step.id}</label>
                         <input
                             type="text"
-                            className="w-full p-2 rounded bg-slate-800 border border-slate-700 focus:border-blue-500 text-white"
+                            className="w-full p-2 rounded bg-reg-input border border-reg-border focus:border-reg-focus-ring text-reg-text"
                             value={value || ''}
                             onChange={(e) => step.field && onChange(step.field, e.target.value)}
                         />
@@ -140,24 +140,24 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
                     <div className="mb-4 flex items-center">
                         <input
                             type="checkbox"
-                            className="mr-2 rounded bg-slate-800 border border-slate-700 text-teal-500 focus:ring-teal-500"
+                            className="mr-2 rounded bg-reg-input border border-reg-border text-reg-accent focus:ring-reg-focus-ring"
                             checked={!!value}
                             onChange={(e) => step.field && onChange(step.field, e.target.checked)}
                         />
-                        <label className="text-sm font-medium text-slate-300">{step.promptKey || step.id}</label>
+                        <label className="text-sm font-medium text-reg-muted">{step.promptKey || step.id}</label>
                     </div>
                 );
             case 'radio':
                 return (
                     <div className="mb-4">
-                        <label className="block text-sm font-medium mb-2 text-slate-300">{step.promptKey || step.id}</label>
+                        <label className="block text-sm font-medium mb-2 text-reg-muted">{step.promptKey || step.id}</label>
                         <div className="flex flex-col gap-2">
                             {step.options?.map((opt) => (
-                                <label key={opt.value} className="flex items-center text-slate-300">
+                                <label key={opt.value} className="flex items-center text-reg-muted">
                                     <input
                                         type="radio"
                                         name={step.id}
-                                        className="mr-2 text-teal-500 focus:ring-teal-500 bg-slate-800 border-slate-700"
+                                        className="mr-2 text-reg-accent focus:ring-reg-focus-ring bg-reg-input border-reg-border"
                                         checked={value === opt.value}
                                         onChange={() => step.field && onChange(step.field, opt.value)}
                                     />
@@ -169,7 +169,7 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
                 );
             case 'info':
                 return (
-                    <div className="mb-4 p-4 bg-slate-800 rounded border border-slate-700 text-slate-300">
+                    <div className="mb-4 p-4 bg-reg-card rounded border border-reg-border text-reg-muted">
                         {/* Placeholder for localized text or simplified logic */}
                         <p>{step.promptKey || step.id}</p>
                     </div>
@@ -191,7 +191,7 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
             : null;
 
     return (
-        <div className="script-engine max-w-2xl mx-auto bg-slate-900 text-white rounded-lg shadow-xl border border-slate-800 overflow-hidden">
+        <div className="script-engine max-w-2xl mx-auto bg-reg-panel text-reg-text rounded-lg shadow-xl border border-reg-border overflow-hidden">
             {eventImageUrl && (
                 <img
                     src={eventImageUrl}
@@ -200,24 +200,24 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
                 />
             )}
             <div className="p-6">
-            {showStepTitle && <h2 className="text-xl font-semibold mb-6 text-teal-400">{stepTitle}</h2>}
+            {showStepTitle && <h2 className="text-xl font-semibold mb-6 text-reg-accent">{stepTitle}</h2>}
 
             <div className="step-content min-h-[200px]">
                 {renderCurrentStep()}
             </div>
             {validationError && (
-                <p className="mt-4 text-amber-400 text-sm" role="alert">{validationError}</p>
+                <p className="mt-4 text-reg-error text-sm" role="alert">{validationError}</p>
             )}
 
             <div className="mt-8 flex justify-between items-center flex-wrap gap-3">
                 <button
                     onClick={handleBack}
                     disabled={isFirst}
-                    className={`px-4 py-2 rounded ${isFirst ? 'bg-slate-700 text-slate-500 cursor-not-allowed' : 'bg-slate-700 text-white hover:bg-slate-600 transition-colors'}`}
+                    className={`px-4 py-2 rounded ${isFirst ? 'bg-reg-button text-reg-text-disabled cursor-not-allowed' : 'bg-reg-button text-reg-text hover:bg-reg-button-hover transition-colors'}`}
                 >
                     {promptLookup(context, 'back')}
                 </button>
-                <span className="text-slate-400 text-sm flex-1 text-center">
+                <span className="text-reg-muted text-sm flex-1 text-center">
                     {promptLookup(context, 'regProgress')
                         .replace(/\|\|currentStep\|\|/g, String(effectiveStepIndex + 1))
                         .replace(/\|\|totalSteps\|\|/g, String(definition.steps.length))}
@@ -227,7 +227,7 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
                         <button
                             type="button"
                             onClick={() => (context as any).onCancel?.()}
-                            className="px-4 py-2 rounded bg-slate-600 text-white hover:bg-slate-500 transition-colors"
+                            className="px-4 py-2 rounded bg-reg-button-hover text-reg-text hover:bg-reg-button transition-colors"
                         >
                             {promptLookup(context, 'cancel')}
                         </button>
@@ -239,7 +239,7 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
                                 ? async () => { await saveStepRef.current?.save(); }
                                 : handleNext}
                         disabled={!!validationError}
-                        className={`px-6 py-2 rounded font-medium transition-colors shadow-lg ${validationError ? 'bg-slate-600 text-slate-400 cursor-not-allowed shadow-slate-900/20' : 'bg-teal-600 text-white hover:bg-teal-500 shadow-teal-900/20'}`}
+                        className={`px-6 py-2 rounded font-medium transition-colors shadow-lg ${validationError ? 'bg-reg-button-disabled text-reg-text-disabled cursor-not-allowed' : 'bg-reg-accent-button text-reg-accent-button-text hover:bg-reg-accent-button-hover'}`}
                     >
                         {promptLookup(context, 'next')}
                     </button>
