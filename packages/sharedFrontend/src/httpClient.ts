@@ -16,26 +16,34 @@ if (!process.env.NEXT_PUBLIC_API_URL) {
 // needs to be set to the root of the internal hosting domain for production
 const API_BASE = process.env.NEXT_PUBLIC_API_URL;
 
-// at module scope
+// at module scope: cache token and in-flight promise so concurrent callers share one CSRF fetch
 let cachedCsrfToken: string | null = null;
+let csrfTokenPromise: Promise<string> | null = null;
 
 /**
  * @async
  * @function ensureCsrfToken
- * @description Ensures that a valid CSRF token is available.
+ * @description Ensures that a valid CSRF token is available. Deduplicates concurrent calls so only one /api/csrf request is made (avoids 403s when multiple POSTs run in parallel on first load).
  * @returns {Promise<string>} A promise that resolves to the CSRF token.
  */
 async function ensureCsrfToken(): Promise<string> {
   if (cachedCsrfToken) {
-    return cachedCsrfToken
+    return cachedCsrfToken;
   }
-  const resp = await fetch(`${API_BASE}/api/csrf`, {
-    credentials: 'include',
-  });
-  const body = await resp.json();
-  let token = body.csrfToken;
-  cachedCsrfToken = token;
-  return token!;
+  if (csrfTokenPromise) {
+    return csrfTokenPromise;
+  }
+  csrfTokenPromise = (async () => {
+    const resp = await fetch(`${API_BASE}/api/csrf`, {
+      credentials: 'include',
+    });
+    const body = await resp.json();
+    const token = body.csrfToken as string;
+    cachedCsrfToken = token;
+    csrfTokenPromise = null;
+    return token;
+  })();
+  return csrfTokenPromise;
 }
 
 /**
