@@ -181,6 +181,14 @@ export default function Home() {
         loadData();
     }, [router.isReady, activeEventCode, studentPid, studentHash]);
 
+    // Initial theme from event config (default meadow)
+    useEffect(() => {
+        if (!data?.event?.config) return;
+        const raw = data.event.config.registrationTheme;
+        const themeId: ThemeId = raw === 'dark' || raw === 'light' || raw === 'meadow' ? raw : 'meadow';
+        setTheme(themeId);
+    }, [data?.event?.config?.registrationTheme, setTheme]);
+
     // Determine Initial Phase
     const [phase, setPhase] = useState<'loading' | 'testModeConfig' | 'join' | 'offer' | 'stripeCapture' | 'debugTable' | 'acceptanceThankYouWarm' | 'acceptanceThankYouCold'>('loading');
 
