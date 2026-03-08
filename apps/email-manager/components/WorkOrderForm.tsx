@@ -517,11 +517,17 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
 
                 // Note: testers and sendContinuously are intentionally excluded from structuralFieldsChanged
                 // Changing these fields should NOT reset the stages/workflow progress
+                // Compare languages with sorted keys so key order (e.g. API vs form state) doesn't cause false positives
+                const existingLangs = existingWorkOrder.languages || {}
+                const currentLangs = languages || {}
+                const langKeysSorted = (o: Record<string, boolean>) =>
+                    JSON.stringify(Object.keys(o).sort().reduce((acc, k) => ({ ...acc, [k]: o[k] }), {}))
+                const languagesChanged = langKeysSorted(existingLangs) !== langKeysSorted(currentLangs)
                 structuralFieldsChanged =
                     existingWorkOrder.eventCode !== eventCode ||
                     existingWorkOrder.subEvent !== subEvent ||
                     existingWorkOrder.stage !== stage ||
-                    JSON.stringify(existingWorkOrder.languages || {}) !== JSON.stringify(languages || {}) ||
+                    languagesChanged ||
                     revisionChanged
 
                 shouldResetSteps = structuralFieldsChanged
