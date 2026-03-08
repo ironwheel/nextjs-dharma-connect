@@ -8,6 +8,8 @@ import re
 import time
 import sys
 import os
+import hmac
+import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.headerregistry import Address
@@ -17,7 +19,7 @@ from botocore.exceptions import ClientError
 
 from .config import (
     SMTP_SERVER, SMTP_PORT, DEFAULT_PREVIEW, DEFAULT_FROM_NAME,
-    EMAIL_ACCOUNT_CREDENTIALS_TABLE, AWS_REGION
+    EMAIL_ACCOUNT_CREDENTIALS_TABLE, AWS_REGION, APP_ACCESS_JSON, REGLINK_APP_HOST
 )
 from .prompts import prompt_lookup
 from .eligible import check_eligibility
@@ -25,6 +27,39 @@ from .steps.shared import code_to_full_language
 
 # Cache for email account credentials to avoid repeated DynamoDB calls
 _credentials_cache = {}
+
+
+def _generate_auth_hash(guid: str, secret_key_hex: str) -> str:
+    """
+    Generate an HMAC-SHA256 hash of a UUID using a secret key (same algorithm as API authUtils).
+    """
+    if not re.match(r'^[0-9a-f]{64}$', secret_key_hex, re.IGNORECASE):
+        raise ValueError('Secret key must be a 64-character hexadecimal string')
+    key_bytes = bytes.fromhex(secret_key_hex)
+    return hmac.new(key_bytes, guid.encode('utf-8'), 'sha256').hexdigest()
+
+
+def _get_reglink_secret() -> str:
+    """Get the secret from APP_ACCESS_JSON for hash generation (by REGLINK_APP_HOST or first entry)."""
+    if not APP_ACCESS_JSON:
+        raise Exception("Can't use ||hash||. APP_ACCESS_JSON environment variable not set.")
+    try:
+        access_list = json.loads(APP_ACCESS_JSON)
+    except json.JSONDecodeError:
+        raise Exception("APP_ACCESS_JSON is not valid JSON")
+    if not access_list:
+        raise Exception("APP_ACCESS_JSON is empty")
+    if REGLINK_APP_HOST:
+        entry = next((e for e in access_list if e.get('host') == REGLINK_APP_HOST), None)
+        if not entry:
+            raise Exception(f"REGLINK_APP_HOST '{REGLINK_APP_HOST}' not found in APP_ACCESS_JSON")
+    else:
+        entry = access_list[0]
+    secret = entry.get('secret')
+    if not secret:
+        raise Exception("APP_ACCESS_JSON entry has no 'secret' field")
+    return secret
+
 
 def lookup_email_account_credentials(account: str, country: str) -> tuple[str, str]:
     """
@@ -127,9 +162,11 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
     # ||aid|| will get replaced with the event's aid below
     if "#reglink" in html:
         full_language = code_to_full_language(language)
-        registration_link_text = prompt_lookup(prompts_array, 'reglink', full_language, event['aid'])
+        reglinkv2 = (event.get('config') or {}).get('reglinkv2')
+        prompt_key = 'reglinkv2' if reglinkv2 else 'reglink'
+        registration_link_text = prompt_lookup(prompts_array, prompt_key, full_language, event['aid'])
         if not registration_link_text:
-            raise Exception(f"Can't use #reglink. No prompt found for prompt: reglink, {full_language}")
+            raise Exception(f"Can't use #reglink. No prompt found for prompt: {prompt_key}, {full_language}")
         html = html.replace("#reglink", registration_link_text)
 
     # If #tangralink directive in html, replace it with the langauge specific reg link language
@@ -256,6 +293,13 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
     # Replace placeholder pid with student ID
     html = html.replace("123456789", student.get('id', ''))
     html = html.replace("||pid||", student.get('id', ''))
+
+    # Replace ||hash|| with HMAC-SHA256(pid, secret) using APP_ACCESS_JSON (same as API authUtils)
+    if "||hash||" in html:
+        secret = _get_reglink_secret()
+        pid = student.get('id', '')
+        auth_hash = _generate_auth_hash(pid, secret)
+        html = html.replace("||hash||", auth_hash)
 
     # Replace placeholder aid with event aid
     html = html.replace("||aid||", event['aid'])

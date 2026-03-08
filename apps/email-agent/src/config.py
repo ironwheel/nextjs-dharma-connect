@@ -83,6 +83,10 @@ SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
 DEFAULT_PREVIEW = os.getenv('DEFAULT_PREVIEW')
 DEFAULT_FROM_NAME = os.getenv('DEFAULT_FROM_NAME')
 
+# App access (for ||hash|| replacement in emails; same format as API APP_ACCESS_JSON)
+APP_ACCESS_JSON = os.getenv('APP_ACCESS_JSON')
+REGLINK_APP_HOST = os.getenv('REGLINK_APP_HOST')  # host to use for hash secret when set
+
 # Email sending configuration
 EMAIL_BURST_SIZE = int(os.getenv('EMAIL_BURST_SIZE', '10'))
 EMAIL_RECOVERY_SLEEP_SECS = int(os.getenv('EMAIL_RECOVERY_SLEEP_SECS', '60'))
