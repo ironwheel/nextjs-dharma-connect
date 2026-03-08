@@ -626,6 +626,14 @@ const Home = () => {
     const [deletePromptName, setDeletePromptName] = useState<string>('');
     const [deletePromptMatches, setDeletePromptMatches] = useState<Prompt[] | null>(null);
     const [deletePromptSaving, setDeletePromptSaving] = useState<boolean>(false);
+    // Duplicate prompt (within edit modal) state
+    const [showDuplicatePromptModal, setShowDuplicatePromptModal] = useState<boolean>(false);
+    const [duplicateStep, setDuplicateStep] = useState<1 | 2>(1);
+    const [duplicateSourceName, setDuplicateSourceName] = useState<string>('');
+    const [duplicateSourceMatches, setDuplicateSourceMatches] = useState<Prompt[] | null>(null);
+    const [duplicateNewName, setDuplicateNewName] = useState<string>('');
+    const [duplicateNewNameExists, setDuplicateNewNameExists] = useState<boolean | null>(null);
+    const [duplicatePromptSaving, setDuplicatePromptSaving] = useState<boolean>(false);
     const [viewsProfileKeys, setViewsProfileKeys] = useState<string[]>([]);
 
     // Suppress a known benign runtime error coming from a third-party
@@ -1637,6 +1645,73 @@ const Home = () => {
             toast.error('Failed to delete prompts');
         } finally {
             setDeletePromptSaving(false);
+        }
+    };
+
+    const handleDuplicateSourceSearch = () => {
+        const nameForKey = duplicateSourceName.trim().replace(/\s+/g, '-');
+        if (!nameForKey) {
+            toast.error('Please enter a prompt name to copy from');
+            return;
+        }
+        if (!promptsEditAid) {
+            toast.error('Event code (aid) is required');
+            return;
+        }
+        const fullKey = `${promptsEditAid}-${nameForKey}`;
+        const matches = promptsEditData.filter(p => p.prompt === fullKey);
+        setDuplicateSourceMatches(matches);
+        setDuplicateNewNameExists(null);
+        if (matches.length === 0) {
+            toast.info(`No prompts found for "${fullKey}" in this event.`);
+        }
+    };
+
+    const handleDuplicateNewNameCheck = () => {
+        const nameForKey = duplicateNewName.trim().replace(/\s+/g, '-');
+        if (!nameForKey) {
+            toast.error('Please enter a new prompt name');
+            return;
+        }
+        if (!promptsEditAid) return;
+        const fullKey = `${promptsEditAid}-${nameForKey}`;
+        const exists = promptsEditData.some(p => p.prompt === fullKey);
+        setDuplicateNewNameExists(exists);
+        if (exists) {
+            toast.error(`"${fullKey}" already exists. Choose a name that is not yet used.`);
+        }
+    };
+
+    const handleDuplicatePromptConfirm = async () => {
+        if (!duplicateSourceMatches || duplicateSourceMatches.length === 0) return;
+        const nameForKey = duplicateNewName.trim().replace(/\s+/g, '-');
+        if (!nameForKey || !promptsEditAid) return;
+        const fullNewKey = `${promptsEditAid}-${nameForKey}`;
+        if (promptsEditData.some(p => p.prompt === fullNewKey)) {
+            toast.error('That prompt name already exists. Choose another.');
+            return;
+        }
+        setDuplicatePromptSaving(true);
+        try {
+            const newPrompts: Prompt[] = duplicateSourceMatches.map(p => ({ ...p, prompt: fullNewKey }));
+            for (const prompt of newPrompts) {
+                await putTableItem('prompts', prompt.prompt, prompt, pid as string, hash as string);
+            }
+            allPrompts = [...newPrompts, ...allPrompts];
+            setPromptsOriginalData(prev => [...newPrompts, ...prev]);
+            setPromptsEditData(prev => [...newPrompts, ...prev]);
+            setDuplicateSourceMatches(null);
+            setDuplicateSourceName('');
+            setDuplicateNewName('');
+            setDuplicateNewNameExists(null);
+            setDuplicateStep(1);
+            setShowDuplicatePromptModal(false);
+            toast.success(`Duplicated ${newPrompts.length} prompt(s) as "${fullNewKey}".`);
+        } catch (error) {
+            console.error('Error duplicating prompts:', error);
+            toast.error('Failed to duplicate prompts');
+        } finally {
+            setDuplicatePromptSaving(false);
         }
     };
 
@@ -4920,6 +4995,21 @@ const Home = () => {
                                 <h5 style={{ color: '#ffc107', margin: 0 }}>Prompts</h5>
                                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                                     <Button
+                                        variant="outline-info"
+                                        size="sm"
+                                        onClick={() => {
+                                            setShowDuplicatePromptModal(true);
+                                            setDuplicateStep(1);
+                                            setDuplicateSourceName('');
+                                            setDuplicateSourceMatches(null);
+                                            setDuplicateNewName('');
+                                            setDuplicateNewNameExists(null);
+                                        }}
+                                        title="Duplicate a prompt (copy to a new name)"
+                                    >
+                                        Duplicate
+                                    </Button>
+                                    <Button
                                         variant="outline-danger"
                                         size="sm"
                                         onClick={() => { setShowDeletePromptModal(true); setDeletePromptMatches(null); setDeletePromptName(''); }}
@@ -5120,6 +5210,111 @@ const Home = () => {
                         <Button variant="outline-primary" onClick={handleDeletePromptSearch} disabled={deletePromptSaving || !deletePromptName.trim()}>
                             Find
                         </Button>
+                    )}
+                </Modal.Footer>
+            </Modal>
+
+            {/* Duplicate Prompt (within edit) Modal */}
+            <Modal show={showDuplicatePromptModal} onHide={() => { if (!duplicatePromptSaving) { setShowDuplicatePromptModal(false); setDuplicateStep(1); setDuplicateSourceName(''); setDuplicateSourceMatches(null); setDuplicateNewName(''); setDuplicateNewNameExists(null); } }}>
+                <Modal.Header closeButton={!duplicatePromptSaving}>
+                    <Modal.Title>Duplicate prompt {duplicateStep === 2 ? '— new name' : ''}</Modal.Title>
+                </Modal.Header>
+                <Modal.Body>
+                    <Form>
+                        {duplicateStep === 1 && (
+                            <Form.Group className="mb-3">
+                                <Form.Label>Prompt name to copy from</Form.Label>
+                                <Form.Control
+                                    type="text"
+                                    value={duplicateSourceName}
+                                    onChange={(e) => { setDuplicateSourceName(e.target.value); setDuplicateSourceMatches(null); }}
+                                    placeholder="e.g. nextOrRemaining"
+                                    disabled={duplicatePromptSaving}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleDuplicateSourceSearch(); } }}
+                                    style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                                />
+                                <Form.Text className="text-muted">
+                                    Finds prompts for this event with key &quot;{promptsEditAid || 'aid'}-yourName&quot; (all languages). Spaces become hyphens.
+                                </Form.Text>
+                                {duplicateSourceMatches !== null && duplicateSourceMatches.length > 0 && (
+                                    <div
+                                        className="mb-3 mt-2"
+                                        style={{
+                                            padding: '0.75rem',
+                                            backgroundColor: 'rgba(23, 162, 184, 0.15)',
+                                            border: '1px solid rgba(23, 162, 184, 0.6)',
+                                            borderRadius: '4px',
+                                            color: 'white'
+                                        }}
+                                    >
+                                        <strong>Found {duplicateSourceMatches.length} prompt(s):</strong>
+                                        <ul style={{ marginBottom: 0, marginTop: '0.5rem', paddingLeft: '1.25rem' }}>
+                                            {duplicateSourceMatches.map(p => (
+                                                <li key={`${p.prompt}-${p.language}`} style={{ color: 'white' }}>
+                                                    {p.prompt} ({p.language})
+                                                </li>
+                                            ))}
+                                        </ul>
+                                        <p style={{ marginTop: '0.75rem', marginBottom: 0, color: '#b8e6f0' }}>
+                                            Next: enter a new prompt name that does not already exist.
+                                        </p>
+                                    </div>
+                                )}
+                            </Form.Group>
+                        )}
+                        {duplicateStep === 2 && (
+                            <Form.Group className="mb-3">
+                                <Form.Label>New prompt name (must not already exist)</Form.Label>
+                                <Form.Control
+                                    type="text"
+                                    value={duplicateNewName}
+                                    onChange={(e) => { setDuplicateNewName(e.target.value); setDuplicateNewNameExists(null); }}
+                                    placeholder="e.g. nextOrRemainingCopy"
+                                    disabled={duplicatePromptSaving}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleDuplicateNewNameCheck(); } }}
+                                    style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                                />
+                                <Form.Text className="text-muted">
+                                    Creates &quot;{promptsEditAid || 'aid'}-yourName&quot; with the same languages and text as the source. Spaces become hyphens.
+                                </Form.Text>
+                                {duplicateNewNameExists === true && (
+                                    <div className="mt-2" style={{ color: '#f8d7da' }}>
+                                        That name already exists. Choose a different name.
+                                    </div>
+                                )}
+                                {duplicateNewNameExists === false && (
+                                    <div className="mt-2" style={{ color: '#d4edda' }}>
+                                        Name is available. Click Duplicate to create the new prompts.
+                                    </div>
+                                )}
+                            </Form.Group>
+                        )}
+                    </Form>
+                </Modal.Body>
+                <Modal.Footer>
+                    <Button variant="secondary" onClick={() => { setShowDuplicatePromptModal(false); setDuplicateStep(1); setDuplicateSourceName(''); setDuplicateSourceMatches(null); setDuplicateNewName(''); setDuplicateNewNameExists(null); }} disabled={duplicatePromptSaving}>
+                        Cancel
+                    </Button>
+                    {duplicateStep === 1 ? (
+                        <>
+                            <Button variant="primary" onClick={handleDuplicateSourceSearch} disabled={duplicatePromptSaving || !duplicateSourceName.trim()}>
+                                Find
+                            </Button>
+                            {duplicateSourceMatches !== null && duplicateSourceMatches.length > 0 && (
+                                <Button variant="info" onClick={() => setDuplicateStep(2)} disabled={duplicatePromptSaving}>
+                                    Next
+                                </Button>
+                            )}
+                        </>
+                    ) : (
+                        <>
+                            <Button variant="outline-primary" onClick={handleDuplicateNewNameCheck} disabled={duplicatePromptSaving || !duplicateNewName.trim()}>
+                                Check name
+                            </Button>
+                            <Button variant="info" onClick={handleDuplicatePromptConfirm} disabled={duplicatePromptSaving || duplicateNewNameExists !== false || !duplicateNewName.trim()}>
+                                {duplicatePromptSaving ? 'Duplicating...' : 'Duplicate'}
+                            </Button>
+                        </>
                     )}
                 </Modal.Footer>
             </Modal>
