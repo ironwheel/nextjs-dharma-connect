@@ -9,7 +9,6 @@ import time
 import sys
 import os
 import hmac
-import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.headerregistry import Address
@@ -19,7 +18,7 @@ from botocore.exceptions import ClientError
 
 from .config import (
     SMTP_SERVER, SMTP_PORT, DEFAULT_PREVIEW, DEFAULT_FROM_NAME,
-    EMAIL_ACCOUNT_CREDENTIALS_TABLE, AWS_REGION, APP_ACCESS_JSON, REGLINK_APP_HOST
+    EMAIL_ACCOUNT_CREDENTIALS_TABLE, AWS_REGION, REGLINKV2_HASHGEN_SECRET
 )
 from .prompts import prompt_lookup
 from .eligible import check_eligibility
@@ -37,28 +36,6 @@ def _generate_auth_hash(guid: str, secret_key_hex: str) -> str:
         raise ValueError('Secret key must be a 64-character hexadecimal string')
     key_bytes = bytes.fromhex(secret_key_hex)
     return hmac.new(key_bytes, guid.encode('utf-8'), 'sha256').hexdigest()
-
-
-def _get_reglink_secret() -> str:
-    """Get the secret from APP_ACCESS_JSON for hash generation (by REGLINK_APP_HOST or first entry)."""
-    if not APP_ACCESS_JSON:
-        raise Exception("Can't use ||hash||. APP_ACCESS_JSON environment variable not set.")
-    try:
-        access_list = json.loads(APP_ACCESS_JSON)
-    except json.JSONDecodeError:
-        raise Exception("APP_ACCESS_JSON is not valid JSON")
-    if not access_list:
-        raise Exception("APP_ACCESS_JSON is empty")
-    if REGLINK_APP_HOST:
-        entry = next((e for e in access_list if e.get('host') == REGLINK_APP_HOST), None)
-        if not entry:
-            raise Exception(f"REGLINK_APP_HOST '{REGLINK_APP_HOST}' not found in APP_ACCESS_JSON")
-    else:
-        entry = access_list[0]
-    secret = entry.get('secret')
-    if not secret:
-        raise Exception("APP_ACCESS_JSON entry has no 'secret' field")
-    return secret
 
 
 def lookup_email_account_credentials(account: str, country: str) -> tuple[str, str]:
@@ -294,11 +271,12 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
     html = html.replace("123456789", student.get('id', ''))
     html = html.replace("||pid||", student.get('id', ''))
 
-    # Replace ||hash|| with HMAC-SHA256(pid, secret) using APP_ACCESS_JSON (same as API authUtils)
+    # Replace ||hash|| with HMAC-SHA256(pid, secret) using REGLINKV2_HASHGEN_SECRET (same algo as API authUtils)
     if "||hash||" in html:
-        secret = _get_reglink_secret()
+        if not REGLINKV2_HASHGEN_SECRET:
+            raise Exception("Can't use ||hash||. REGLINKV2_HASHGEN_SECRET environment variable not set.")
         pid = student.get('id', '')
-        auth_hash = _generate_auth_hash(pid, secret)
+        auth_hash = _generate_auth_hash(pid, REGLINKV2_HASHGEN_SECRET)
         html = html.replace("||hash||", auth_hash)
 
     # Replace placeholder aid with event aid
