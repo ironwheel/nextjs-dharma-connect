@@ -30,6 +30,8 @@ export const tables: TableConfig[] = [
   { resource: 'pools', envVar: 'DYNAMODB_TABLE_POOLS', pk: 'name', sk: '', ops: ['get', 'list', 'count', 'put', 'delete'] },
   { resource: 'scripts', envVar: 'DYNAMODB_TABLE_SCRIPTS', pk: 'name', sk: '', ops: ['get', 'list', 'count', 'put', 'delete'] },
   { resource: 'offering-config', envVar: 'DYNAMODB_TABLE_OFFERING_CONFIG', pk: 'oid', sk: '', ops: ['get', 'list', 'count', 'put', 'delete'] },
+  /** offering-transactions: pk = paymentIntentId (Stripe), sk = ''. GSI status-createdAt-index (pk=status, sk=createdAt) for abandoned-cart listing. */
+  { resource: 'offering-transactions', envVar: 'DYNAMODB_TABLE_OFFERING_TRANSACTIONS', pk: 'paymentIntentId', sk: '', ops: ['get', 'put', 'update', 'query', 'query-index'] },
   { resource: 'views', envVar: 'DYNAMODB_TABLE_VIEWS', pk: 'name', sk: '', ops: ['get', 'list', 'count', 'put', 'delete'] },
   { resource: 'views-profiles', envVar: 'DYNAMODB_TABLE_VIEWS_PROFILES', pk: 'profile', sk: '', ops: ['get', 'list'] },
   { resource: 'app.actions', envVar: 'DYNAMODB_TABLE_APP_ACTIONS', pk: 'host', sk: '', ops: ['get'] },

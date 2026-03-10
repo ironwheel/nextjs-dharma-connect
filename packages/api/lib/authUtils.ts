@@ -392,13 +392,13 @@ function generateAuthHash(guid: string, secretKeyHex: string): string {
 
 /**
  * @async
-    * @function authGetLink
+ * @function authGetLink
  * @description Generates an access link for a student to a specific domain.
- * @param { string } domainName - The domain name for the app.
+ * @param { string } linkHost - The domain name for the app.
  * @param { string } studentId - The student ID.
- * @returns { Promise<string> } The access link in format: https://${domainName}/?pid=${studentId}&hash=${appSpecificHash}
+ * @returns { Promise<string> } The access link in format: https://${linkHost}/?pid=${studentId}&hash=${appSpecificHash}
  * @throws { Error } If the student doesn't have access to the domain or configuration is missing.
-    */
+ */
 async function authGetLink(studentId: string, linkHost: string, oidcToken?: string): Promise<string> {
     // Parse and validate APP_ACCESS_JSON
     const accessJson = process.env.APP_ACCESS_JSON;
@@ -442,6 +442,69 @@ async function authGetLink(studentId: string, linkHost: string, oidcToken?: stri
 
     // Return the access link
     return `https://${linkHost}/?pid=${studentId}&hash=${appSpecificHash}`;
+}
+
+/**
+ * @async
+ * @function authGetRegisterLink
+ * @description Generates a registration link for a student for the register.slsupport.link app.
+ *              This is used by backoffice tools (e.g. event dashboard) to copy a registration URL
+ *              that includes the correct HMAC hash and event code.
+ *
+ *              The link format is:
+ *              https://register.slsupport.link/?pid={studentId}&hash={hash}&eventCode={eventCode}
+ *
+ *              The secret used for the hash comes from APP_ACCESS_JSON entry where host === 'register.slsupport.link'.
+ * @param {string} studentId - The student ID.
+ * @param {string} eventCode - The event code (usually the event aid).
+ * @returns {Promise<string>} The registration link.
+ * @throws {Error} If configuration is missing, the APP_ACCESS_JSON entry is missing/invalid,
+ *                 or the student does not have access to the register.slsupport.link host.
+ */
+export async function authGetRegisterLink(
+    studentId: string,
+    eventCode: string,
+    oidcToken?: string
+): Promise<string> {
+    const registerHost = 'register.slsupport.link';
+
+    const accessJson = process.env.APP_ACCESS_JSON;
+    if (!accessJson) {
+        throw new Error('APP_ACCESS_JSON environment variable not set');
+    }
+
+    let accessList: any[];
+    try {
+        accessList = JSON.parse(accessJson);
+    } catch (e) {
+        throw new Error('APP_ACCESS_JSON is not valid JSON');
+    }
+
+    const entry = accessList.find((e: any) => e.host === registerHost);
+    if (!entry) {
+        throw new Error(`Link host '${registerHost}' not found in APP_ACCESS_JSON`);
+    }
+
+    // Check if student has access to this domain
+    const tableCfg = tableGetConfig('auth');
+    let data = await getOne(tableCfg.tableName, tableCfg.pk, studentId, process.env.AUTH_ROLE_ARN!, oidcToken);
+
+    if (!data) {
+        data = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN!, oidcToken);
+        if (!data) {
+            throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
+        }
+    }
+
+    const permittedHosts: string[] = data['permitted-hosts'] || [];
+    const hasPermission = permittedHosts.includes(registerHost);
+    if (!hasPermission) {
+        throw new Error(`Student ${studentId} does not have access to link host '${registerHost}'`);
+    }
+
+    const appSpecificHash = generateAuthHash(studentId, entry.secret);
+
+    return `https://${registerHost}/?pid=${studentId}&hash=${appSpecificHash}&eventCode=${encodeURIComponent(eventCode)}`;
 }
 
 // Auth Exports for the API

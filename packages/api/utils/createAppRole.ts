@@ -221,6 +221,12 @@ function mapAppActionsToPermissions(appActions) {
                     readTables.add(tableArn);
                 } catch (e) { console.warn(e.message); }
                 break;
+            case 'POST/auth/getRegistrationLink':
+                try {
+                    const authArn = getTableArn('auth');
+                    readTables.add(authArn);
+                } catch (e) { console.warn(e.message); }
+                break;
 
             // Pools Table - POST can be used for chunked listing (Scan)
             case 'POST/table/pools':

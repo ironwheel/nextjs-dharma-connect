@@ -16,6 +16,7 @@ import {
     putTableItem,
     authGetViews,
     authGetConfigValue,
+    authGetRegistrationLink,
     useWebSocket,
     getTableCount,
     checkEligibility,
@@ -143,7 +144,7 @@ function fromDynamo(item: any): any {
 }
 
 // StudentHistoryModal component
-const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, allPools, emailDisplayPermission, userEventAccess }) => {
+const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, allPools, emailDisplayPermission, userEventAccess, pid, hash }) => {
     const [copying, setCopying] = React.useState(false);
     const [sortColumn, setSortColumn] = React.useState<'date' | 'event' | 'eligible' | 'joined' | 'offering'>('date');
     const [sortDirection, setSortDirection] = React.useState<'asc' | 'desc'>('desc');
@@ -264,33 +265,62 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
         toast.info(`Copied ${label} to the clipboard`, { autoClose: 2000 });
     };
     // Add click handler for event row - uses cached regDomain for Safari compatibility
-    const handleEventRowClick = (sub) => {
+    const handleEventRowClick = async (sub) => {
         const eligible = getEligibility(sub.event, sub.subEventKey);
         if (!eligible) return;
 
-        if (!regDomain) {
-            toast.error('Registration domain not loaded yet');
-            return;
-        }
-
         setCopying(true);
-        const url = `${regDomain}/?pid=${student.id}&aid=${sub.event.aid}`;
+        try {
+            const useRegLinkV2 = sub.event?.config?.reglinkv2 === true;
+            let url: string;
 
-        // Try synchronous clipboard write (required for Safari)
-        navigator.clipboard.writeText(url)
-            .then(() => {
-                toast.success(`Registration link copied: ${url}`, { autoClose: 4000 });
-                setFallbackUrl(null);
-            })
-            .catch((err) => {
-                console.error('Clipboard write failed:', err);
-                // Show fallback UI with the URL for manual copying
-                setFallbackUrl(url);
-                toast.warning('Could not auto-copy. Please copy the link shown below.', { autoClose: 4000 });
-            })
-            .finally(() => {
-                setCopying(false);
-            });
+            if (useRegLinkV2) {
+                const result = await authGetRegistrationLink(
+                    pid as string,
+                    hash as string,
+                    student.id,
+                    sub.event.aid
+                );
+
+                if (result && typeof result === 'object' && 'redirected' in result) {
+                    toast.error('Authentication required to generate registration link');
+                    setCopying(false);
+                    return;
+                }
+
+                url = result as string;
+                if (!url) {
+                    throw new Error('Empty registration link returned from server');
+                }
+            } else {
+                if (!regDomain) {
+                    toast.error('Registration domain not loaded yet');
+                    setCopying(false);
+                    return;
+                }
+                url = `${regDomain}/?pid=${student.id}&aid=${sub.event.aid}`;
+            }
+
+            // Try synchronous clipboard write (required for Safari)
+            navigator.clipboard.writeText(url)
+                .then(() => {
+                    toast.success(`Registration link copied: ${url}`, { autoClose: 4000 });
+                    setFallbackUrl(null);
+                })
+                .catch((err) => {
+                    console.error('Clipboard write failed:', err);
+                    // Show fallback UI with the URL for manual copying
+                    setFallbackUrl(url);
+                    toast.warning('Could not auto-copy. Please copy the link shown below.', { autoClose: 4000 });
+                })
+                .finally(() => {
+                    setCopying(false);
+                });
+        } catch (error) {
+            console.error('Error generating registration link:', error);
+            toast.error('Failed to generate registration link');
+            setCopying(false);
+        }
     };
     // Handle column header click for sorting
     const handleSort = (column: 'date' | 'event' | 'eligible' | 'joined' | 'offering') => {
@@ -3834,7 +3864,18 @@ const Home = () => {
                     />
                 )}
             </Container>
-            <StudentHistoryModal show={showHistoryModal} onClose={() => setShowHistoryModal(false)} student={selectedStudent} fetchConfig={fetchConfig} allEvents={allEvents} allPools={allPools} emailDisplayPermission={emailDisplayPermission} userEventAccess={userEventAccess} />
+            <StudentHistoryModal
+                show={showHistoryModal}
+                onClose={() => setShowHistoryModal(false)}
+                student={selectedStudent}
+                fetchConfig={fetchConfig}
+                allEvents={allEvents}
+                allPools={allPools}
+                emailDisplayPermission={emailDisplayPermission}
+                userEventAccess={userEventAccess}
+                pid={pid as string}
+                hash={hash as string}
+            />
         </>
     );
 };

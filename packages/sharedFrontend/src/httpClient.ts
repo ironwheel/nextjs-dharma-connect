@@ -82,11 +82,19 @@ async function apiFetch(
     ...(opts.headers as Record<string, string> || {}),
   };
 
-  const res = await fetch(url, {
-    credentials: 'include',
-    headers,
-    ...opts,
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      credentials: 'include',
+      headers,
+      ...opts,
+    });
+  } catch (err: any) {
+    console.error('[API] fetch failed for', url, err);
+    const error = new Error('Network error contacting the registration API. Please check your connection or try again.');
+    (error as any).cause = err;
+    throw error;
+  }
 
   if (res.status === 401) {
     console.log("Front end middleware detects 401, checking for expired auth flow", res.status, res.statusText);

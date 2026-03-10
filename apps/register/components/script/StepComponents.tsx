@@ -51,6 +51,15 @@ export function promptLookup(context: ScriptContext, key: string): string {
     return eventCode + '-' + key + '-' + language + '-unknown';
 }
 
+// Helper: is the current student in a given eligibility pool for the active event?
+export function isInPool(context: ScriptContext, poolName: string): boolean {
+    const pools = Array.isArray((context as any).pools) ? (context as any).pools : [];
+    const eventCode = context.event?.aid ?? '';
+    const checkElig = getCheckEligibility(context);
+    if (!eventCode || typeof checkElig !== 'function') return false;
+    return checkElig(poolName, context.student, eventCode, pools);
+}
+
 // Helper for inputs (omit label to avoid duplicating step title)
 const InputField = ({ label, value, onChange, type = "text", placeholder = "" }: any) => (
     <div className="mb-4">
@@ -88,9 +97,9 @@ const RadioYesNo = ({ context, path, label, engineOnChange }: { context: ScriptC
     const isYes = val === true;
     const isNo = val === false;
     return (
-        <div className="mb-4">
-            {label ? <label className="block text-sm font-medium mb-2 text-reg-muted">{label}</label> : null}
-            <div className="flex gap-4">
+        <div className="mb-2">
+            {label ? <label className="block text-sm font-medium mb-1 text-reg-muted">{label}</label> : null}
+            <div className="flex gap-4 items-center">
                 <label className="flex items-center text-reg-muted">
                     <input type="radio" name={path} checked={isYes} onChange={() => engineOnChange(path, true)} className="mr-2 text-reg-accent" />
                     <span>{promptLookup(context, 'yes') || 'Yes'}</span>
@@ -240,11 +249,12 @@ export const RenderIntroduction: React.FC<{ context: ScriptContext; engineOnChan
     );
 };
 
-export const RenderWrittenTranslation: React.FC<{ context: ScriptContext, engineOnChange: (path: string, val: any) => void, value: any }> = ({ context, engineOnChange }) => {
+export const RenderWrittenTranslation: React.FC<{ context: ScriptContext, engineOnChange: (path: string, val: any) => void, value: any }> = ({ context, engineOnChange, value }) => {
     const languages = [
         { value: "English", label: "English" },
-        { value: "German", label: "Deutsch" },
+        { value: "Chinese", label: "中文" },
         { value: "Czech", label: "čeština" },
+        { value: "German", label: "Deutsch" },
         { value: "Spanish", label: "Español" },
         { value: "French", label: "Français" },
         { value: "Italian", label: "Italiano" },
@@ -261,8 +271,38 @@ export const RenderWrittenTranslation: React.FC<{ context: ScriptContext, engine
             </div>
             <SelectField
                 label=""
-                value={context.student.writtenLangPref}
+                value={value ?? context.student.writtenLangPref ?? 'English'}
                 onChange={(val: any) => engineOnChange('student.writtenLangPref', val)}
+                options={languages}
+            />
+        </div>
+    );
+};
+
+export const RenderSpokenTranslation: React.FC<{ context: ScriptContext, engineOnChange: (path: string, val: any) => void, value: any }> = ({ context, engineOnChange, value }) => {
+    const languages = [
+        { value: "English", label: "English" },
+        { value: "Chinese", label: "中文" },
+        { value: "Czech", label: "čeština" },
+        { value: "German", label: "Deutsch" },
+        { value: "Spanish", label: "Español" },
+        { value: "French", label: "Français" },
+        { value: "Italian", label: "Italiano" },
+        { value: "Dutch", label: "Nederlands" },
+        { value: "Portuguese", label: "Português" },
+        { value: "Russian", label: "русский" }
+    ];
+
+    return (
+        <div className="p-4 bg-reg-card-muted rounded border border-reg-border">
+            <div className="flex items-center mb-4 text-reg-accent">
+                <FontAwesomeIcon icon={faGlobe} className="mr-2" />
+                <h3 className="text-lg font-medium">{promptLookup(context, 'selectLanguage')}</h3>
+            </div>
+            <SelectField
+                label=""
+                value={value ?? context.student.spokenLangPref ?? 'English'}
+                onChange={(val: any) => engineOnChange('student.spokenLangPref', val)}
                 options={languages}
             />
         </div>
@@ -302,8 +342,6 @@ export const RenderMotivation: React.FC<{ context: ScriptContext, engineOnChange
 
     return (
         <div className="mb-4">
-            <label className="block text-sm font-medium mb-1 text-reg-muted">Motivation</label>
-            <p className="text-xs text-reg-muted mb-2">Please briefly describe your motivation for attending this event.</p>
             <textarea
                 className="w-full p-2 rounded bg-reg-input border border-reg-border focus:border-reg-focus-ring text-reg-text h-32"
                 value={motivation || ''}
@@ -557,6 +595,12 @@ export const RenderInterestedInTakedown: React.FC<{ context: ScriptContext; engi
     return <RadioYesNo context={context} path={`student.programs.${eventCode}.interestedInTakedown`} label="" engineOnChange={engineOnChange} />;
 };
 
+// --- Share email (Yes/No) ---
+export const RenderShareEmail: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
+    const eventCode = context.event?.aid;
+    return <RadioYesNo context={context} path={`student.programs.${eventCode}.shareEmail`} label="" engineOnChange={engineOnChange} />;
+};
+
 // --- Healthcare professional (Yes/No; if Yes, healthcareTraining) ---
 export const RenderHealthcareProfessional: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
     const isPro = context.student?.healthcareProfessional;
@@ -743,6 +787,9 @@ export const RenderSupplicationMY: React.FC<{ context: ScriptContext; engineOnCh
 export const RenderSupplicationVY: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = (props) => (
     <RenderSupplication {...props} titleKey="supplicationTitleVY" bodyKey="supplicationBodyVY" retreat="vajrayana" joinKey="joinVY" />
 );
+export const RenderSupplicationGeneric: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = (props) => (
+    <RenderSupplication {...props} titleKey="supplicationTitle" bodyKey="supplicationBody" joinKey="join" />
+);
 
 // --- Join (retreat-specific: joinMY, joinVY) ---
 // (Now handled inside RenderSupplication; these remain defined but are hidden via step conditions.)
@@ -766,13 +813,53 @@ export const RenderSocialMedia: React.FC<{ context: ScriptContext; engineOnChang
     const checked = !!context.student?.programs?.[eventCode]?.socialMedia;
 
     return (
-        <div className="mb-4">
+        <div className="mb-2">
             <label className="flex items-center text-reg-muted">
                 <input
                     type="checkbox"
                     className="mr-2 rounded text-reg-accent"
                     checked={checked}
                     onChange={(e) => engineOnChange(`student.programs.${eventCode}.socialMedia`, e.target.checked)}
+                />
+                <span>{promptLookup(context, 'agree')}</span>
+            </label>
+        </div>
+    );
+};
+
+// --- Series commitment (same pattern as socialMedia; promptKey seriesCommitment) ---
+export const RenderSeriesCommitment: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
+    const eventCode = context.event?.aid;
+    const checked = !!context.student?.programs?.[eventCode]?.seriesCommitment;
+
+    return (
+        <div className="mb-2">
+            <label className="flex items-center text-reg-muted">
+                <input
+                    type="checkbox"
+                    className="mr-2 rounded text-reg-accent"
+                    checked={checked}
+                    onChange={(e) => engineOnChange(`student.programs.${eventCode}.seriesCommitment`, e.target.checked)}
+                />
+                <span>{promptLookup(context, 'agree')}</span>
+            </label>
+        </div>
+    );
+};
+
+// --- Abhisheka commitment (same pattern as seriesCommitment; promptKey abhishekaCommitment) ---
+export const RenderAbhishekaCommitment: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
+    const eventCode = context.event?.aid;
+    const checked = !!context.student?.programs?.[eventCode]?.abhishekaCommitment;
+
+    return (
+        <div className="mb-2">
+            <label className="flex items-center text-reg-muted">
+                <input
+                    type="checkbox"
+                    className="mr-2 rounded text-reg-accent"
+                    checked={checked}
+                    onChange={(e) => engineOnChange(`student.programs.${eventCode}.abhishekaCommitment`, e.target.checked)}
                 />
                 <span>{promptLookup(context, 'agree')}</span>
             </label>
