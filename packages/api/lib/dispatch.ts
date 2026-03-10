@@ -28,6 +28,16 @@ import { translatePromptFromEnglish } from './translate';
  * @param {NextApiResponse} res - The Next.js API response object.
  * @returns {Promise<void>}
  */
+function normalizeHostHeader(rawHost: string | string[] | undefined): string | undefined {
+  if (!rawHost) return undefined;
+  const first = Array.isArray(rawHost) ? rawHost[0] : rawHost;
+  if (!first) return undefined;
+  // Strip protocol if present, then take just hostname (no port, no path)
+  const withoutProtocol = first.replace(/^https?:\/\//i, '').trim();
+  const hostOnly = withoutProtocol.split('/')[0]; // drop any path/query
+  return hostOnly.split(':')[0].trim(); // drop port
+}
+
 async function dispatchTable(
   resource: string,
   id: string | undefined,
@@ -51,17 +61,29 @@ async function dispatchTable(
 
     let maskEmail = false;
     if (resource === 'students') {
-      const pid = req.headers['x-user-id'] as string;
-      const host = req.headers['x-host'] as string;
-      try {
-        // getConfigValue is async
-        const display = await getConfigValue(pid, host, 'emailDisplay', oidcToken);
-        if (!display) maskEmail = true;
-      } catch (e) {
-        // Default to masking if check fails (e.g. permission error or missing default)
-        // If config is simply missing, getConfigValue returns false, so logic holds.
-        // If it throws, we should probably mask to be safe.
-        maskEmail = true;
+      const pid = req.headers['x-user-id'] as string | undefined;
+      const normalizedHost =
+        normalizeHostHeader((req.headers['x-host'] as string | string[] | undefined) ?? req.headers.host);
+
+      if (pid && normalizedHost) {
+        try {
+          // getConfigValue is async
+          const display = await getConfigValue(pid, normalizedHost, 'emailDisplay', oidcToken);
+          // Explicit false means "mask"; true means "show"; missing (false) keeps masking behavior
+          if (!display) maskEmail = true;
+        } catch (e) {
+          // If config lookup fails unexpectedly, log but do not override the default (unmasked) state.
+          console.warn(
+            'dispatchTable: getConfigValue failed for emailDisplay; leaving maskEmail=false',
+            { resource, pid, host: normalizedHost, error: (e as any)?.message }
+          );
+        }
+      } else {
+        // If we don't have pid/host yet (e.g. early hydration), skip masking decision here
+        console.warn(
+          'dispatchTable: missing pid or host for emailDisplay check; leaving maskEmail=false',
+          { resource, pidPresent: !!pid, hostPresent: !!normalizedHost }
+        );
       }
     }
 
