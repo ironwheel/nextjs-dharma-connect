@@ -9,12 +9,13 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import { tables, TableConfig } from './tableConfig';
 import { websockets, WebSocketConfig, websocketGetConfig } from './websocketConfig';
 import { listAll, listAllChunked, getOne, deleteOne, deleteOneWithSort, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll, batchGetItems, listAllQueryBeginsWithSortKeyMultiple, queryIndex } from './dynamoClient';
-import { verificationEmailSend, verificationEmailCallback, verificationCheck, createToken, getActionsProfiles, getAuthList, getViews, getViewsProfiles, putAuthItem, linkEmailSend, getConfigValue } from './authUtils';
+import { verificationEmailSend, verificationEmailCallback, verificationCheck, createToken, getActionsProfiles, getAuthList, getViews, getViewsProfiles, putAuthItem, linkEmailSend, getConfigValue, authGetRegisterLink } from './authUtils';
 import { serialize } from 'cookie';
 import { v4 as uuidv4 } from 'uuid';
 import { sendWorkOrderMessage } from './sqsClient';
 import { extractShowcaseToVideoList, enableVideoPlayback } from './vimeoClient';
 import { stripeCreatePaymentIntent, stripeUpdatePaymentIntent } from './stripe';
+import { putOfferingTransaction, completeOffering, updateOfferingTransactionRefund } from './offering';
 import { translatePromptFromEnglish } from './translate';
 
 /**
@@ -396,6 +397,18 @@ async function dispatchAuth(
         }
         const configValue = await getConfigValue(pid, host, key, oidcToken);
         return res.status(200).json({ value: configValue });
+      case 'getRegistrationLink':
+        {
+          const { targetUserPid, eventCode } = req.body;
+          if (!targetUserPid) {
+            return res.status(400).json({ error: 'Missing required parameter: targetUserPid' });
+          }
+          if (!eventCode) {
+            return res.status(400).json({ error: 'Missing required parameter: eventCode' });
+          }
+          const link = await authGetRegisterLink(targetUserPid, eventCode, oidcToken);
+          return res.status(200).json({ link });
+        }
       default:
         return res.status(404).json({ error: `Unknown auth action: ${action}` });
     }
@@ -660,17 +673,45 @@ async function dispatchStripe(
 
   try {
     switch (action) {
+      case 'config': {
+        if (req.method !== 'GET') {
+          res.setHeader('Allow', 'GET');
+          return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
+        }
+        const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY || '';
+        return res.status(200).json({ publishableKey });
+      }
       case 'create': {
         if (req.method !== 'POST') {
           res.setHeader('Allow', 'POST');
           return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
         }
-        const { aid, pid: createPid, amount: createAmount, currency, description } = req.body;
+        const { aid, pid: createPid, amount: createAmount, currency, description, cart, summaryString, skuSummary, eventCode, eventName, payerEmail } = req.body;
         if (!aid || !createPid || !createAmount || !currency || !description) {
           return res.status(400).json({ error: "Missing required parameters (aid, pid, amount, currency, description)" });
         }
-        const createResult = await stripeCreatePaymentIntent(aid, createPid, createAmount, currency, description);
-        return res.status(200).json(createResult);
+        const createResult = await stripeCreatePaymentIntent(aid, createPid, String(createAmount), currency, description);
+        if (cart != null && summaryString != null && skuSummary != null && eventCode != null) {
+          try {
+            await putOfferingTransaction({
+              paymentIntentId: createResult.id,
+              pid: createPid,
+              eventCode,
+              amount: parseInt(String(createAmount), 10),
+              currency,
+              description,
+              cart,
+              summaryString,
+              skuSummary,
+              eventName: eventName || undefined,
+              payerEmail: payerEmail || undefined,
+            }, appRole, oidcToken);
+          } catch (txErr: any) {
+            console.error('[STRIPE] Failed to put offering-transactions record:', txErr);
+          }
+        }
+        const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY || '';
+        return res.status(200).json({ ...createResult, publishableKey });
       }
 
       case 'update': {
@@ -700,24 +741,22 @@ async function dispatchStripe(
         console.log(`[STRIPE] Processing refund for ${studentId}, intent ${offeringIntent}`);
 
         // 1. Process Refund
-        const refund = await import('./stripe').then(m => m.stripeCreateRefund(offeringIntent, amount)); // Dynamic import or top level?
-        // Using top level import is better but I need to add it to top of file.
-        // I will use dynamic import here to avoid modifying top of file extensively/conflicts, OR better, I will add import at top in a separate edit or use fully qualified if I can?
-        // No, I should add import at the top. But tools limit me to one contiguous block?
-        // Wait, replace_file_content can only replace one block.
-        // I should use `multi_replace_file_content` to add import AND function.
-        // But `dispatch.ts` is huge.
-        // I will assume the function is added here, and I will add the import in a separate tool call or same turn.
-        // Actually, `replace_file_content` rule 2: "Do NOT make multiple parallel calls to this tool... for the same file."
-        // So I must use `multi_replace_file_content` to add import AND function.
+        const refund = await import('./stripe').then(m => m.stripeCreateRefund(offeringIntent, amount));
 
-        // 2. Send Email
+        // 2. Update offering-transactions record (refund-aware)
         if (refund.status === 'succeeded' || refund.status === 'pending') {
+          try {
+            const pi = await import('./stripe').then(m => m.stripeRetrievePaymentIntent(offeringIntent));
+            const totalAmount = pi.amount ?? 0;
+            const thisRefundCents = refund.amount ?? (amount ? Number(amount) : totalAmount);
+            await updateOfferingTransactionRefund(offeringIntent, thisRefundCents, totalAmount, appRole, oidcToken);
+          } catch (txErr: any) {
+            console.error('[STRIPE] Failed to update offering-transactions for refund:', txErr);
+          }
           try {
             await import('./stripe').then(m => m.sendRefundEmail(studentId, aid || 'refund-manager', undefined, offeringIntent, undefined, appRole, oidcToken));
           } catch (emailErr) {
             console.error("[STRIPE] Refund succeeded but email failed:", emailErr);
-            // Don't fail the response, just log
           }
         }
 
@@ -991,7 +1030,52 @@ export async function dispatch(
       const [translateAction] = rest;
       console.log("DISPATCH: subsystem:", subsystem, "action:", translateAction);
       return await dispatchTranslate(translateAction, req, res);
+    case 'offering':
+      // Offering URLs: /api/offering/[action] e.g. /api/offering/complete
+      const [offeringAction] = rest;
+      console.log("DISPATCH: subsystem:", subsystem, "action:", offeringAction);
+      return await dispatchOffering(offeringAction, req, res);
     default:
       return res.status(404).json({ error: `Unknown subsystem: ${subsystem}` });
+  }
+}
+
+/**
+ * @async
+ * @function dispatchOffering
+ * @description Dispatches offering-related API requests (complete flow after Stripe success).
+ */
+async function dispatchOffering(
+  action: string | undefined,
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  const appRole = (req as any).userRole || process.env.DEFAULT_GUEST_ROLE_ARN!;
+  let oidcToken = req.headers['x-vercel-oidc-token'] as string;
+  if (!oidcToken && process.env.NODE_ENV === 'development') {
+    oidcToken = process.env.VERCEL_OIDC_TOKEN!;
+  }
+
+  try {
+    switch (action) {
+      case 'complete': {
+        if (req.method !== 'POST') {
+          res.setHeader('Allow', 'POST');
+          return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
+        }
+        const { paymentIntentId, pid, eventCode, cart, subEventNames } = req.body;
+        if (!paymentIntentId || !pid || !eventCode || !Array.isArray(cart)) {
+          return res.status(400).json({ error: 'Missing required parameters (paymentIntentId, pid, eventCode, cart)' });
+        }
+        const subEvents = Array.isArray(subEventNames) ? subEventNames : [];
+        await completeOffering(paymentIntentId, pid, eventCode, cart, subEvents, appRole, oidcToken);
+        return res.status(200).json({ success: true });
+      }
+      default:
+        return res.status(404).json({ error: `Unknown offering action: ${action}` });
+    }
+  } catch (error: any) {
+    console.error(`Offering action ${action} failed:`, error);
+    return res.status(500).json({ error: error.message || 'Offering complete failed' });
   }
 }

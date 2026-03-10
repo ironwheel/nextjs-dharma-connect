@@ -1,9 +1,10 @@
 import React from 'react';
 import { ScriptStep, StepConditionConfig, ScriptContext } from '../components/script/types';
-import { promptLookup } from '../components/script/StepComponents';
+import { promptLookup, isInPool } from '../components/script/StepComponents';
 import {
     RenderIntroduction,
     RenderWrittenTranslation,
+    RenderSpokenTranslation,
     RenderJoin,
     RenderMotivation,
     RenderOath,
@@ -15,6 +16,7 @@ import {
     RenderInPersonTeachings,
     RenderInterestedInSetup,
     RenderInterestedInTakedown,
+    RenderShareEmail,
     RenderHealthcareProfessional,
     RenderServiceAlready,
     RenderServiceNoQuestion,
@@ -22,10 +24,13 @@ import {
     RenderAccessibility,
     RenderSupplicationMY,
     RenderSupplicationVY,
+    RenderSupplicationGeneric,
     RenderJoinMY,
     RenderJoinVY,
     RenderVisibleSignature,
     RenderSocialMedia,
+    RenderSeriesCommitment,
+    RenderAbhishekaCommitment,
     RenderSave,
 } from '../components/script/StepComponents';
 
@@ -44,7 +49,16 @@ export const stepRegistry: Record<string, ScriptStep> = {
         type: 'custom',
         component: RenderWrittenTranslation as any,
         field: 'student.writtenLangPref',
-        promptKey: 'writtenTranslation'
+        promptKey: 'writtenTranslation',
+        defaultValue: 'English'
+    },
+    'spokenTranslation': {
+        id: 'spokenTranslation',
+        type: 'custom',
+        component: RenderSpokenTranslation as any,
+        field: 'student.spokenLangPref',
+        promptKey: 'spokenTranslation',
+        defaultValue: 'English'
     },
     'location': {
         id: 'location',
@@ -173,6 +187,20 @@ export const stepRegistry: Record<string, ScriptStep> = {
             return null;
         }
     },
+    'shareEmail': {
+        id: 'shareEmail',
+        type: 'custom',
+        component: RenderShareEmail as any,
+        field: 'student.programs',
+        promptKey: 'shareEmail',
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const shareEmail = value?.[eventCode]?.shareEmail;
+            if (typeof shareEmail !== 'boolean') return promptLookup(context, 'yesNoRequired');
+            return null;
+        }
+    },
     'healthcareProfessional': {
         id: 'healthcareProfessional',
         type: 'custom',
@@ -260,6 +288,30 @@ export const stepRegistry: Record<string, ScriptStep> = {
                     return promptLookup(context, 'accessibilityDetailsRequired');
                 }
             }
+            return null;
+        }
+    },
+    'supplication': {
+        id: 'supplication',
+        type: 'custom',
+        component: RenderSupplicationGeneric as any,
+        field: null as any,
+        promptKey: 'supplicationTitle',
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const prog = context.student?.programs?.[eventCode] || {};
+            const joinVal = prog.join;
+            const visible = prog.visible;
+
+            if (joinVal !== true) {
+                return promptLookup(context, 'joinRequired');
+            }
+
+            if (typeof visible !== 'boolean') {
+                return promptLookup(context, 'yesNoRequired');
+            }
+
             return null;
         }
     },
@@ -362,6 +414,35 @@ export const stepRegistry: Record<string, ScriptStep> = {
             return null;
         }
     },
+    'seriesCommitment': {
+        id: 'seriesCommitment',
+        type: 'custom',
+        component: RenderSeriesCommitment as any,
+        field: 'student.programs',
+        promptKey: 'seriesCommitment',
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const checked = value?.[eventCode]?.seriesCommitment === true;
+            if (!checked) return promptLookup(context, 'agreeRequired');
+            return null;
+        }
+    },
+    'abhishekaCommitment': {
+        id: 'abhishekaCommitment',
+        type: 'custom',
+        component: RenderAbhishekaCommitment as any,
+        field: 'student.programs',
+        promptKey: 'abhishekaCommitment',
+        condition: (context: ScriptContext) => !isInPool(context, 'amitayus-abhisheka'),
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const checked = value?.[eventCode]?.abhishekaCommitment === true;
+            if (!checked) return promptLookup(context, 'agreeRequired');
+            return null;
+        }
+    },
     'save': {
         id: 'save',
         type: 'custom',
@@ -381,7 +462,14 @@ export const stepRegistry: Record<string, ScriptStep> = {
         type: 'custom',
         component: RenderMotivation as any,
         field: 'student.programs',
-        promptKey: 'motivation'
+        promptKey: 'motivation',
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const text = value?.[eventCode]?.motivation;
+            if (!text || String(text).trim() === '') return promptLookup(context, 'motivationRequired');
+            return null;
+        }
     },
     'oath': {
         id: 'oath',

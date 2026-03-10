@@ -110,6 +110,13 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
     // Resolve field path relative to context.student (strip leading "student." if present)
     const pathFromStudent = step.field?.startsWith('student.') ? step.field.slice(8) : step.field;
     const value = pathFromStudent ? getNested(context.student, pathFromStudent) : undefined;
+
+    // When step has defaultValue and field is missing, apply it once so Next will persist it
+    useEffect(() => {
+        if (step?.field && step.defaultValue !== undefined && value === undefined) {
+            onChange(step.field, step.defaultValue);
+        }
+    }, [step?.field, step?.defaultValue, value, onChange]);
     const validationError = step.validation ? step.validation(value, context) : null;
 
     const renderCurrentStep = () => {
@@ -118,7 +125,8 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
                 const CustomComponent = step.component as any;
                 if (CustomComponent) {
                     const refProp = step.id === 'save' ? { ref: saveStepRef } : {};
-                    return <CustomComponent {...refProp} context={context} value={value} engineOnChange={onChange} />;
+                    const effectiveValue = value === undefined && step.defaultValue !== undefined ? step.defaultValue : value;
+                    return <CustomComponent {...refProp} context={context} value={effectiveValue} engineOnChange={onChange} />;
                 }
                 return <div>Custom component missing for {step.id}</div>;
             }
@@ -199,17 +207,17 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
                     className="w-full h-auto block"
                 />
             )}
-            <div className="p-6">
-            {showStepTitle && <h2 className="text-xl font-semibold mb-6 text-reg-accent">{stepTitle}</h2>}
+            <div className="p-4 sm:p-6">
+            {showStepTitle && <h2 className="text-xl font-semibold mb-4 text-reg-accent">{stepTitle}</h2>}
 
-            <div className="step-content min-h-[200px]">
+            <div className="step-content min-h-[160px]">
                 {renderCurrentStep()}
             </div>
             {validationError && (
-                <p className="mt-4 text-reg-error text-sm" role="alert">{validationError}</p>
+                <p className="mt-3 text-reg-error text-sm" role="alert">{validationError}</p>
             )}
 
-            <div className="mt-8 flex justify-between items-center flex-wrap gap-3">
+            <div className="mt-6 flex justify-between items-center flex-wrap gap-2">
                 <button
                     onClick={handleBack}
                     disabled={isFirst}
@@ -217,7 +225,7 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
                 >
                     {promptLookup(context, 'back')}
                 </button>
-                <span className="text-reg-muted text-sm flex-1 text-center">
+                <span className="text-reg-muted text-sm flex-1 text-center min-w-[140px]">
                     {promptLookup(context, 'regProgress')
                         .replace(/\|\|currentStep\|\|/g, String(effectiveStepIndex + 1))
                         .replace(/\|\|totalSteps\|\|/g, String(definition.steps.length))}

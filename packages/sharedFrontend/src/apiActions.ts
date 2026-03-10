@@ -860,6 +860,43 @@ export async function authLinkEmailSend(
 
 /**
  * @async
+ * @function authGetRegistrationLink
+ * @description Get a registration link for a specific student and event, using the
+ *              register.slsupport.link host and server-side hashing.
+ * @param {string} pid - The participant ID of the current authenticated user.
+ * @param {string} hash - The verification hash for the current user.
+ * @param {string} targetUserPid - The participant ID of the student to generate the link for.
+ * @param {string} eventCode - The event code (usually the event aid).
+ * @returns {Promise<string | RedirectedResponse>} A promise that resolves to the registration link.
+ */
+export async function authGetRegistrationLink(
+    pid: string,
+    hash: string,
+    targetUserPid: string,
+    eventCode: string
+): Promise<string | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/auth/getRegistrationLink`, pid, hash, {
+            targetUserPid,
+            eventCode
+        });
+        if (response && response.redirected) {
+            console.log('[API] authGetRegistrationLink redirected - authentication required');
+            return { redirected: true };
+        }
+        return response?.link || '';
+    } catch (error: any) {
+        console.error('[API] authGetRegistrationLink failed:', error);
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log('[API] authGetRegistrationLink authentication failed - returning redirected response');
+            return { redirected: true };
+        }
+        throw new Error(error.message || 'Failed to get registration link');
+    }
+}
+
+/**
+ * @async
  * @function authGetActionsProfiles
  * @description Get the actions profiles.
  * @param {string} pid - The participant ID.
@@ -1011,4 +1048,71 @@ export async function enableVimeoVideoPlayback(
         console.error(`[API] enableVimeoVideoPlayback failed for video ${videoId}:`, error);
         throw new Error(error.message || 'Failed to enable video playback');
     }
+}
+
+/**
+ * GET /api/stripe/config - returns { publishableKey } for Stripe Elements (no key in front-end env).
+ */
+export async function getStripeConfig(pid: string, hash: string): Promise<{ publishableKey: string } | RedirectedResponse> {
+    const response = await api.get(`${API_BASE_URL}/stripe/config`, pid, hash);
+    if (response && response.redirected) return { redirected: true };
+    return response;
+}
+
+/**
+ * POST /api/stripe/create - create PaymentIntent; optional cart/summaryString/skuSummary for offering-transactions record.
+ * Returns { id, clientSecret, publishableKey }.
+ */
+export async function createStripePaymentIntent(
+    pid: string,
+    hash: string,
+    body: {
+        aid: string;
+        pid: string;
+        amount: number;
+        currency: string;
+        description: string;
+        cart?: any;
+        summaryString?: string;
+        skuSummary?: any[];
+        eventCode?: string;
+        eventName?: string;
+        payerEmail?: string;
+    }
+): Promise<{ id: string; clientSecret: string; publishableKey?: string } | RedirectedResponse> {
+    const response = await api.post(`${API_BASE_URL}/stripe/create`, pid, hash, body);
+    if (response && response.redirected) return { redirected: true };
+    return response;
+}
+
+/**
+ * POST /api/stripe/update - update PaymentIntent amount.
+ */
+export async function updateStripePaymentIntent(
+    pid: string,
+    hash: string,
+    body: { paymentIntentId: string; amount: number }
+): Promise<unknown | RedirectedResponse> {
+    const response = await api.post(`${API_BASE_URL}/stripe/update`, pid, hash, body);
+    if (response && response.redirected) return { redirected: true };
+    return response;
+}
+
+/**
+ * POST /api/offering/complete - after Stripe payment succeeded; writes offeringHistory and updates transaction record.
+ */
+export async function completeOffering(
+    pid: string,
+    hash: string,
+    body: {
+        paymentIntentId: string;
+        pid: string;
+        eventCode: string;
+        cart: Array<{ id: string; name: string; currentOfferings?: Record<string, any>; offeringHistory?: Record<string, any> }>;
+        subEventNames: string[];
+    }
+): Promise<{ success: boolean } | RedirectedResponse> {
+    const response = await api.post(`${API_BASE_URL}/offering/complete`, pid, hash, body);
+    if (response && response.redirected) return { redirected: true };
+    return response;
 } 
