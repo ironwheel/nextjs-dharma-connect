@@ -53,54 +53,17 @@ async function dispatchTable(
     const tableName = process.env[cfg.envVar]!;
     if (!tableName) throw new Error(`Missing env var: ${cfg.envVar}`);
 
-    // Check Email Masking for Students
     let oidcToken = req.headers['x-vercel-oidc-token'] as string;
     if (!oidcToken && process.env.NODE_ENV === 'development') {
       oidcToken = process.env.VERCEL_OIDC_TOKEN!;
     }
 
-    let maskEmail = false;
-    if (resource === 'students') {
-      const pid = req.headers['x-user-id'] as string | undefined;
-      const normalizedHost =
-        normalizeHostHeader((req.headers['x-host'] as string | string[] | undefined) ?? req.headers.host);
-
-      if (pid && normalizedHost) {
-        try {
-          // getConfigValue is async
-          const display = await getConfigValue(pid, normalizedHost, 'emailDisplay', oidcToken);
-          // Explicit false means "mask"; true means "show"; missing (false) keeps masking behavior
-          if (!display) maskEmail = true;
-        } catch (e) {
-          // If config lookup fails unexpectedly, log but do not override the default (unmasked) state.
-          console.warn(
-            'dispatchTable: getConfigValue failed for emailDisplay; leaving maskEmail=false',
-            { resource, pid, host: normalizedHost, error: (e as any)?.message }
-          );
-        }
-      } else {
-        // If we don't have pid/host yet (e.g. early hydration), skip masking decision here
-        console.warn(
-          'dispatchTable: missing pid or host for emailDisplay check; leaving maskEmail=false',
-          { resource, pidPresent: !!pid, hostPresent: !!normalizedHost }
-        );
-      }
-    }
-
-    const mask = (item: any) => {
-      if (maskEmail && item && item.email) {
-        item.email = '**********';
-      }
-      return item;
-    };
-    const maskList = (items: any[]) => items.map(mask);
     const appRole = (req as any).userRole || process.env.DEFAULT_GUEST_ROLE_ARN!;
 
 
     // LIST
     if (req.method === 'GET' && !id && cfg.ops.includes('list')) {
       const items = await listAll(tableName, appRole, oidcToken);
-      if (maskEmail) maskList(items);
       return res.status(200).json(items);
     }
 
@@ -108,7 +71,6 @@ async function dispatchTable(
     if (req.method === 'POST' && !id && req.body && req.body.limit) {
       const { limit, lastEvaluatedKey, scanParams = {}, projectionExpression, expressionAttributeNames } = req.body;
       const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit, appRole, projectionExpression, expressionAttributeNames, oidcToken);
-      if (maskEmail && result.items) maskList(result.items);
       return res.status(200).json(result);
     }
 
@@ -116,7 +78,6 @@ async function dispatchTable(
     if (req.method === 'POST' && id === 'chunked' && req.body && req.body.limit) {
       const { limit, lastEvaluatedKey, scanParams = {}, projectionExpression, expressionAttributeNames } = req.body;
       const result = await listAllChunked(tableName, scanParams, lastEvaluatedKey, limit, appRole, projectionExpression, expressionAttributeNames, oidcToken);
-      if (maskEmail && result.items) maskList(result.items);
       return res.status(200).json(result);
     }
 
@@ -124,7 +85,6 @@ async function dispatchTable(
     if (req.method === 'POST' && id === 'filtered' && req.body && req.body.filterFieldName && req.body.filterFieldValue) {
       const { filterFieldName, filterFieldValue } = req.body;
       const items = await listAllFiltered(tableName, filterFieldName, filterFieldValue, appRole, oidcToken);
-      if (maskEmail) maskList(items);
       return res.status(200).json({ items });
     }
 
@@ -132,13 +92,6 @@ async function dispatchTable(
     if (req.method === 'POST' && id === 'query' && req.body && req.body.primaryKeyValue && req.body.sortKeyValue && cfg.ops.includes('query')) {
       const { primaryKeyValue, sortKeyValue } = req.body;
       const results = await listAllQueryBeginsWithSortKeyMultiple(tableName, cfg.pk, primaryKeyValue, cfg.sk, sortKeyValue, appRole, oidcToken);
-      if (maskEmail) {
-        Object.keys(results).forEach(key => {
-          if (Array.isArray(results[key])) {
-            maskList(results[key]);
-          }
-        });
-      }
       return res.status(200).json({ results });
     }
 
@@ -146,7 +99,6 @@ async function dispatchTable(
     if (req.method === 'POST' && id === 'query-index' && req.body && req.body.indexName && req.body.pkName && req.body.pkValue && cfg.ops.includes('query-index')) {
       const { indexName, pkName, pkValue } = req.body;
       const items = await queryIndex(tableName, indexName, pkName, pkValue, appRole, oidcToken);
-      if (maskEmail) maskList(items);
       return res.status(200).json({ items });
     }
 
@@ -154,7 +106,6 @@ async function dispatchTable(
     if (req.method === 'POST' && id === 'batch' && req.body && req.body.ids && Array.isArray(req.body.ids)) {
       const { ids } = req.body;
       const items = await batchGetItems(tableName, cfg.pk, ids, appRole, oidcToken);
-      if (maskEmail) maskList(items);
       return res.status(200).json(items);
     }
 
@@ -178,7 +129,6 @@ async function dispatchTable(
     // GET ONE
     if (req.method === 'GET' && id && cfg.ops.includes('get')) {
       const item = await getOne(tableName, cfg.pk, id, appRole, oidcToken);
-      if (maskEmail && item) mask(item);
       return item ? res.status(200).json(item) : res.status(404).json({ error: `${resource} ${id} not found` });
     }
 
