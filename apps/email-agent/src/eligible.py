@@ -184,6 +184,16 @@ def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid:
             programs = student_data.get('programs', {})
             program = programs.get(current_aid, {})
             is_eligible = bool(program.get('eligible'))
+        elif attr_type == 'specifiedAIDBool':
+            aid = attr.get('aid')
+            bool_name = attr.get('boolName')
+            if aid is None:
+                raise ValueError(f"Pool '{pool_name}' has a malformed 'specifiedAIDBool' type attribute missing required 'aid' field. Attribute data: {attr}")
+            if bool_name is None:
+                raise ValueError(f"Pool '{pool_name}' has a malformed 'specifiedAIDBool' type attribute missing required 'boolName' field. Attribute data: {attr}")
+            programs = student_data.get('programs', {})
+            program = programs.get(aid, {})
+            is_eligible = bool(program.get(bool_name))
         else:
             print(f"UNKNOWN POOL ATTRIBUTE TYPE encountered: {pool_name} {attr_type}")
             is_eligible = False
