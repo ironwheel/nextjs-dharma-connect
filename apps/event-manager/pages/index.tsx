@@ -68,7 +68,8 @@ type PoolAttributeType =
     | 'currenteventnotjoin'
     | 'joinwhich'
     | 'offeringwhich'
-    | 'eligible';
+    | 'eligible'
+    | 'specifiedAIDBool';
 
 interface PoolAttribute {
     type: PoolAttributeType;
@@ -86,6 +87,7 @@ interface PoolAttribute {
     // Program / event context
     subevent?: string;
     retreat?: string;
+    boolName?: string;
 }
 
 interface Pool {
