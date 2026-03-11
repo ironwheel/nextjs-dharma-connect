@@ -3464,6 +3464,8 @@ const Home = () => {
                                                 return 'Requires both whichRetreats and offeringHistory to match retreat and subevent patterns for a given program (aid). First checks: student has joined, not withdrawn, and whichRetreats has a key starting with retreat prefix. Then checks: offeringHistory has a key starting with subevent prefix and has an offeringSKU. Both conditions must be true. Used for complex retreat + offering combinations.';
                                             case 'eligible':
                                                 return 'Checks the generic eligible flag for the CURRENT event. Returns true if student.programs[currentAid].eligible is truthy. This is a general-purpose eligibility flag that can be set by various processes.';
+                                            case 'specifiedAIDBool':
+                                                return 'Checks a boolean field on a specific program (aid). Requires both aid and boolName. Returns true if student.programs[aid][boolName] is truthy. Used for custom per-program boolean flags such as join, accepted, manualInclude, or other custom flags.';
                                             default:
                                                 return '';
                                         }
@@ -3499,6 +3501,7 @@ const Home = () => {
                                                             <option value="joinwhich">joinwhich – joined + whichRetreats</option>
                                                             <option value="offeringwhich">offeringwhich – offering + whichRetreats</option>
                                                             <option value="eligible">eligible – current event eligible flag</option>
+                                                            <option value="specifiedAIDBool">specifiedAIDBool – program bool field</option>
                                                         </Form.Select>
                                                         {typeHelpText && (
                                                             <Form.Text className="text-muted">
@@ -3675,6 +3678,28 @@ const Home = () => {
                                                                 />
                                                             </Form.Group>
                                                         )}
+                                                    {type === 'specifiedAIDBool' && (
+                                                        <>
+                                                            <Form.Group className="mb-2">
+                                                                <EventCodeAutocomplete
+                                                                    value={attr.aid || ''}
+                                                                    onChange={(value) => handleUpdatePoolAttribute(index, 'aid', value)}
+                                                                    placeholder="Program / event code (aid) - checks programs[aid][boolName]"
+                                                                    label="Program AID (aid)"
+                                                                    id={`specifiedAIDBool-aid-${index}`}
+                                                                />
+                                                            </Form.Group>
+                                                            <Form.Group className="mb-2">
+                                                                <Form.Label>Bool Field Name (boolName)</Form.Label>
+                                                                <Form.Control
+                                                                    type="text"
+                                                                    value={attr.boolName || ''}
+                                                                    onChange={(e) => handleUpdatePoolAttribute(index, 'boolName', e.target.value)}
+                                                                    placeholder="Key on programs[aid] to check (e.g., 'join', 'accepted', 'manualInclude')"
+                                                                />
+                                                            </Form.Group>
+                                                        </>
+                                                    )}
                                                     {(type === 'joinwhich' || type === 'offeringwhich') && (
                                                         <>
                                                             <Form.Group className="mb-2">

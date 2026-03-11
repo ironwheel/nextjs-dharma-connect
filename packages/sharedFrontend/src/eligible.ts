@@ -13,7 +13,7 @@ export interface StudentData {
 }
 
 export interface PoolAttribute {
-    type: 'true' | 'pool' | 'pooldiff' | 'pooland' | 'practice' | 'offering' | 'currenteventoffering' | 'currenteventtest' | 'currenteventnotoffering' | 'offeringandpools' | 'oath' | 'attended' | 'join' | 'currenteventjoin' | 'currenteventmanualinclude' | 'currenteventaccepted' | 'currenteventnotjoin' | 'joinwhich' | 'offeringwhich' | 'eligible';
+    type: 'true' | 'pool' | 'pooldiff' | 'pooland' | 'practice' | 'offering' | 'currenteventoffering' | 'currenteventtest' | 'currenteventnotoffering' | 'offeringandpools' | 'oath' | 'attended' | 'join' | 'currenteventjoin' | 'currenteventmanualinclude' | 'currenteventaccepted' | 'currenteventnotjoin' | 'joinwhich' | 'offeringwhich' | 'eligible' | 'specifiedAIDBool';
     name?: string;
     inpool?: string;
     outpool?: string;
@@ -24,6 +24,7 @@ export interface PoolAttribute {
     subevent?: string;
     pools?: string[];
     retreat?: string;
+    boolName?: string;
 }
 
 export interface Pool {
@@ -189,6 +190,11 @@ export function checkEligibility(
                 break;
             case 'eligible':
                 isEligible = !!(studentData.programs?.[currentAid]?.eligible);
+                break;
+            case 'specifiedAIDBool':
+                if (attr.aid && attr.boolName) {
+                    isEligible = !!(studentData.programs?.[attr.aid]?.[attr.boolName]);
+                }
                 break;
             default:
                 console.warn("UNKNOWN POOL ATTRIBUTE TYPE encountered:", poolName, attr.type);
