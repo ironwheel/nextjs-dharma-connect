@@ -217,17 +217,23 @@ function PaymentForm({
     if (!stripe || !elements) return;
     setLoading(true);
     setMessage(promptLookup(context, 'pleaseWait') || 'Please wait...');
-    const { error } = await stripe.confirmPayment({
+    const { error, paymentIntent } = await stripe.confirmPayment({
       elements,
       confirmParams: { return_url: typeof window !== 'undefined' ? window.location.href : '' },
+      redirect: 'if_required',
     });
     if (error) {
       onError(error.message ?? 'Payment failed');
       setLoading(false);
       return;
     }
+    if (paymentIntent?.status === 'succeeded') {
+      setLoading(false);
+      onSuccess();
+      return;
+    }
     setLoading(false);
-    onSuccess();
+    onError(paymentIntent?.status === 'requires_action' ? 'Additional authentication is required.' : 'Payment could not be completed.');
   };
 
   const buttonLabel =
