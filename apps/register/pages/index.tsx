@@ -750,7 +750,13 @@ export default function Home() {
                 )}
 
                 {phase === 'offer' && (
-                    <Offer context={context} onComplete={() => setPhase('offeringCompleteCold')} />
+                    <Offer
+                        context={context}
+                        onComplete={() => {
+                          setOfferingCompleteVariant('warm');
+                          setPhase('offeringCompleteCold');
+                        }}
+                      />
                 )}
 
                 {phase === 'stripeCapture' && (
