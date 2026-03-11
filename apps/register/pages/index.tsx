@@ -572,6 +572,12 @@ export default function Home() {
             ? (testModeOathEligibility === 'true')
             : (!eventPool || checkEligForEvent(eventPool, data.student, activeEventCode, data.pools || []));
 
+    const rawEventImage = data.event?.config?.eventImage ?? context.config?.eventImage;
+    const eventImageUrl =
+        typeof rawEventImage === 'string' && (rawEventImage.startsWith('http://') || rawEventImage.startsWith('https://'))
+            ? rawEventImage
+            : null;
+
     return (
         <div className="min-h-screen bg-reg-page text-reg-text font-sans">
             <Head>
@@ -715,37 +721,46 @@ export default function Home() {
                 )}
 
                 {(phase === 'acceptanceThankYouWarm' || phase === 'acceptanceThankYouCold' || phase === 'offeringCompleteCold') && (
-                    <div className="max-w-xl mx-auto p-6 rounded-lg border border-reg-border bg-reg-card-muted">
-                        <div className="text-reg-text">
-                            {(() => {
-                                const key =
-                                    phase === 'offeringCompleteCold'
-                                        ? (offeringCompleteVariant === 'warm' ? 'offeringCompleteWarm' : 'offeringCompleteCold')
-                                        : phase === 'acceptanceThankYouWarm'
-                                            ? 'applyThankYouWarm'
-                                            : 'applyThankYouCold';
-                                let html = promptLookup(context, key) || '';
-                                const title = promptLookup(context, 'title') || '';
-                                const coordEmail =
-                                    context.event?.config?.coordEmailAmericas ??
-                                    context.event?.config?.coordEmailEurope ??
-                                    '';
-                                html = html.replace(/\|\|title\|\|/g, title);
-                                html = html.replace(/\|\|coord-email\|\|/g, coordEmail);
-                                return <span dangerouslySetInnerHTML={{ __html: html }} />;
-                            })()}
-                        </div>
-                        {data?.student?.debug?.registerTest === true && (
-                            <div className="mt-6">
-                                <button
-                                    type="button"
-                                    onClick={() => setPhase('debugTable')}
-                                    className="px-4 py-2 rounded bg-reg-accent-button text-reg-accent-button-text hover:bg-reg-accent-button-hover"
-                                >
-                                    Test Mode Summary
-                                </button>
-                            </div>
+                    <div className="max-w-2xl mx-auto rounded-lg shadow-xl border border-reg-border overflow-hidden bg-reg-panel text-reg-text">
+                        {eventImageUrl && (
+                            <img
+                                src={eventImageUrl}
+                                alt={data.event?.name ? `Event: ${data.event.name}` : 'Event'}
+                                className="w-full h-auto block"
+                            />
                         )}
+                        <div className="p-6">
+                            <div className="text-reg-text">
+                                {(() => {
+                                    const key =
+                                        phase === 'offeringCompleteCold'
+                                            ? (offeringCompleteVariant === 'warm' ? 'offeringCompleteWarm' : 'offeringCompleteCold')
+                                            : phase === 'acceptanceThankYouWarm'
+                                                ? 'applyThankYouWarm'
+                                                : 'applyThankYouCold';
+                                    let html = promptLookup(context, key) || '';
+                                    const title = promptLookup(context, 'title') || '';
+                                    const coordEmail =
+                                        context.event?.config?.coordEmailAmericas ??
+                                        context.event?.config?.coordEmailEurope ??
+                                        '';
+                                    html = html.replace(/\|\|title\|\|/g, title);
+                                    html = html.replace(/\|\|coord-email\|\|/g, coordEmail);
+                                    return <span dangerouslySetInnerHTML={{ __html: html }} />;
+                                })()}
+                            </div>
+                            {data?.student?.debug?.registerTest === true && (
+                                <div className="mt-6">
+                                    <button
+                                        type="button"
+                                        onClick={() => setPhase('debugTable')}
+                                        className="px-4 py-2 rounded bg-reg-accent-button text-reg-accent-button-text hover:bg-reg-accent-button-hover"
+                                    >
+                                        Test Mode Summary
+                                    </button>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 )}
 
