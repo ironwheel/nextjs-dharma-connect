@@ -91,7 +91,7 @@ def get_stage_prefix(stage_record, language):
     prefixes = stage_record.get('prefix', {})
     return prefixes.get(language, "")
 
-def find_eligible_students(student_data, pools_data, work_order, campaign_string, stage_record, lang, create_eligible_object_func):
+def find_eligible_students(student_data, pools_data, work_order, campaign_string, stage_record, lang, create_eligible_object_func, event_data=None):
     """
     Find eligible students using consistent logic across all steps.
     
@@ -103,6 +103,7 @@ def find_eligible_students(student_data, pools_data, work_order, campaign_string
         stage_record: The stage record from DynamoDB
         lang: The language code being processed
         create_eligible_object_func: Function to create eligible object for stage filtering
+        event_data: Event data containing the latest configuration
         
     Returns:
         List[Dict]: List of eligible student records
@@ -137,7 +138,7 @@ def find_eligible_students(student_data, pools_data, work_order, campaign_string
                 continue
         
         # Apply all filters
-        pool_name = work_order.config.get('pool') if hasattr(work_order, 'config') and work_order.config else None
+        pool_name = event_data.get('config', {}).get('pool') if event_data else (work_order.config.get('pool') if hasattr(work_order, 'config') and work_order.config else None)
         if not pool_name:
             continue
             

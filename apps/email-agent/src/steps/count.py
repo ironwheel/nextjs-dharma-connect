@@ -52,14 +52,20 @@ class CountStep:
             pools_data = self.aws_client.scan_table(POOLS_TABLE)
             await self._update_progress(work_order, f"Found {len(pools_data)} pool definitions")
             
+            # Fetch the latest event data to ensure we have the most up-to-date configuration
+            await self._update_progress(work_order, f"Fetching event data for {work_order.eventCode}")
+            event_data = self.aws_client.get_event(work_order.eventCode)
+            if not event_data:
+                raise Exception(f"Event not found: {work_order.eventCode}")
+            
             # Get and log the pool being used for eligibility
-            pool_name = work_order.config.get('pool') if hasattr(work_order, 'config') and work_order.config else None
+            pool_name = event_data.get('config', {}).get('pool')
             if pool_name:
                 await self._update_progress(work_order, f"Using pool '{pool_name}' for eligibility filtering")
                 self.log('progress', f"[COUNT] Using pool '{pool_name}' to determine eligible recipients")
             else:
-                await self._update_progress(work_order, "Warning: No pool specified in work order config")
-                self.log('warning', f"[WARNING] [COUNT] No pool specified in work order config")
+                await self._update_progress(work_order, "Warning: No pool specified in event config")
+                self.log('warning', f"[WARNING] [COUNT] No pool specified in event config")
             
             # Initialize counters for each language
             received_counts = {}
@@ -82,7 +88,7 @@ class CountStep:
                 
                 # Count recipients for this language
                 received_count, will_receive_count = self._count_recipients(
-                    student_data, pools_data, work_order, campaign_string, stage_record, lang
+                    student_data, pools_data, work_order, campaign_string, stage_record, lang, event_data
                 )
                 
                 received_counts[lang] = received_count
@@ -122,7 +128,7 @@ class CountStep:
         return {}
 
     def _count_recipients(self, student_data: List[Dict], pools_data: List[Dict], 
-                                work_order: WorkOrder, campaign_string: str, stage_record: Dict, lang: str) -> Tuple[int, int]:
+                                work_order: WorkOrder, campaign_string: str, stage_record: Dict, lang: str, event_data: Dict) -> Tuple[int, int]:
         """
         Count recipients for a specific language.
         Adds language eligibility logic as described by user.
@@ -132,7 +138,7 @@ class CountStep:
         lang_full_name = code_to_full_language(lang).lower()
         
         # Get pool name for this count operation
-        pool_name = work_order.config.get('pool') if hasattr(work_order, 'config') and work_order.config else None
+        pool_name = event_data.get('config', {}).get('pool')
         if not pool_name:
             self.log('warning', f"[WARNING] [COUNT] No pool name found in work order config for language {lang}")
         
