@@ -439,7 +439,10 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void }>
         cart,
         subEventNames,
       });
-      onComplete();
+      const result = onComplete();
+      if (result != null && typeof (result as Promise<unknown>).then === 'function') {
+        await (result as Promise<void>);
+      }
     } catch (e: any) {
       setPayError(e.message || 'Failed to complete offering');
     } finally {
