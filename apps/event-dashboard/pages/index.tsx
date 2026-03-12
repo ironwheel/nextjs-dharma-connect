@@ -1106,8 +1106,13 @@ const Home = () => {
 
                 // Trigger incremental update with final result
                 if (onIncrementalUpdate) {
-                    console.log('Calling onIncrementalUpdate with final result:', finalEligibleStudents.length, 'students');
-                    onIncrementalUpdate(finalEligibleStudents);
+                    const newlyEligibleStudents = finalEligibleStudents.filter(
+                        student => !alreadyHaveStudentIds.has(student.id)
+                    );
+                    if (newlyEligibleStudents.length > 0) {
+                        console.log('Calling onIncrementalUpdate with final result:', newlyEligibleStudents.length, 'new students');
+                        onIncrementalUpdate(newlyEligibleStudents);
+                    }
                 }
 
                 setLoadingEligibilityCache(false);
