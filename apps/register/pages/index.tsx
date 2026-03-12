@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { getTableItem, getTableItemOrNull, getAllTableItemsFiltered, getAllTableItems, putTableItem, deleteTableItemWithSortKey, checkEligibility, completeOffering } from 'sharedFrontend';
@@ -189,6 +189,19 @@ export default function Home() {
         setTheme(themeId);
     }, [data?.event?.config?.registrationTheme, data?.student?.debug?.registerTest, setTheme]);
 
+    /** Refetch student so phase effect sees up-to-date offeringHistory (e.g. after same-page payment completion). */
+    const refetchStudent = useCallback(async () => {
+        if (!studentPid || !studentHash) return;
+        try {
+            const studentData = await getTableItem('students', studentPid, studentPid, studentHash);
+            if (studentData && !(studentData as any).redirected) {
+                setData((prev) => (prev ? { ...prev, student: studentData } : prev));
+            }
+        } catch (err) {
+            console.error('Refetch student after offering failed', err);
+        }
+    }, [studentPid, studentHash]);
+
     // Determine Initial Phase
     const [phase, setPhase] = useState<
         | 'loading'
@@ -295,8 +308,13 @@ export default function Home() {
             setPhase('offer');
             return;
         }
-        // Only transition to offer/acceptance from data when not already in join (so answering visibility + Next is required)
-        if (isJoined && phase !== 'join') {
+        // Only transition to offer/acceptance from data when not already in join (so answering visibility + Next is required).
+        // Do not overwrite the warm completion screen (just-completed same-page payment) when data is still stale.
+        if (
+            isJoined &&
+            phase !== 'join' &&
+            !(phase === 'offeringCompleteCold' && offeringCompleteVariant === 'warm')
+        ) {
             if (needAcceptance) {
                 if (accepted === true) {
                     setPhase('offer');
@@ -767,7 +785,8 @@ export default function Home() {
                 {phase === 'offer' && (
                     <Offer
                         context={context}
-                        onComplete={() => {
+                        onComplete={async () => {
+                          await refetchStudent();
                           setOfferingCompleteVariant('warm');
                           setPhase('offeringCompleteCold');
                         }}
