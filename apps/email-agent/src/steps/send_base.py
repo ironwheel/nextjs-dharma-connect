@@ -137,7 +137,7 @@ class SendBaseStep:
                 # Find eligible students for this language
                 await self._update_progress(work_order, f"Finding eligible students for {lang}...", step.name)
                 eligible_students = find_eligible_students(
-                    student_data, pools_data, work_order, campaign_string, stage_record, lang, self._create_eligible_object
+                    student_data, pools_data, work_order, campaign_string, stage_record, lang, self._create_eligible_object, event_data
                 )
                 
                 await self._update_progress(work_order, f"Found {len(eligible_students)} eligible students for {lang}", step.name)
