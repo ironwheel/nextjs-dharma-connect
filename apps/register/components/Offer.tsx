@@ -19,6 +19,81 @@ function formatAmount(amountCents: number, currency: string): string {
   return `${currencySymbol(currency)}${(amountCents / 100).toFixed(2)} ${currency}`;
 }
 
+function parseMoneyDollars(val: string): number {
+  if (val == null) return Number.NaN;
+  const cleaned = String(val).replace(/[^0-9.]/g, '');
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : Number.NaN;
+}
+
+function clampMoney(n: number, min: number): number {
+  if (!Number.isFinite(n)) return min;
+  return Math.max(min, n);
+}
+
+function AmountStepper({
+  value,
+  min,
+  step = 1,
+  currency,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  min: number;
+  step?: number;
+  currency: string;
+  onChange: (val: string) => void;
+  placeholder?: string;
+}) {
+  const parsed = parseMoneyDollars(value);
+  const current = Number.isFinite(parsed) ? parsed : min;
+
+  const bump = (delta: number) => {
+    const next = clampMoney(current + delta, min);
+    onChange(next.toFixed(2));
+  };
+
+  return (
+    <div className="flex justify-end">
+      <div className="flex items-stretch gap-2">
+      <button
+        type="button"
+        onClick={() => bump(-step)}
+        aria-label="Decrease amount"
+        className="w-12 rounded border border-reg-border bg-reg-card text-reg-text hover:bg-reg-card-muted transition-colors text-xl font-semibold"
+      >
+        −
+      </button>
+      <div className="flex items-stretch rounded border border-reg-border overflow-hidden bg-reg-input text-reg-text">
+        <div className="px-3 flex items-center text-sm text-reg-muted border-r border-reg-border select-none">
+          {currencySymbol(currency)}
+        </div>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-[7.25rem] px-3 py-3 bg-transparent text-sm tabular-nums text-right outline-none"
+          placeholder={placeholder}
+        />
+        <div className="px-3 flex items-center text-sm text-reg-muted border-l border-reg-border select-none">
+          {currency}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => bump(step)}
+        aria-label="Increase amount"
+        className="w-12 rounded border border-reg-border bg-reg-card text-reg-text hover:bg-reg-card-muted transition-colors text-xl font-semibold"
+      >
+        +
+      </button>
+      </div>
+    </div>
+  );
+}
+
 function isOwyaaPrompt(promptKey: string): boolean {
   const key = String(promptKey).trim();
   const lower = key.toLowerCase();
@@ -29,6 +104,14 @@ function isOwyaaPrompt(promptKey: string): boolean {
     lower.includes('owyaa') ||
     key === 'Offer what you are able'
   );
+}
+
+function isHeartGiftConfig(oc: OfferingConfig | null | undefined): boolean {
+  return oc?.config?.mode === 'variable';
+}
+
+function heartGiftButtonPromptKey(promptKey: string): string {
+  return promptKey === 'offeringHeartGift' ? 'offeringHeartGiftButton' : promptKey;
 }
 
 /** Full Offering Plus / Sponsoring: prompt key or its label contains "Sponsoring". */
@@ -254,11 +337,11 @@ function PaymentForm({
   );
 }
 
-export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void }> = ({ context, onComplete }) => {
+export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | Promise<void> }> = ({ context, onComplete }) => {
   const eventCode = eventCodeFromContext(context);
   const event = context.event;
   const { configs, fafFull, setFafFull, loading, error } = useOfferingData(context);
-  const [paymentStep, setPaymentStep] = useState<'selection' | 'owyaa' | 'sponsoring' | 'stripe'>('selection');
+  const [paymentStep, setPaymentStep] = useState<'selection' | 'owyaa' | 'heartGift' | 'sponsoring' | 'stripe'>('selection');
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [publishableKey, setPublishableKey] = useState<string | null>(null);
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
@@ -266,6 +349,14 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void }>
   const [payError, setPayError] = useState<string | null>(null);
   const [owyaaModal, setOwyaaModal] = useState<{ personIndex: number; subName: string; promptKey: string } | null>(null);
   const [owyaaAmountInput, setOwyaaAmountInput] = useState('');
+  const [heartGiftModal, setHeartGiftModal] = useState<{
+    personIndex: number;
+    subName: string;
+    promptKey: string;
+    initialAmountDollars?: number;
+    minAmountDollars?: number;
+  } | null>(null);
+  const [heartGiftAmountInput, setHeartGiftAmountInput] = useState('');
   const [sponsoringModal, setSponsoringModal] = useState<{
     personIndex: number;
     subName: string;
@@ -513,8 +604,40 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void }>
     setOwyaaModal({ personIndex, subName, promptKey });
     const existing = fafFull[personIndex]?.currentOfferings?.[subName];
     const existingCents = existing?.offeringSelection === promptKey ? existing?.offeringAmount : undefined;
-    setOwyaaAmountInput(existingCents != null ? String(Math.round(existingCents / 100)) : '');
+    setOwyaaAmountInput(existingCents != null ? (Number(existingCents) / 100).toFixed(2) : '');
     setPaymentStep('owyaa');
+  };
+
+  const openHeartGiftCard = (personIndex: number, subName: string, promptKey: string, oc: OfferingConfig | null) => {
+    const minAmountDollars = Number(oc?.config?.minDollars ?? 1);
+    const initialAmountDollarsRaw = oc?.config?.initialAmount;
+    const initialAmountDollars =
+      typeof initialAmountDollarsRaw === 'number' && Number.isFinite(initialAmountDollarsRaw)
+        ? Math.max(minAmountDollars, initialAmountDollarsRaw)
+        : minAmountDollars;
+
+    setHeartGiftModal({ personIndex, subName, promptKey, initialAmountDollars, minAmountDollars });
+    const existing = fafFull[personIndex]?.currentOfferings?.[subName];
+    const existingCents = existing?.offeringSelection === promptKey ? existing?.offeringAmount : undefined;
+    const initialDollarsString =
+      existingCents != null ? (Number(existingCents) / 100).toFixed(2) : Number(initialAmountDollars).toFixed(2);
+    setHeartGiftAmountInput(initialDollarsString);
+
+    // Preselect the initial amount so total + pay button reflect it immediately.
+    const dollars = parseMoneyDollars(initialDollarsString);
+    if (Number.isFinite(dollars) && dollars >= minAmountDollars) {
+      const amountCents = Math.round(dollars * 100);
+      const idx = oc?.prompts?.indexOf(promptKey) ?? -1;
+      setPersonOffering(personIndex, subName, {
+        offeringSelection: promptKey,
+        offeringIndex: idx,
+        offeringSKU: `${eventCode}-${subName}-${promptKey}`,
+        offeringAmount: amountCents,
+      });
+    } else {
+      setPersonOffering(personIndex, subName, null);
+    }
+    setPaymentStep('heartGift');
   };
 
   const openSponsoringCard = (
@@ -537,7 +660,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void }>
       offeringSKU: `${eventCode}-${subName}-${promptKey}`,
       offeringAmount: defaultCents,
     });
-    setSponsoringAmountInput(String(Math.round(effectiveDefault)));
+    setSponsoringAmountInput(Number(effectiveDefault).toFixed(2));
     setSponsoringModal({ personIndex, subName, promptKey, minAmountDollars });
     setPaymentStep('sponsoring');
   };
@@ -554,17 +677,17 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void }>
       ? promptLookup(context, 'offeringOWYAABodyActive')
       : promptLookup(context, 'offeringOWYAABodyEnable');
 
-    const parsed = parseInt(owyaaAmountInput, 10);
+    const parsed = parseMoneyDollars(owyaaAmountInput);
     const hasAmount = canEnterAmount && Number.isFinite(parsed) && parsed > 0;
 
     const handleOwyaaAmountChange = (val: string) => {
       setOwyaaAmountInput(val);
-      const num = parseInt(val, 10);
+      const num = parseMoneyDollars(val);
       if (!Number.isFinite(num) || num <= 0) {
         setPersonOffering(owyaaModal.personIndex, subName, null);
         return;
       }
-      const amountCents = num * 100;
+      const amountCents = Math.round(num * 100);
       const subEv = event?.subEvents?.[subName];
       const oid = subEv?.offeringMode;
       const ocLocal = oid ? configs[oid] : null;
@@ -614,16 +737,20 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void }>
           )}
           {canEnterAmount && (
             <>
-              <div className="mt-4">
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={owyaaAmountInput}
-                  onChange={(e) => handleOwyaaAmountChange(e.target.value)}
-                  className="w-full px-3 py-2 rounded border border-reg-border bg-reg-input text-reg-text"
-                  placeholder="0"
-                />
+              <div className="mt-4 flex flex-col md:flex-row gap-4 md:gap-6 items-start">
+                <div className="flex-1 text-reg-text text-sm whitespace-pre-wrap">
+                  {bodyText}
+                </div>
+                <div className="w-full md:w-auto md:flex-none">
+                  <AmountStepper
+                    value={owyaaAmountInput}
+                    min={0}
+                    step={1}
+                    currency={currency}
+                    onChange={handleOwyaaAmountChange}
+                    placeholder="0.00"
+                  />
+                </div>
               </div>
               {hasAmount && (
                 <div className="flex justify-end pt-4">
@@ -656,6 +783,107 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void }>
     );
   }
 
+  if (paymentStep === 'heartGift' && heartGiftModal) {
+    const person = fafFull[heartGiftModal.personIndex];
+    if (!person) return null;
+    const subName = heartGiftModal.subName;
+    const promptKey = heartGiftModal.promptKey;
+    const headerLabel = promptLookup(context, subName) || subName;
+    const offeringIntroHeartGift = promptLookup(context, 'offeringIntroduction') || '';
+    const bodyText =
+      promptLookup(context, 'offeringHeartGiftBody') ||
+      '';
+
+    const parsed = parseMoneyDollars(heartGiftAmountInput);
+    const minDollars = typeof heartGiftModal.minAmountDollars === 'number' ? heartGiftModal.minAmountDollars : 1;
+    const hasAmount = Number.isFinite(parsed) && parsed >= minDollars;
+
+    const handleHeartGiftAmountChange = (val: string) => {
+      setHeartGiftAmountInput(val);
+      const num = parseMoneyDollars(val);
+      if (!Number.isFinite(num) || num < minDollars) {
+        setPersonOffering(heartGiftModal.personIndex, subName, null);
+        return;
+      }
+      const amountCents = Math.round(num * 100);
+      const subEv = event?.subEvents?.[subName];
+      const oid = subEv?.offeringMode;
+      const ocLocal = oid ? configs[oid] : null;
+      const idx = ocLocal?.prompts?.indexOf(promptKey) ?? -1;
+      setPersonOffering(heartGiftModal.personIndex, subName, {
+        offeringSelection: promptKey,
+        offeringIndex: idx,
+        offeringSKU: `${eventCode}-${subName}-${promptKey}`,
+        offeringAmount: amountCents,
+      });
+    };
+
+    const handleHeartGiftBack = () => {
+      setHeartGiftModal(null);
+      setPaymentStep('selection');
+    };
+
+    return (
+      <div className="max-w-2xl mx-auto rounded-lg shadow-xl border border-reg-border overflow-hidden bg-reg-panel text-reg-text">
+        {eventImageUrl && (
+          <img
+            src={eventImageUrl}
+            alt={event?.name ? `Event: ${event.name}` : 'Event'}
+            className="w-full h-auto block"
+          />
+        )}
+        <div className="p-6 space-y-6">
+          <div className="mb-4">
+            {offeringIntroHeartGift ? (
+              <p className="text-base text-reg-text italic">{offeringIntroHeartGift}</p>
+            ) : (
+              <h2 className="text-lg font-semibold text-reg-accent">{headerLabel}</h2>
+            )}
+          </div>
+          <div className="mt-4 flex flex-col md:flex-row gap-4 md:gap-6 items-start">
+            <div className="flex-1 text-reg-text text-sm whitespace-pre-wrap">
+              {bodyText}
+            </div>
+            <div className="w-full md:w-auto md:flex-none">
+              <AmountStepper
+                value={heartGiftAmountInput}
+                min={minDollars}
+                step={1}
+                currency={currency}
+                onChange={handleHeartGiftAmountChange}
+                placeholder={Number(minDollars).toFixed(2)}
+              />
+            </div>
+          </div>
+          {hasAmount && (
+            <div className="flex justify-end pt-4">
+              <button
+                type="button"
+                onClick={handlePay}
+                disabled={processing}
+                className="w-full max-w-2xl flex items-center justify-between min-h-[2.75rem] px-6 py-2 rounded font-medium transition-colors shadow-lg bg-reg-accent-button text-reg-accent-button-text hover:bg-reg-accent-button-hover disabled:bg-reg-button-disabled disabled:text-reg-text-disabled disabled:cursor-not-allowed"
+              >
+                <span className="text-sm">
+                  {processing ? (promptLookup(context, 'pleaseWait') || 'Please wait...') : (promptLookup(context, 'offeringClick') || 'Click here to make an offering')}
+                </span>
+                <span className="text-sm tabular-nums">{formatAmount(totalCents, currency)}</span>
+              </button>
+            </div>
+          )}
+          <div className="flex justify-start pt-4">
+            <button
+              type="button"
+              onClick={handleHeartGiftBack}
+              className="px-4 py-2 rounded bg-reg-button text-reg-text hover:bg-reg-button-hover transition-colors"
+            >
+              {promptLookup(context, 'back') || 'Back'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (paymentStep === 'sponsoring' && sponsoringModal) {
     const person = fafFull[sponsoringModal.personIndex];
     if (!person) return null;
@@ -671,7 +899,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void }>
     const offeringIntroSponsoring = promptLookup(context, 'offeringIntroduction') || '';
     const bodyText = promptLookup(context, 'offeringSponsoringBody') || promptLookup(context, 'offeringOWYAABodyActive');
 
-    const parsed = parseInt(sponsoringAmountInput, 10);
+    const parsed = parseMoneyDollars(sponsoringAmountInput);
     const hasAmount = Number.isFinite(parsed) && parsed >= minSponsoringDollars;
 
     const handleSponsoringAmountChange = (val: string) => {
@@ -680,20 +908,20 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void }>
     };
 
     const commitSponsoringAmount = () => {
-      const num = parseInt(sponsoringAmountInput, 10);
+      const num = parseMoneyDollars(sponsoringAmountInput);
       const effectiveDollars = Number.isFinite(num)
         ? Math.max(num, minSponsoringDollars)
         : minSponsoringDollars;
 
       // If entered value is below the minimum or invalid, snap back to the minimum.
-      setSponsoringAmountInput(String(effectiveDollars));
+      setSponsoringAmountInput(effectiveDollars.toFixed(2));
 
       if (effectiveDollars <= 0) {
         setPersonOffering(sponsoringModal.personIndex, subName, null);
         return;
       }
 
-      const amountCents = effectiveDollars * 100;
+      const amountCents = Math.round(effectiveDollars * 100);
       const idx = ocLocal?.prompts?.indexOf(promptKey) ?? -1;
       setPersonOffering(sponsoringModal.personIndex, subName, {
         offeringSelection: promptKey,
@@ -726,20 +954,22 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void }>
               <p className="text-base text-reg-text italic">{offeringIntroSponsoring}</p>
             ) : null}
           </div>
-          <div className="text-reg-text text-sm whitespace-pre-wrap">
-            {bodyText}
-          </div>
-          <div className="mt-4">
-            <input
-              type="number"
-              min={minSponsoringDollars}
-              step="1"
-              value={sponsoringAmountInput}
-              onChange={(e) => handleSponsoringAmountChange(e.target.value)}
-              onBlur={commitSponsoringAmount}
-              className="w-full px-3 py-2 rounded border border-reg-border bg-reg-input text-reg-text"
-              placeholder={String(minSponsoringDollars)}
-            />
+          <div className="mt-4 flex flex-col md:flex-row gap-4 md:gap-6 items-start">
+            <div className="flex-1 text-reg-text text-sm whitespace-pre-wrap">
+              {bodyText}
+            </div>
+            <div className="w-full md:w-auto md:flex-none">
+              <AmountStepper
+                value={sponsoringAmountInput}
+                min={minSponsoringDollars}
+                step={1}
+                currency={currency}
+                onChange={(val) => {
+                  handleSponsoringAmountChange(val);
+                }}
+                placeholder={Number(minSponsoringDollars).toFixed(2)}
+              />
+            </div>
           </div>
           {hasAmount && (
             <div className="flex flex-col items-end pt-4 space-y-1">
@@ -884,6 +1114,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void }>
                         const amount = oc.amounts[idx] ?? 0;
                         const baseAmountCents = Math.round((amount ?? 0) * 100);
                         const isOwyaa = isOwyaaPrompt(promptKey);
+                        const isHeartGift = isHeartGiftConfig(oc);
                         const isSponsoring = isSponsoringPrompt(promptKey, context);
                         const isSelected =
                           person.currentOfferings[nextSubName]?.offeringSelection === promptKey ||
@@ -965,7 +1196,21 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void }>
                             <span className="text-reg-text text-sm flex-1">
                               {promptLookup(context, promptKey) || promptKey}
                             </span>
-                            {isOwyaa ? (
+                            {isHeartGift ? (
+                              <button
+                                type="button"
+                                onClick={() => openHeartGiftCard(pIdx, nextSubName, promptKey, oc)}
+                                className={`min-w-[8rem] px-4 py-2 rounded text-sm font-medium transition-colors shadow-lg ${
+                                  isSelected
+                                    ? 'bg-reg-accent-button text-reg-accent-button-text hover:bg-reg-accent-button-hover text-right'
+                                    : 'bg-reg-card border border-reg-border text-reg-text hover:border-reg-border-light hover:bg-reg-card-muted text-center'
+                                }`}
+                              >
+                                {isSelected && typeof current?.offeringAmount === 'number'
+                                  ? formatAmount(current.offeringAmount, currency)
+                                  : (promptLookup(context, heartGiftButtonPromptKey(promptKey)) || heartGiftButtonPromptKey(promptKey))}
+                              </button>
+                            ) : isOwyaa ? (
                               <button
                                 type="button"
                                 onClick={() => openOwyaaCard(pIdx, nextSubName, promptKey)}
@@ -1173,6 +1418,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void }>
                       const amount = oc.amounts[idx] ?? 0;
                       const baseAmountCents = Math.round((amount ?? 0) * 100);
                       const isOwyaa = isOwyaaPrompt(promptKey);
+                      const isHeartGift = isHeartGiftConfig(oc);
                       const isSponsoring = isSponsoringPrompt(promptKey, context);
                       const isSelected =
                         person.currentOfferings[subName]?.offeringSelection === promptKey ||
@@ -1278,7 +1524,21 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void }>
                           <span className="text-reg-text text-sm flex-1">
                             {promptLookup(context, promptKey) || promptKey}
                           </span>
-                          {isOwyaa ? (
+                          {isHeartGift ? (
+                            <button
+                              type="button"
+                              onClick={() => openHeartGiftCard(pIdx, subName, promptKey, oc)}
+                              className={`min-w-[8rem] px-4 py-2 rounded text-sm font-medium transition-colors shadow-lg ${
+                                isSelected
+                                  ? 'bg-reg-accent-button text-reg-accent-button-text hover:bg-reg-accent-button-hover text-right'
+                                  : 'bg-reg-card border border-reg-border text-reg-text hover:border-reg-border-light hover:bg-reg-card-muted text-center'
+                              }`}
+                            >
+                              {isSelected && typeof current?.offeringAmount === 'number'
+                                ? formatAmount(current.offeringAmount, currency)
+                                : (promptLookup(context, heartGiftButtonPromptKey(promptKey)) || heartGiftButtonPromptKey(promptKey))}
+                            </button>
+                          ) : isOwyaa ? (
                             <button
                               type="button"
                               onClick={() => openOwyaaCard(pIdx, subName, promptKey)}
