@@ -29,6 +29,7 @@ interface WorkOrder {
     createdBy?: string;
     config?: { pool?: string };
     revision?: string;
+    transactionReceipt?: boolean;
 }
 
 interface Event {
@@ -172,6 +173,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
     const [regLinkPresent, setRegLinkPresent] = useState(true)  // Default to true
     const [revisionEnabled, setRevisionEnabled] = useState(false)  // Default to false
     const [revision, setRevision] = useState('1')  // Default to "1" when enabled
+    const [isTransactionReceipt, setIsTransactionReceipt] = useState(false)
+    const [hasExistingReceiptWO, setHasExistingReceiptWO] = useState(false)
     const [testParticipantOptions, setTestParticipantOptions] = useState<Array<{ id: string, name: string }>>([])
     const [stages, setStages] = useState<Stage[]>([])
     const [selectedStageRecord, setSelectedStageRecord] = useState<Stage | null>(null)
@@ -192,13 +195,19 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
         const loadOptions = async () => {
             try {
                 // Load all options in parallel
-                const [eventsResp, accountResp, stagesResp, langResp, testIDsResp] = await Promise.all([
+                const [eventsResp, accountResp, stagesResp, langResp, testIDsResp, receiptWOsResp] = await Promise.all([
                     getAllTableItems('events', userPid, userHash),
                     getTableItem('config', 'emailAccountList', userPid, userHash),
                     getAllTableItems('stages', userPid, userHash),
                     getTableItem('config', 'emailLanguageList', userPid, userHash),
-                    getTableItem('config', 'emailTestIDs', userPid, userHash)
+                    getTableItem('config', 'emailTestIDs', userPid, userHash),
+                    getAllTableItemsFiltered('work-orders', 'eventCode', 'receipt', userPid, userHash)
                 ])
+
+                if (Array.isArray(receiptWOsResp)) {
+                    const existing = receiptWOsResp.filter(wo => !id || wo.id !== id)
+                    setHasExistingReceiptWO(existing.length > 0)
+                }
 
                 // Filter events based on user's event access list
                 let filteredEvents: Event[] = [];
@@ -250,6 +259,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     setStage('')
                     setLanguages({})
                     setSubjects({})
+                    setIsTransactionReceipt(false)
                 }
                 setOptionsLoaded(true)
             } catch {
@@ -292,6 +302,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     setRegLinkPresent(response.regLinkPresent !== false)  // Default to true if not explicitly false
                     setRevisionEnabled(!!response.revision)  // Enable if revision exists
                     setRevision(response.revision || '1')  // Set revision or default to "1"
+                    setIsTransactionReceipt(response.transactionReceipt || false)
                 }
             }).catch(error => {
                 console.error('Error loading work order:', error)
@@ -321,6 +332,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             setRegLinkPresent(response.regLinkPresent !== false)  // Default to true if not explicitly false
             setRevisionEnabled(!!response.revision)  // Enable if revision exists
             setRevision(response.revision || '1')  // Set revision or default to "1"
+            setIsTransactionReceipt(response.transactionReceipt || false)
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [optionsLoaded])
@@ -349,16 +361,29 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 // Always select if there is only one option (e.g. list events)
                 setSubEvent(subEvNames[0])
             } else if (!id) {
-                setSubEvent('')
+                if (!isTransactionReceipt) setSubEvent('')
             } else if (id && !subEvNames.includes(subEvent)) {
-                setSubEvent('')
+                if (!isTransactionReceipt) setSubEvent('')
             }
         } else {
             setSubEvents([])
-            setSubEvent('')
+            if (!isTransactionReceipt) setSubEvent('')
             setInPerson(false)
         }
-    }, [eventCode, events, id])
+    }, [eventCode, events, id, isTransactionReceipt])
+
+    const handleTransactionReceiptChange = (checked: boolean) => {
+        setIsTransactionReceipt(checked)
+        if (checked) {
+            setEventCode('receipt')
+            setSubEvent('receipt')
+            setStage('receipt')
+        } else {
+            setEventCode('')
+            setSubEvent('')
+            setStage('')
+        }
+    }
 
     // Load existing work orders when eventCode or subEvent changes
     useEffect(() => {
@@ -506,6 +531,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
         let shouldResetSteps = false
         let existingSteps: Array<{ name: string, status: string, message: string, isActive: boolean }> = []
         let structuralFieldsChanged = false
+        let resetReasons: string[] = []
 
         if (id) {
             // When editing, check if structural fields changed
@@ -523,12 +549,21 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 const langKeysSorted = (o: Record<string, boolean>) =>
                     JSON.stringify(Object.keys(o).sort().reduce((acc, k) => ({ ...acc, [k]: o[k] }), {}))
                 const languagesChanged = langKeysSorted(existingLangs) !== langKeysSorted(currentLangs)
-                structuralFieldsChanged =
-                    existingWorkOrder.eventCode !== eventCode ||
-                    existingWorkOrder.subEvent !== subEvent ||
-                    existingWorkOrder.stage !== stage ||
-                    languagesChanged ||
-                    revisionChanged
+                const eventCodeChanged = existingWorkOrder.eventCode !== eventCode
+                const subEventChanged = existingWorkOrder.subEvent !== subEvent
+                const stageChanged = existingWorkOrder.stage !== stage
+                resetReasons = []
+                if (eventCodeChanged) resetReasons.push(`Event Code changed (${existingWorkOrder.eventCode || '(empty)'} -> ${eventCode || '(empty)'})`)
+                if (subEventChanged) resetReasons.push(`Sub Event changed (${existingWorkOrder.subEvent || '(empty)'} -> ${subEvent || '(empty)'})`)
+                if (stageChanged) resetReasons.push(`Stage changed (${existingWorkOrder.stage || '(empty)'} -> ${stage || '(empty)'})`)
+                if (languagesChanged) resetReasons.push('Languages changed')
+                if (revisionChanged) {
+                    resetReasons.push(
+                        `Revision changed (${existingRevision || '(disabled)'} -> ${currentRevision || '(disabled)'})`
+                    )
+                }
+
+                structuralFieldsChanged = resetReasons.length > 0
 
                 shouldResetSteps = structuralFieldsChanged
                 existingSteps = existingWorkOrder.steps || []
@@ -658,6 +693,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 salutationByName,
                 regLinkPresent,
                 revision: revisionEnabled ? revision : undefined,
+                transactionReceipt: isTransactionReceipt,
                 config: {
                     pool: pool
                 },
@@ -673,7 +709,13 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 workOrder.updatedAt = new Date().toISOString()
                 await putTableItem('work-orders', workOrderId, workOrder, userPid, userHash)
                 if (structuralFieldsChanged) {
-                    toast.success('Work order updated - workflow progress has been reset due to structural changes')
+                    const reasonHeader = 'Reason:'
+                    const reasonLines = resetReasons.length > 0
+                        ? resetReasons.map(reason => `- ${reason}`).join('\n')
+                        : '- Structural fields changed'
+                    toast.success(
+                        `${reasonHeader}\n${reasonLines}\n\nWork order updated - workflow progress has been reset due to structural changes`
+                    )
                 } else {
                     toast.success('Work order updated - workflow progress preserved')
                 }
@@ -702,6 +744,23 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     </Button>
                 </div>
             </div>
+            
+            <Form.Group className="mb-3">
+                <Form.Check
+                    type="checkbox"
+                    id="isTransactionReceipt"
+                    label="Transaction Receipt Email"
+                    checked={isTransactionReceipt}
+                    onChange={e => handleTransactionReceiptChange(e.target.checked)}
+                    disabled={hasExistingReceiptWO && !isTransactionReceipt}
+                    className="bg-dark text-light border-secondary fw-bold text-warning"
+                />
+                <Form.Text className="text-light" style={{ opacity: 0.8 }}>
+                    When enabled, this work order will automatically process 'offering-transactions' instead of student records.
+                    {hasExistingReceiptWO && !isTransactionReceipt && " (Disabled: A transaction receipt work order already exists)"}
+                </Form.Text>
+            </Form.Group>
+
             <Form.Group className="mb-3">
                 <Form.Label>Event Code</Form.Label>
                 <Form.Control
@@ -711,6 +770,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     onChange={(e) => setEventCode(e.target.value)}
                     placeholder="Search or select an event..."
                     required
+                    disabled={isTransactionReceipt}
                     className="bg-dark text-light border-secondary"
                 />
                 <datalist id="workorder-event-list">
@@ -728,10 +788,11 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     value={subEvent}
                     onChange={e => setSubEvent(e.target.value)}
                     required
-                    disabled={subEvents.length === 1}
+                    disabled={isTransactionReceipt || subEvents.length === 1}
                     className="bg-dark text-light border-secondary"
                 >
                     {subEvents.length !== 1 && <option value="" disabled>Select sub-event</option>}
+                    {isTransactionReceipt && <option value="receipt">receipt</option>}
                     {subEvents.map(subEv => (
                         <option key={subEv} value={subEv}>{subEv}</option>
                     ))}
@@ -744,10 +805,11 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     value={stageValidating ? attemptedStageRef.current : stage}
                     onChange={e => handleStageChange(e.target.value)}
                     required
-                    disabled={stageValidating || loadingExistingWorkOrders}
+                    disabled={isTransactionReceipt || stageValidating || loadingExistingWorkOrders}
                     className="bg-dark text-light border-secondary"
                 >
-                    <option value="">Select Stage</option>
+                    <option value="" disabled>Select Stage</option>
+                    {isTransactionReceipt && <option value="receipt">receipt</option>}
                     {stages
                         .slice() // copy array to avoid mutating state
                         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))

@@ -142,16 +142,36 @@ class TestStep:
                     
                     # Send the test email
                     try:
+                        transaction_data = None
+                        event_for_email = event_data
+                        if getattr(work_order, 'transactionReceipt', False):
+                            transaction_data = self.aws_client.get_single_offering_transaction()
+                            if not transaction_data:
+                                raise Exception("Event transaction receipt test failed: no offering transaction found")
+
+                            # For transaction receipts, use the event referenced by the offering transaction.
+                            # The work order eventCode is typically "receipt" and won't have the banner image.
+                            tx_event_code = (
+                                transaction_data.get('eventCode')
+                                or transaction_data.get('event_code')
+                                or work_order.eventCode
+                            )
+                            tx_event_data = self.aws_client.get_event(tx_event_code)
+                            if not tx_event_data:
+                                raise Exception(f"Event {tx_event_code} not found for transaction receipt test")
+                            event_for_email = tx_event_data
+
                         success = send_email(
                             html=html_content,
                             subject=test_subject,
                             language=lang,
                             account=work_order.account,
                             student=tester,
-                            event=event_data,
+                            event=event_for_email,
                             pools_array=pools_data,
                             prompts_array=prompts_data,
-                            dryrun=False
+                            dryrun=False,
+                            transaction_data=transaction_data
                         )
                         
                         if success:

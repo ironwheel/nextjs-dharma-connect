@@ -73,6 +73,163 @@ class SendBaseStep:
             # Get stage record for filtering and prefix
             stage_record = self._get_stage_record(work_order.stage)
             
+            if getattr(work_order, 'transactionReceipt', False):
+                await self._update_progress(work_order, "Bypassing standard student scan for transaction receipt...", step.name)
+                # Ensure S3 paths exist
+                if not work_order.s3HTMLPaths:
+                    raise Exception("No S3 HTML paths found. Prepare step must be completed first.")
+                
+                await self._update_progress(work_order, "Fetching offering transactions needing receipts...", step.name)
+                transactions = self.aws_client.get_offering_transactions()
+                await self._update_progress(work_order, f"Found {len(transactions)} transactions to process", step.name)
+                
+                event_cache: Dict[str, Dict] = {}
+                # Receipt mode bypasses the normal student scan eligibility flow, so we preload students
+                # (from the agent's scan_table cache) for recipient name + pid resolution.
+                students_data = self.aws_client.scan_table(STUDENT_TABLE) if hasattr(self.aws_client, 'scan_table') else []
+                students_by_pid: Dict[str, Dict] = {}
+                for s in students_data:
+                    sid = s.get('id')
+                    if sid and isinstance(sid, str):
+                        students_by_pid[sid] = s
+                pools_data = self.aws_client.scan_table(POOLS_TABLE)
+                prompts_data = self.aws_client.scan_table(PROMPTS_TABLE)
+                
+                total_emails_sent = 0
+                receipt_problem_payer_email = '**********'
+                for lang in work_order.languages.keys():
+                    if not work_order.languages[lang]:
+                        continue
+                        
+                    await self._update_progress(work_order, f"Processing {lang} language for receipts...", step.name)
+                    emails_sent = 0
+                    # email-manager expects campaignString to be built from work_order fields + language
+                    campaign_string = build_campaign_string(
+                        work_order.eventCode,
+                        work_order.subEvent,
+                        work_order.stage,
+                        lang,
+                        work_order.revision
+                    )
+                    
+                    if self.dryrun:
+                        self.aws_client.delete_dryrun_recipients(campaign_string)
+                    
+                    for i, transaction in enumerate(transactions):
+                        transaction_event_code = transaction.get('eventCode') or transaction.get('event_code')
+                        if not transaction_event_code:
+                            raise Exception(
+                                "Transaction receipt email failed: offering transaction is missing eventCode"
+                            )
+                        
+                        payer_email = transaction.get('payerEmail', '') or transaction.get('payer_email', '')
+                        tx_pid = transaction.get('pid') or transaction.get('PID')
+                        if not isinstance(tx_pid, str):
+                            tx_pid = ''
+                        is_problem_payer_email = isinstance(payer_email, str) and payer_email == receipt_problem_payer_email
+                        if is_problem_payer_email:
+                            payment_intent_id = transaction.get('paymentIntentId') or transaction.get('payment_intent_id') or ''
+                            pid = tx_pid or '(missing pid)'
+                            raise Exception(
+                                "Receipt processing aborted due to disallowed payerEmail. "
+                                f"paymentIntentId='{payment_intent_id}', pid='{pid}'"
+                            )
+
+                        if transaction_event_code not in event_cache:
+                            event_data_for_transaction = self.aws_client.get_event(transaction_event_code)
+                            if not event_data_for_transaction:
+                                raise Exception(
+                                    f"Transaction receipt email failed: Event not found for transaction eventCode '{transaction_event_code}'"
+                                )
+                            event_cache[transaction_event_code] = event_data_for_transaction
+                        event_data_for_transaction = event_cache[transaction_event_code]
+
+                        pid = tx_pid or ''
+                        student_record = students_by_pid.get(pid) if pid else None
+                        first_name = (student_record or {}).get('first', '') or ''
+                        last_name = (student_record or {}).get('last', '') or ''
+                        full_name = f"{first_name} {last_name}".strip() or 'Friend'
+                        country = (student_record or {}).get('country', 'United States') or 'United States'
+                        
+                        student_mock = {
+                            # Used for ||pid|| and ||hash|| macros
+                            'id': pid or '',
+                            'email': transaction.get('payerEmail', ''),
+                            'first': first_name,
+                            'last': last_name,
+                            'country': country
+                        }
+                        
+                        try:
+                            success = await self._send_student_email(
+                                student=student_mock,
+                                language=lang,
+                                work_order=work_order,
+                                event_data=event_data_for_transaction,
+                                pools_data=pools_data,
+                                prompts_data=prompts_data,
+                                campaign_string=campaign_string,
+                                stage_record=stage_record,
+                                transaction_data=transaction
+                            )
+                            if success:
+                                emails_sent += 1
+                                total_emails_sent += 1
+                                entry = {
+                                    "name": full_name,
+                                    "email": student_mock['email'],
+                                    "sendtime": datetime.now(timezone.utc).isoformat()
+                                }
+                                if self.dryrun:
+                                    self.aws_client.append_dryrun_recipient(campaign_string, entry)
+                                else:
+                                    self.aws_client.update_transaction_receipt_sent(transaction['paymentIntentId'])
+                                    self.aws_client.append_send_recipient(campaign_string, entry, work_order.account)
+                                    # Apply the same burst cooldown behavior for receipt sends.
+                                    # This respects EMAIL_BURST_SIZE and EMAIL_RECOVERY_SLEEP_SECS
+                                    # (typically a 5-minute cooling-off window in production config).
+                                    if (i + 1) % EMAIL_BURST_SIZE == 0 and i + 1 < len(transactions):
+                                        self.log('progress', f"[BURST] Receipt burst limit reached, sleeping for {EMAIL_RECOVERY_SLEEP_SECS} seconds...")
+                                        await self._update_progress(
+                                            work_order,
+                                            f"Receipt burst limit reached for {lang}, sleeping for {EMAIL_RECOVERY_SLEEP_SECS} seconds...",
+                                            step.name
+                                        )
+                                        try:
+                                            await async_interruptible_sleep(EMAIL_RECOVERY_SLEEP_SECS, work_order, self.aws_client)
+                                            self.log('progress', "[BURST] Receipt burst cooldown completed, resuming sends...")
+                                        except InterruptedError:
+                                            await self._update_progress(work_order, "Step interrupted by stop request.", step.name)
+                                            step.status = StepStatus.INTERRUPTED
+                                            step.message = "Step interrupted by stop request."
+                                            return False
+
+                                # Periodic progress updates for email-manager UI
+                                processed = i + 1
+                                total = len(transactions)
+                                if processed % 10 == 0 or processed == total:
+                                    await self._update_progress(
+                                        work_order,
+                                        f"Processed {processed}/{total} receipt transactions for {lang} (sent {emails_sent})",
+                                        step.name
+                                    )
+                                    
+                        except Exception as e:
+                            error_message = f"Receipt email failed for {student_mock['email']}: {str(e)}"
+                            await self._update_progress(work_order, error_message, step.name)
+                            raise Exception(error_message)
+
+                        latest_work_order = self.aws_client.get_work_order(work_order.id)
+                        if latest_work_order and getattr(latest_work_order, 'stopRequested', False):
+                            step.status = StepStatus.INTERRUPTED
+                            return False
+                            
+                success_message = f"Dry-Run completed successfully. {total_emails_sent} emails would have been sent." if self.dryrun else f"{self.step_name} completed successfully. Sent {total_emails_sent} total receipt emails."
+                await self._update_progress(work_order, success_message, step.name)
+                step.message = success_message
+                return True
+            
+            
             # Get required data (do this once before language loop)
             await self._update_progress(work_order, "Loading required data...", step.name)
             
@@ -266,7 +423,7 @@ class SendBaseStep:
 
     async def _send_student_email(self, student: Dict, language: str, work_order: WorkOrder, 
                                  event_data: Dict, pools_data: List[Dict], prompts_data: List[Dict], 
-                                 campaign_string: str, stage_record: Dict) -> bool:
+                                 campaign_string: str, stage_record: Dict, transaction_data: Dict = None) -> bool:
         """
         Send an email to a specific student in a specific language.
         
@@ -311,13 +468,14 @@ class SendBaseStep:
                 event=event_data,
                 pools_array=pools_data,
                 prompts_array=prompts_data,
-                dryrun=self.dryrun
+                dryrun=self.dryrun,
+                transaction_data=transaction_data
             )
             
             if not success:
                 raise Exception(f"send_email() returned False for student {student.get('email')} in language {language}")
             
-            if not self.dryrun:
+            if not self.dryrun and transaction_data is None:
                 # Record the campaign string in the student's emails field with ISO 8601 timestamp
                 emails = student.get('emails', {})
                 emails[campaign_string] = datetime.utcnow().isoformat()

@@ -9,6 +9,7 @@ import time
 import sys
 import os
 import hmac
+from decimal import Decimal, InvalidOperation
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.headerregistry import Address
@@ -88,7 +89,7 @@ def lookup_email_account_credentials(account: str, country: str) -> tuple[str, s
 
 def send_email(html: str, subject: str, language: str, account: str, student: Dict, 
                event: Dict, pools_array: List[Dict], prompts_array: List[Dict], 
-               dryrun: bool = False) -> bool:
+               dryrun: bool = False, transaction_data: Dict = None) -> bool:
     """
     Send an email with template processing and variable substitution.
     
@@ -123,6 +124,90 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
         raise Exception("Student email not found")
     msg['To'] = email_to
 
+    # Transaction Receipt adjustments
+    if transaction_data:
+        warning_event_code = (
+            transaction_data.get('eventCode')
+            or transaction_data.get('event_code')
+            or event.get('aid')
+            or 'unknown'
+        )
+        event_image_url = (event.get('config') or {}).get('eventImage')
+        if event_image_url:
+            try:
+                def img_replacer(match):
+                    tag = match.group(0)
+                    # Mailchimp often includes the hero/banner as an <img> with a data-file-id
+                    # but may not include the internal "mcnImage" marker, depending on export/source.
+                    should_replace = (
+                        'mcnImage' in tag
+                        or ('data-file-id' in tag and 'mcusercontent.com/' in tag)
+                    )
+                    if should_replace:
+                        return re.sub(r'src="[^"]+"', f'src="{event_image_url}"', tag)
+                    return tag
+                
+                html = re.sub(r'<img[^>]+>', img_replacer, html)
+            except Exception as e:
+                print(f"Warning: Failed to replace event image for transaction receipt: {e}")
+        else:
+            print(
+                f"Warning: No eventImage configured for transaction receipt eventCode '{warning_event_code}'"
+            )
+
+        if "#receipt" in html:
+            try:
+                skus = transaction_data.get('skuSummary', [])
+                currency = transaction_data.get('currency', 'USD')
+                
+                receipt_text = ""
+                total_cents = Decimal('0')
+                
+                for sku in skus:
+                    raw_amount_cents = sku.get('amountCents', 0)
+                    try:
+                        amount_cents = Decimal(str(raw_amount_cents))
+                    except (InvalidOperation, TypeError):
+                        amount_cents = Decimal('0')
+                    amount = amount_cents / Decimal('100')
+                    total_cents += amount_cents
+                    currency_str = sku.get('currency', currency).upper()
+                    if sku.get('subEvent') == 'kmFee':
+                        line = f"Kalapa Media 5% Fee       ${float(amount):.2f} {currency_str}\n"
+                    else:
+                        person_name = sku.get('personName', '')
+                        offering_sku = sku.get('offeringSKU', '')
+                        # Receipt line item format (no leading prefix, no parentheses)
+                        line = f"{person_name}, {offering_sku}  ${float(amount):.2f} {currency_str}\n"
+                    receipt_text += line
+                
+                receipt_text += "--------------\n"
+                receipt_text += f"${float(total_cents / Decimal('100')):.2f} {currency.upper()}"
+                
+                rows = len(skus) + 2
+                full_language = code_to_full_language(language)
+                title_text = prompt_lookup(prompts_array, 'title', full_language, event['aid'])
+                # Use a proportional font for receipt text (textarea defaults can be monospace).
+                receipt_html = (
+                    f'<div style="text-align: left;">'
+                    f'<span style="font-size:15px">'
+                    f'<div style="font-style: italic; font-family: helvetica neue,helvetica,arial,verdana,sans-serif; margin-bottom: 6px;">{title_text}</div>'
+                    f'<textarea readonly '
+                    f'style="text-align: right; font-family: helvetica neue,helvetica,arial,verdana,sans-serif;" '
+                    f'cols="70" rows="{rows}">'
+                    f'{receipt_text}'
+                    f'</textarea>'
+                    f'</span>'
+                    f'</div>'
+                )
+                
+                html = html.replace("#receipt", receipt_html)
+            except Exception as e:
+                print(f"Warning: Failed to construct #receipt: {e}")
+        
+        if "#paymentid" in html:
+            html = html.replace("#paymentid", transaction_data.get('paymentIntentId', ''))
+
     # If #salutation directive in html, replace it with the langauge specific salutation
     # replacing the ||name|| field in the prompts with the person's name
     if "#salutation" in html:
@@ -132,6 +217,13 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
             raise Exception(f"Can't use #salutation. No prompt found for prompt: salutation, {full_language}")
         # name will get replaced with the person's name below
         html = html.replace("#salutation", salutation_text)
+
+    # If ||title|| directive in html, replace it with the localized title prompt
+    # Uses event['aid'] for correct title resolution in both normal and transactionReceipt modes.
+    if "||title||" in html:
+        full_language = code_to_full_language(language)
+        title_text = prompt_lookup(prompts_array, 'title', full_language, event['aid'])
+        html = html.replace("||title||", title_text)
 
     # If #reglink directive in html, replace it with the langauge specific reg link language
     # ||pid|| will get replaced with the participant's pid below

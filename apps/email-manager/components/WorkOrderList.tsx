@@ -40,6 +40,7 @@ interface WorkOrder {
     archivedBy?: string
     sleepUntil?: string
     revision?: string
+    transactionReceipt?: boolean
 }
 
 interface RecipientEntry {
@@ -486,6 +487,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                     archivedBy: workOrder.archivedBy,
                     sleepUntil: workOrder.sleepUntil,
                     revision: workOrder.revision,
+                    transactionReceipt: workOrder.transactionReceipt,
                 }
 
                 setWorkOrdersLocal(prevOrders => {
