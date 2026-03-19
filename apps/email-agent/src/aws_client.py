@@ -9,6 +9,7 @@ import time
 from .config import (
     STUDENT_TABLE, POOLS_TABLE, PROMPTS_TABLE, EVENTS_TABLE, 
     EMAIL_BURST_SIZE, EMAIL_RECOVERY_SLEEP_SECS, DRYRUN_RECIPIENTS_TABLE, SEND_RECIPIENTS_TABLE,
+    OFFERING_TRANSACTIONS_TABLE,
     config
 )
 from .models import WorkOrder, WorkOrderUpdate
@@ -601,6 +602,65 @@ class AWSClient:
             return True
         except ClientError as e:
             print(f"Error updating student emails: {e}")
+            return False
+
+    def get_offering_transactions(self) -> List[Dict]:
+        """Get offering transactions that have succeeded but have no email receipt sent."""
+        try:
+            table = self.dynamodb.Table(OFFERING_TRANSACTIONS_TABLE)
+            # Scan the table. Might need pagination if table is large.
+            transactions = []
+            last_evaluated_key = None
+            while True:
+                if last_evaluated_key:
+                    response = table.scan(ExclusiveStartKey=last_evaluated_key)
+                else:
+                    response = table.scan()
+                
+                for item in response.get('Items', []):
+                    # Check for succeeded status and missing/false emailReceiptSent
+                    if item.get('status') == 'succeeded' and not item.get('emailReceiptSent'):
+                        transactions.append(item)
+                        
+                last_evaluated_key = response.get('LastEvaluatedKey')
+                if not last_evaluated_key:
+                    break
+            
+            return transactions
+        except Exception as e:
+            print(f"Error getting offering transactions: {e}")
+            return []
+
+    def get_single_offering_transaction(self) -> Optional[Dict]:
+        """Get a single successful offering transaction for testing purposes."""
+        try:
+            table = self.dynamodb.Table(OFFERING_TRANSACTIONS_TABLE)
+            response = table.scan(
+                FilterExpression='#status = :status AND attribute_not_exists(emailReceiptSent)',
+                ExpressionAttributeNames={'#status': 'status'},
+                ExpressionAttributeValues={':status': 'succeeded'},
+                Limit=1
+            )
+            items = response.get('Items', [])
+            if items:
+                return items[0]
+            return None
+        except Exception as e:
+            print(f"Error getting single offering transaction: {e}")
+            return None
+
+    def update_transaction_receipt_sent(self, payment_intent_id: str) -> bool:
+        """Update the offering transaction to mark the email receipt as sent with ISO 8601 timestamp."""
+        try:
+            table = self.dynamodb.Table(OFFERING_TRANSACTIONS_TABLE)
+            table.update_item(
+                Key={'paymentIntentId': payment_intent_id},
+                UpdateExpression='SET emailReceiptSent = :timestamp',
+                ExpressionAttributeValues={':timestamp': datetime.now(timezone.utc).isoformat()}
+            )
+            return True
+        except ClientError as e:
+            print(f"Error updating transaction receipt sent: {e}")
             return False
 
     def _get_full_language_name(self, language_code: str) -> str:

@@ -43,6 +43,29 @@ class CountStep:
             # Get stage record for filtering
             stage_record = self._get_stage_record(work_order.stage)
             
+            # If transactionReceipt is true, bypass standard student scanning
+            if getattr(work_order, 'transactionReceipt', False):
+                await self._update_progress(work_order, "Scanning offering transactions table...")
+                transactions = self.aws_client.get_offering_transactions()
+                await self._update_progress(work_order, f"Found {len(transactions)} transactions needing receipts")
+                
+                received_counts = {}
+                will_receive_counts = {}
+                for lang in work_order.languages.keys():
+                    if work_order.languages[lang]:
+                        received_counts[lang] = 0
+                        will_receive_counts[lang] = len(transactions)  # All are unpaid receipts
+                
+                received_parts = [f"{lang}:{received_counts[lang]}" for lang in received_counts.keys()]
+                will_receive_parts = [f"{lang}:{will_receive_counts[lang]}" for lang in will_receive_counts.keys()]
+                total_parts = [f"{lang}:{received_counts[lang] + will_receive_counts[lang]}" for lang in received_counts.keys()]
+                
+                success_message = f"Already received: {', '.join(received_parts)}, Will send: {', '.join(will_receive_parts)}, Total: {', '.join(total_parts)}"
+                
+                await self._update_progress(work_order, success_message)
+                step.message = success_message
+                return True
+            
             # Scan both tables (do this once before language loop)
             await self._update_progress(work_order, f"Scanning student table: {STUDENT_TABLE}")
             student_data = self.aws_client.scan_table(STUDENT_TABLE)
