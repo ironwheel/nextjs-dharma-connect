@@ -4,7 +4,7 @@
  */
 import { tableGetConfig } from './tableConfig';
 import { getOne, putOne, updateItem } from './dynamoClient';
-import { stripeRetrievePaymentIntent } from './stripe';
+import { stripeRetrievePaymentIntentForOfferingAugmentation } from './stripe';
 
 export type OfferingTransactionStatus = 'pending' | 'succeeded' | 'abandoned' | 'refunded';
 
@@ -14,6 +14,7 @@ export interface OfferingTransactionRecord {
   createdAt: string;
   updatedAt: string;
   succeededAt?: string;
+  refundedAt?: string;
   pid: string;
   eventCode: string;
   eventName?: string;
@@ -25,6 +26,17 @@ export interface OfferingTransactionRecord {
   skuSummary: Array<{ personName: string; subEvent: string; offeringSKU?: string; amountCents?: number; currency?: string }>;
   refundedAmount?: number;
   payerEmail?: string;
+
+  // Dashboard-ready augmentation (for offering-dashboard + caching).
+  dashboardStripeFeeCents?: number;
+  dashboardKmFeeDollars?: number; // Stored in dollars; dashboard multiplies by 100.
+  dashboardAmountCents?: number; // Amount excluding kmFee.
+  dashboardStatus?: 'COMPLETED' | 'REFUNDED' | 'PENDING';
+  dashboardStep?: string; // e.g. 'confirmCardPayment'
+  dashboardTimestamp?: string; // Timestamp for year/month filters.
+
+  // Card metadata for receipt display.
+  card?: { brand?: string; last4?: string };
 }
 
 /**
@@ -72,12 +84,35 @@ export async function updateOfferingTransactionRefund(
   const refundedAmount = previousRefunded + thisRefundCents;
   const now = new Date().toISOString();
   const status = refundedAmount >= totalAmountCents ? 'refunded' : 'succeeded';
+
+  const willBeRefunded = status === 'refunded';
+  const shouldSetRefundedAt = willBeRefunded && (existing as any)?.refundedAt == null;
   await updateItem(
     cfg.tableName,
     { [cfg.pk]: paymentIntentId },
-    'SET #refundedAmount = :refundedAmount, #updatedAt = :updatedAt, #status = :status',
-    { ':refundedAmount': refundedAmount, ':updatedAt': now, ':status': status },
-    { '#refundedAmount': 'refundedAmount', '#updatedAt': 'updatedAt', '#status': 'status' },
+    [
+      'SET #refundedAmount = :refundedAmount',
+      '#updatedAt = :updatedAt',
+      '#status = :status',
+      willBeRefunded ? '#dashboardStatus = :dashboardStatus' : '#dashboardStatus = :dashboardStatus',
+      shouldSetRefundedAt ? '#refundedAt = :refundedAt' : undefined,
+    ]
+      .filter(Boolean)
+      .join(', '),
+    {
+      ':refundedAmount': refundedAmount,
+      ':updatedAt': now,
+      ':status': status,
+      ':dashboardStatus': willBeRefunded ? 'REFUNDED' : 'COMPLETED',
+      ...(shouldSetRefundedAt ? { ':refundedAt': now } : {}),
+    },
+    {
+      '#refundedAmount': 'refundedAmount',
+      '#updatedAt': 'updatedAt',
+      '#status': 'status',
+      '#dashboardStatus': 'dashboardStatus',
+      ...(shouldSetRefundedAt ? { '#refundedAt': 'refundedAt' } : {}),
+    },
     roleArn,
     oidcToken
   );
@@ -88,17 +123,74 @@ export async function updateOfferingTransactionRefund(
  */
 export async function updateOfferingTransactionSucceeded(
   paymentIntentId: string,
+  dashboardStripeFeeCents: number | undefined,
+  dashboardKmFeeDollars: number | undefined,
+  dashboardAmountCents: number | undefined,
+  cardBrand: string | undefined,
+  cardLast4: string | undefined,
   roleArn: string,
   oidcToken?: string
 ): Promise<void> {
   const cfg = tableGetConfig('offering-transactions');
   const now = new Date().toISOString();
+
+  const card = cardBrand || cardLast4 ? { brand: cardBrand, last4: cardLast4 } : undefined;
+
+  const setParts: string[] = [
+    '#status = :status',
+    '#updatedAt = :updatedAt',
+    '#succeededAt = :succeededAt',
+    '#dashboardStatus = :dashboardStatus',
+    '#dashboardStep = :dashboardStep',
+    '#dashboardTimestamp = :dashboardTimestamp',
+  ];
+  const exprValues: Record<string, any> = {
+    ':status': 'succeeded',
+    ':updatedAt': now,
+    ':succeededAt': now,
+    ':dashboardStatus': 'COMPLETED',
+    ':dashboardStep': 'confirmCardPayment',
+    ':dashboardTimestamp': now,
+  };
+  const exprNames: Record<string, string> = {
+    '#status': 'status',
+    '#updatedAt': 'updatedAt',
+    '#succeededAt': 'succeededAt',
+    '#dashboardStatus': 'dashboardStatus',
+    '#dashboardStep': 'dashboardStep',
+    '#dashboardTimestamp': 'dashboardTimestamp',
+  };
+
+  if (dashboardStripeFeeCents != null) {
+    setParts.push('#dashboardStripeFeeCents = :dashboardStripeFeeCents');
+    exprValues[':dashboardStripeFeeCents'] = dashboardStripeFeeCents;
+    exprNames['#dashboardStripeFeeCents'] = 'dashboardStripeFeeCents';
+  }
+
+  if (dashboardKmFeeDollars != null) {
+    setParts.push('#dashboardKmFeeDollars = :dashboardKmFeeDollars');
+    exprValues[':dashboardKmFeeDollars'] = dashboardKmFeeDollars;
+    exprNames['#dashboardKmFeeDollars'] = 'dashboardKmFeeDollars';
+  }
+
+  if (dashboardAmountCents != null) {
+    setParts.push('#dashboardAmountCents = :dashboardAmountCents');
+    exprValues[':dashboardAmountCents'] = dashboardAmountCents;
+    exprNames['#dashboardAmountCents'] = 'dashboardAmountCents';
+  }
+
+  if (card) {
+    setParts.push('#card = :card');
+    exprValues[':card'] = card;
+    exprNames['#card'] = 'card';
+  }
+
   await updateItem(
     cfg.tableName,
     { [cfg.pk]: paymentIntentId },
-    'SET #status = :status, #updatedAt = :updatedAt, #succeededAt = :succeededAt',
-    { ':status': 'succeeded', ':updatedAt': now, ':succeededAt': now },
-    { '#status': 'status', '#updatedAt': 'updatedAt', '#succeededAt': 'succeededAt' },
+    `SET ${setParts.join(', ')}`,
+    exprValues,
+    exprNames,
     roleArn,
     oidcToken
   );
@@ -163,7 +255,7 @@ export async function completeOffering(
   roleArn: string,
   oidcToken?: string
 ): Promise<void> {
-  const pi = await stripeRetrievePaymentIntent(paymentIntentId);
+  const pi = await stripeRetrievePaymentIntentForOfferingAugmentation(paymentIntentId);
   if (pi.status !== 'succeeded') {
     throw new Error(`PaymentIntent ${paymentIntentId} is not succeeded (status: ${pi.status})`);
   }
@@ -174,7 +266,32 @@ export async function completeOffering(
     return;
   }
 
-  await updateOfferingTransactionSucceeded(paymentIntentId, roleArn, oidcToken);
+  // Best-effort extraction from the single PI retrieve call.
+  const latestCharge = (pi as any)?.latest_charge;
+  const balanceTxnFee = (latestCharge as any)?.balance_transaction?.fee;
+  const dashboardStripeFeeCents = balanceTxnFee != null ? Number(balanceTxnFee) : undefined;
+
+  const cardBrand = (latestCharge as any)?.payment_method_details?.card?.brand;
+  const cardLast4 = (latestCharge as any)?.payment_method_details?.card?.last4;
+
+  const skuSummary = (existing as any)?.skuSummary ?? [];
+  const kmLine = Array.isArray(skuSummary) ? skuSummary.find((x: any) => x?.subEvent === 'kmFee') : undefined;
+  const kmFeeCents = kmLine?.amountCents != null ? Number(kmLine.amountCents) : 0;
+  const dashboardKmFeeDollars = kmFeeCents ? kmFeeCents / 100 : 0;
+
+  const recordAmount = typeof (existing as any)?.amount === 'number' ? (existing as any).amount : undefined;
+  const dashboardAmountCents = recordAmount != null ? recordAmount - kmFeeCents : undefined;
+
+  await updateOfferingTransactionSucceeded(
+    paymentIntentId,
+    dashboardStripeFeeCents,
+    dashboardKmFeeDollars,
+    dashboardAmountCents,
+    cardBrand,
+    cardLast4,
+    roleArn,
+    oidcToken
+  );
 
   for (const person of cart) {
     const currentOfferings = person.currentOfferings || {};
