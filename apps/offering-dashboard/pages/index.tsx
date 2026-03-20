@@ -438,29 +438,168 @@ const Home = () => {
     }, [pid, hash]);
 
     // Helper: Fetch Raw Transactions (Lazy)
+    const normalizeV2OfferingTransaction = (rec: any): Transaction => {
+        const skuSummary: any[] = Array.isArray(rec?.skuSummary) ? rec.skuSummary : [];
+        const kmLine = skuSummary.find((x: any) => x?.subEvent === 'kmFee');
+        const kmFeeCents = kmLine?.amountCents != null ? Number(kmLine.amountCents) : 0;
+        const kmFeeDollars =
+            rec?.dashboardKmFeeDollars != null ? Number(rec.dashboardKmFeeDollars) : kmFeeCents / 100;
+
+        const dashboardStripeFeeCents =
+            rec?.dashboardStripeFeeCents != null ? Number(rec.dashboardStripeFeeCents) : 0;
+
+        const status =
+            rec?.dashboardStatus ??
+            (rec?.status === 'refunded' ? 'REFUNDED' : 'COMPLETED');
+
+        // Dashboard formulas treat KM fee specially:
+        // - For COMPLETED rows, Net subtracts (fee + km), so `payerData.amount` should include KM.
+        // - For REFUNDED rows, KM fee is ignored in Net, so `payerData.amount` should exclude KM.
+        const grossAmountCents = rec?.amount != null ? Number(rec.amount) : 0;
+        const amountExcludingKmCents =
+            grossAmountCents - kmFeeCents;
+        const dashboardAmountCents = status === 'REFUNDED' ? amountExcludingKmCents : grossAmountCents;
+
+        const refundedAt =
+            rec?.refundedAt ??
+            (status === 'REFUNDED' ? rec?.updatedAt : undefined);
+
+        const timestamp =
+            rec?.dashboardTimestamp ??
+            rec?.succeededAt ??
+            rec?.createdAt ??
+            rec?.updatedAt ??
+            '';
+
+        const cart: any[] = Array.isArray(rec?.cart) ? rec.cart : [];
+        const payerPerson =
+            cart.find((p: any) => rec?.pid != null && p?.id === rec.pid) ??
+            cart[0] ??
+            {};
+
+        return {
+            transaction: rec?.paymentIntentId ?? '',
+            aid: rec?.eventCode ?? '',
+            cart: rec?.cart ?? [],
+            currency: rec?.currency ?? 'usd',
+            email: rec?.payerEmail ?? payerPerson?.email ?? '',
+            emailReceipt: rec?.emailReceiptSent ?? rec?.emailReceipt ?? '',
+            id: rec?.pid ?? payerPerson?.id ?? '',
+            kmFee: kmFeeDollars,
+            name: payerPerson?.name ?? payerPerson?.id ?? rec?.pid ?? '',
+            payer: 'stripe',
+            payerData: {
+                amount: dashboardAmountCents,
+                fee: dashboardStripeFeeCents,
+                net: dashboardAmountCents - (dashboardStripeFeeCents + kmFeeCents),
+            },
+            refundedAt,
+            step: rec?.dashboardStep ?? 'confirmCardPayment',
+            status,
+            summary: rec?.summaryString ?? '',
+            timestamp,
+            total: dashboardAmountCents / 100,
+            isAggregate: false,
+        } as Transaction;
+    };
+
     const fetchRawTransactions = useCallback(async () => {
         if (loadingTransactions || !pid || !hash) return;
         setLoadingTransactions(true);
+        setTxnLoadedCount(0);
         const onProgress = (loaded: number, chunk: number, total: number) => {
             setTxnLoadedCount(loaded);
         };
         try {
             let txs: any[] | { redirected: true } = [];
+            let totalCount = 0;
 
-            // OPTIMIZATION: Use GSI if specific event is selected (and not 'all')
-            // Double check selectedEventAid is valid and not 'all'
-            if (selectedEventAid && selectedEventAid !== 'all') {
-                console.log(`OPTIMIZATION: Fetching transactions for event ${selectedEventAid} via GSI...`);
-                txs = await queryGetTableIndexItems('transactions', 'aid-index', 'aid', selectedEventAid, pid, hash);
+            const selectedEvent = events.find(e => e.aid === selectedEventAid) as any | undefined;
+            const useV2 = selectedEventAid !== 'all' && selectedEvent?.config?.reglinkv2 === true;
+
+            // Progress modal currently uses full-table counts; good enough as an approximation.
+            if (selectedEventAid === 'all') {
+                const [legacyCountResp, v2CountResp] = await Promise.all([
+                    getTableCount('transactions', pid, hash),
+                    getTableCount('offering-transactions', pid, hash)
+                ]);
+                totalCount = Number((legacyCountResp as any)?.count || 0) + Number((v2CountResp as any)?.count || 0);
             } else {
-                console.log("Fetching ALL transactions (full scan)...");
-                txs = await getAllTableItems('transactions', pid, hash, onProgress);
+                const countResp = await getTableCount(useV2 ? 'offering-transactions' : 'transactions', pid, hash);
+                totalCount = Number((countResp as any)?.count || 0);
+            }
+            setTxnTotalCount(totalCount);
+
+            // RAW load: fetch exactly one table when a single event is selected.
+            // For "all events", fetch both tables and merge.
+            if (selectedEventAid && selectedEventAid !== 'all') {
+                if (useV2) {
+                    console.log(`Fetching v2 offering-transactions for event ${selectedEventAid} (scan + filter)...`);
+                    const v2 = await getAllTableItems('offering-transactions', pid, hash, onProgress);
+                    if (!Array.isArray(v2)) {
+                        txs = v2 as any;
+                    } else {
+                        const filtered = v2.filter((r: any) => r?.eventCode === selectedEventAid);
+                        setAllTransactions(filtered.map(normalizeV2OfferingTransaction));
+                        setLoadedScope(selectedEventAid);
+                        setRawLoaded(true);
+                        return;
+                    }
+                } else {
+                    console.log(`OPTIMIZATION: Fetching legacy transactions for event ${selectedEventAid} via GSI...`);
+                    const legacy = await queryGetTableIndexItems('transactions', 'aid-index', 'aid', selectedEventAid, pid, hash);
+                    if (Array.isArray(legacy)) {
+                        setAllTransactions(legacy as Transaction[]);
+                        setLoadedScope(selectedEventAid);
+                        setRawLoaded(true);
+                        return;
+                    }
+                    txs = legacy as any;
+                }
+            } else {
+                console.log("Fetching ALL transactions (merged legacy+v2)...");
+
+                // Legacy (transactions): already optimized for "all" with full scan.
+                let legacyItems: any[] = [];
+                const loadedOffsetStart = 0;
+
+                const legacyOnProgress = (loaded: number) => {
+                    setTxnLoadedCount(loadedOffsetStart + loaded);
+                };
+
+                const legacy = await getAllTableItems('transactions', pid, hash, (loaded: number) => legacyOnProgress(loaded) as any);
+                if (Array.isArray(legacy)) {
+                    legacyItems = legacy;
+                } else {
+                    txs = legacy as any;
+                }
+
+                // v2 (offering-transactions): scan + merge.
+                if (Array.isArray(txs)) {
+                    // shouldn't happen; keep safety
+                    txs = [];
+                }
+                const offset = legacyItems.length;
+                const v2OnProgress = (loaded: number) => {
+                    setTxnLoadedCount(offset + loaded);
+                };
+                const v2 = await getAllTableItems('offering-transactions', pid, hash, (loaded: number) => v2OnProgress(loaded) as any);
+                if (Array.isArray(v2)) {
+                    const normalizedV2 = v2.map(normalizeV2OfferingTransaction);
+                    setAllTransactions([...(legacyItems as Transaction[]), ...normalizedV2]);
+                    setLoadedScope('all');
+                    setRawLoaded(true);
+                    return;
+                }
+                txs = v2 as any;
             }
 
             if (Array.isArray(txs)) {
-                setAllTransactions(txs);
+                setAllTransactions(txs as Transaction[]);
                 setLoadedScope(selectedEventAid === 'all' ? 'all' : selectedEventAid);
                 setRawLoaded(true);
+            } else if (txs && (txs as any).redirected) {
+                router.push('/login');
             }
         } catch (e) {
             console.error(e);
@@ -468,7 +607,7 @@ const Home = () => {
         } finally {
             setLoadingTransactions(false);
         }
-    }, [pid, hash, loadingTransactions, selectedEventAid]);
+    }, [pid, hash, loadingTransactions, selectedEventAid, events]);
 
     // Determine Display Data
     useEffect(() => {
