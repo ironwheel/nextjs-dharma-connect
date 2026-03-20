@@ -127,6 +127,22 @@ export async function stripeRetrievePaymentIntent(paymentIntentId: string) {
     return paymentIntent;
 }
 
+/**
+ * Stripe PI retrieve helper for offering-v2 augmentation.
+ *
+ * Goal: avoid expanding `payment_method` (to reduce extra payload) while still ensuring we can read:
+ * - latest_charge.balance_transaction.fee
+ * - latest_charge.payment_method_details.card.brand/last4 (already present on the Charge object in practice)
+ */
+export async function stripeRetrievePaymentIntentForOfferingAugmentation(paymentIntentId: string) {
+    if (!paymentIntentId) throw new Error("Missing paymentIntentId");
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId, {
+        expand: ['latest_charge.balance_transaction']
+    });
+    return paymentIntent;
+}
+
 // --- Email Notification ---
 
 // Assuming imports need to be added/checked.
