@@ -2,11 +2,12 @@
 """
 Build Transaction Cache Script
 
-This script scans the `transactions` table, aggregates data by Year and Month,
-and populates the `transactions-cache` table.
+This script scans the legacy `transactions` table (v1) and the new `offering-transactions`
+table (v2), aggregates data by Year and Month, and populates the `transactions-cache` table.
 
 Usage:
     export TRANSACTIONS_TABLE=foundations.transactions
+    export OFFERING_TRANSACTIONS_TABLE=foundations.offering-transactions
     export TRANSACTIONS_CACHE_TABLE=foundations.transactions-cache
     python3 utils/build_transaction_cache.py --profile slsupport
 """
@@ -40,6 +41,15 @@ def build_cache(profile, tx_table_name, cache_table_name, events_table_name, dry
     tx_table = get_table(session, tx_table_name)
     cache_table = get_table(session, cache_table_name)
     events_table = get_table(session, events_table_name)
+    off_tx_table = None
+    # offering-transactions table is optional; if not provided, we'll build cache from legacy v1 only.
+    # This keeps the script safe when deploying before v2 migration/backfill completes.
+    off_tx_table_name = os.environ.get("OFFERING_TRANSACTIONS_TABLE")
+    if off_tx_table_name:
+        off_tx_table = get_table(session, off_tx_table_name)
+        print(f"Offering-transactions table: {off_tx_table_name}")
+    else:
+        print("Warning: OFFERING_TRANSACTIONS_TABLE env var not set; v2 cache contributions will be skipped.")
 
     # 1. Fetch Events and Build Category Map
     print("Fetching events...")
@@ -101,7 +111,7 @@ def build_cache(profile, tx_table_name, cache_table_name, events_table_name, dry
         'count': 0, 'amount': Decimal(0), 'stripeFee': Decimal(0), 'kmFee': Decimal(0)
     })
 
-    # Scan Transactions
+    # Scan Transactions (legacy v1)
     scan_kwargs = {}
     done = False
     start_key = None
@@ -209,6 +219,110 @@ def build_cache(profile, tx_table_name, cache_table_name, events_table_name, dry
         print(f"  Scanned {total_scanned}...", end='\r')
 
     print(f"\nScanning complete. {total_scanned} records processed.")
+
+    # ------------------------------------------------------------
+    # Scan offering-transactions (v2)
+    # We only include records that correspond to dashboard "COMPLETED"
+    # so cache-mode views remain consistent with the existing UI logic.
+    # ------------------------------------------------------------
+    if off_tx_table is not None:
+        scan_kwargs_v2 = {}
+        done_v2 = False
+        start_key_v2 = None
+        total_scanned_v2 = 0
+
+        print("Scanning offering-transactions (v2)...")
+        while not done_v2:
+            if start_key_v2:
+                scan_kwargs_v2['ExclusiveStartKey'] = start_key_v2
+
+            response_v2 = off_tx_table.scan(**scan_kwargs_v2)
+            items_v2 = response_v2.get('Items', [])
+
+            total_scanned_v2 += len(items_v2)
+
+            for rec in items_v2:
+                # Filter to "completed" for cache-mode
+                dashboard_status = rec.get("dashboardStatus")
+                dashboard_step = rec.get("dashboardStep")
+                if dashboard_status != "COMPLETED":
+                    continue
+                if dashboard_step != "confirmCardPayment":
+                    continue
+
+                # Parse timestamp
+                ts_str = (
+                    rec.get("dashboardTimestamp")
+                    or rec.get("succeededAt")
+                    or rec.get("createdAt")
+                    or rec.get("updatedAt")
+                )
+                if not ts_str:
+                    continue
+
+                try:
+                    dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                except ValueError:
+                    continue
+
+                year = dt.year
+                month = dt.month
+
+                aid = rec.get("eventCode")
+                if aid in ignored_aids:
+                    continue
+
+                category = aid_to_category.get(aid, "Uncategorized")
+
+                # Amounts: dashboardAmountCents is the amount used by the dashboard for COMPLETED rows.
+                amount_cents_raw = rec.get("dashboardAmountCents")
+                stripe_fee_cents_raw = rec.get("dashboardStripeFeeCents")
+                km_fee_dollars_raw = rec.get("dashboardKmFeeDollars")
+
+                if amount_cents_raw is None or stripe_fee_cents_raw is None or km_fee_dollars_raw is None:
+                    # If we haven't backfilled this record yet, we can't include it in cache-mode totals reliably.
+                    continue
+
+                amount = Decimal(str(amount_cents_raw))
+                fee = Decimal(str(stripe_fee_cents_raw))
+                km_fee = Decimal(str(km_fee_dollars_raw))
+
+                # Skip if anything is nonsensical
+                if amount is None or fee is None or km_fee is None:
+                    continue
+
+                y_key = year
+                m_key = f"{year}-{month:02d}"
+
+                # Update Year
+                years_data[y_key]['count'] += 1
+                years_data[y_key]['amount'] += amount
+                years_data[y_key]['stripeFee'] += fee
+                years_data[y_key]['kmFee'] += km_fee
+
+                # Update Month
+                months_data[m_key]['count'] += 1
+                months_data[m_key]['amount'] += amount
+                months_data[m_key]['stripeFee'] += fee
+                months_data[m_key]['kmFee'] += km_fee
+
+                # Update Category Year
+                category_years_data[(category, year)]['count'] += 1
+                category_years_data[(category, year)]['amount'] += amount
+                category_years_data[(category, year)]['stripeFee'] += fee
+                category_years_data[(category, year)]['kmFee'] += km_fee
+
+                # Update Category Month
+                category_months_data[(category, m_key)]['count'] += 1
+                category_months_data[(category, m_key)]['amount'] += amount
+                category_months_data[(category, m_key)]['stripeFee'] += fee
+                category_months_data[(category, m_key)]['kmFee'] += km_fee
+
+            start_key_v2 = response_v2.get('LastEvaluatedKey', None)
+            done_v2 = start_key_v2 is None
+            print(f"  [v2] Scanned {total_scanned_v2}...", end='\r')
+
+        print(f"\n[v2] Scanning complete. {total_scanned_v2} records processed.")
 
     # Write to Cache
     print("Writing to cache...")
