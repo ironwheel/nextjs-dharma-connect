@@ -14,6 +14,55 @@ from .config import (
 )
 from .models import WorkOrder, WorkOrderUpdate
 
+
+def pick_receipt_transaction_for_test(
+    eligible: List[Dict],
+    tester: Dict,
+    tester_id_from_work_order: str,
+) -> Optional[Dict]:
+    """
+    Choose one offering-transactions row for a receipt Test email.
+
+    ``eligible`` should be the same list Dry-Run uses (``get_offering_transactions()``).
+
+    Preference order:
+    1. pid matches tester student id (record ``id`` or work-order tester id — some items omit ``id``)
+    2. payerEmail matches tester email (checkout pid vs configured tester id can differ)
+    3. first eligible row so Test still runs when Dry-Run finds transactions
+    """
+    if not eligible:
+        return None
+    pid_hint = (tester.get("id") or tester_id_from_work_order or "").strip()
+    if pid_hint:
+        for item in eligible:
+            tx_pid = item.get("pid") or item.get("PID") or ""
+            if str(tx_pid) == str(pid_hint):
+                return item
+    email_norm = (tester.get("email") or "").strip().lower()
+    if email_norm:
+        for item in eligible:
+            pe = item.get("payerEmail") or item.get("payer_email") or ""
+            if isinstance(pe, str) and pe.strip().lower() == email_norm:
+                return item
+    return eligible[0]
+
+
+def _offering_tx_needs_receipt(item: Dict) -> bool:
+    """
+    True if this offering-transactions row is eligible for a receipt email.
+    Matches bulk-send rules: succeeded, and no sent timestamp in emailReceiptSent
+    or legacy emailReceipt.
+    """
+    if item.get("status") != "succeeded":
+        return False
+    if item.get("emailReceiptSent"):
+        return False
+    er = item.get("emailReceipt")
+    if er not in (None, False, ""):
+        return False
+    return True
+
+
 # Use settings from the centralized config object
 DYNAMODB_TABLE = config.work_orders_table
 SQS_QUEUE_URL = config.sqs_queue_url
@@ -618,8 +667,7 @@ class AWSClient:
                     response = table.scan()
                 
                 for item in response.get('Items', []):
-                    # Check for succeeded status and missing/false emailReceiptSent
-                    if item.get('status') == 'succeeded' and not item.get('emailReceiptSent'):
+                    if _offering_tx_needs_receipt(item):
                         transactions.append(item)
                         
                 last_evaluated_key = response.get('LastEvaluatedKey')
@@ -631,19 +679,35 @@ class AWSClient:
             print(f"Error getting offering transactions: {e}")
             return []
 
-    def get_single_offering_transaction(self) -> Optional[Dict]:
-        """Get a single successful offering transaction for testing purposes."""
+    def get_single_offering_transaction(self, pid: Optional[str] = None) -> Optional[Dict]:
+        """
+        Get one offering-transactions row suitable for a receipt test send.
+
+        Paginates the table and filters in Python. (Scan with Limit=1 applies to items
+        *evaluated* before the filter, so it often returned zero matches.)
+
+        When ``pid`` is set (tester's student id), only that participant's rows are
+        considered.
+        """
         try:
             table = self.dynamodb.Table(OFFERING_TRANSACTIONS_TABLE)
-            response = table.scan(
-                FilterExpression='#status = :status AND attribute_not_exists(emailReceiptSent)',
-                ExpressionAttributeNames={'#status': 'status'},
-                ExpressionAttributeValues={':status': 'succeeded'},
-                Limit=1
-            )
-            items = response.get('Items', [])
-            if items:
-                return items[0]
+            last_key: Optional[Dict] = None
+            while True:
+                scan_kw: Dict = {}
+                if last_key:
+                    scan_kw["ExclusiveStartKey"] = last_key
+                response = table.scan(**scan_kw)
+                for item in response.get("Items", []):
+                    if not _offering_tx_needs_receipt(item):
+                        continue
+                    if pid:
+                        tx_pid = item.get("pid") or item.get("PID")
+                        if tx_pid != pid:
+                            continue
+                    return item
+                last_key = response.get("LastEvaluatedKey")
+                if not last_key:
+                    break
             return None
         except Exception as e:
             print(f"Error getting single offering transaction: {e}")

@@ -55,6 +55,23 @@ interface Event {
     category?: string;
 }
 
+/** RegLink v2 persists installment `offeringAmount` in cents; legacy reglink uses dollars. Retreat config stays in dollars. */
+function installmentOfferingHistoryUsesCents(eventConfig: any): boolean {
+    return eventConfig?.reglinkv2 === true;
+}
+
+/** Net due for one retreat in the same units as `offeringHistory.*.installments.*.offeringAmount`. */
+function retreatNetDueMatchingHistory(rc: any, historyUsesCents: boolean): number {
+    const tot = Number(rc?.offeringTotal ?? 0);
+    const cash = Number(rc?.offeringCashTotal ?? 0);
+    const netDollars = Math.max(0, tot - cash);
+    return historyUsesCents ? Math.round(netDollars * 100) : netDollars;
+}
+
+/** Grid display: dollars either way (history is cents when reglinkv2). */
+function installmentAmountForDisplay(internalInHistoryUnits: number, historyUsesCents: boolean): number {
+    return historyUsesCents ? Math.round(internalInHistoryUnits) / 100 : internalInHistoryUnits;
+}
 
 
 interface View {
@@ -2272,21 +2289,24 @@ const Home = () => {
                     if (currentEvent.config?.offeringPresentation !== 'installments') {
                         if (!cond.boolValue) return false;
                     } else {
+                        const historyUsesCents = installmentOfferingHistoryUsesCents(currentEvent.config);
                         let limitCount = 100;
                         let count = 0;
                         if (eventRecordForStudent.limitFee) limitCount = 2;
                         if (eventRecordForStudent.whichRetreats && currentEvent.config?.whichRetreatsConfig) {
                             for (const [retreat, value] of Object.entries(eventRecordForStudent.whichRetreats)) {
                                 if (value && currentEvent.config.whichRetreatsConfig[retreat]) {
-                                    installmentTotal += currentEvent.config.whichRetreatsConfig[retreat].offeringTotal;
+                                    const rc = currentEvent.config.whichRetreatsConfig[retreat];
+                                    installmentTotal += retreatNetDueMatchingHistory(rc, historyUsesCents);
                                     count += 1;
                                     if (count >= limitCount) break;
                                 }
                             }
                         }
                         const installments = eventRecordForStudent.offeringHistory[subEventKey]?.installments || {};
-                        for (const installmentEntry of Object.values<any>(installments)) {
-                            installmentReceived += installmentEntry.offeringAmount || 0;
+                        for (const [instKey, installmentEntry] of Object.entries<any>(installments)) {
+                            if (instKey === 'refunded') continue;
+                            installmentReceived += installmentEntry?.offeringAmount || 0;
                         }
                         if (installmentReceived === 0) {
                             if (cond.boolValue) {
@@ -2587,13 +2607,15 @@ const Home = () => {
                             offering = true;
                             offeringDate = person.offeringHistory[selectedSubEvent]?.offeringTime?.substring(0, 10) ?? '';
                         } else {
+                            const historyUsesCents = installmentOfferingHistoryUsesCents(currentEvent.config);
                             let limitCount = 100;
                             let count = 0;
                             if (person.limitFee) limitCount = 2;
                             if (person.whichRetreats && currentEvent.config?.whichRetreatsConfig) {
                                 for (const [retreat, value] of Object.entries(person.whichRetreats)) {
                                     if (value && currentEvent.config.whichRetreatsConfig[retreat]) {
-                                        installmentTotal += currentEvent.config.whichRetreatsConfig[retreat].offeringTotal;
+                                        const rc = currentEvent.config.whichRetreatsConfig[retreat];
+                                        installmentTotal += retreatNetDueMatchingHistory(rc, historyUsesCents);
                                         count += 1;
                                         if (count >= limitCount) break;
                                     }
@@ -2602,9 +2624,11 @@ const Home = () => {
                             let lastOfferingTime = '';
                             const installments = person.offeringHistory[selectedSubEvent]?.installments || {};
                             for (const [installmentName, installmentEntry] of Object.entries<any>(installments)) {
-                                if (installmentName !== 'refunded') {
-                                    installmentReceived += installmentEntry.offeringAmount;
-                                    lastOfferingTime = installmentEntry.offeringTime;
+                                if (installmentName === 'refunded') continue;
+                                installmentReceived += installmentEntry?.offeringAmount || 0;
+                                const t = installmentEntry?.offeringTime;
+                                if (t && (!lastOfferingTime || t > lastOfferingTime)) {
+                                    lastOfferingTime = t;
                                 }
                             }
                             if (installmentReceived === 0) {
@@ -2633,6 +2657,7 @@ const Home = () => {
                         const aid = typeof currentEvent.aid === 'string' ? currentEvent.aid : undefined;
                         const selectedSubEvent = typeof currentEvent.selectedSubEvent === 'string' ? currentEvent.selectedSubEvent : undefined;
                         const person = aid ? student.programs?.[aid] : undefined;
+                        const historyUsesCents = installmentOfferingHistoryUsesCents(currentEvent.config);
                         let installmentTotal = 0;
                         let installmentReceived = 0;
                         let installmentRefunded = 0;
@@ -2645,7 +2670,8 @@ const Home = () => {
                             if (person.whichRetreats && currentEvent.config?.whichRetreatsConfig) {
                                 for (const [retreat, value] of Object.entries(person.whichRetreats)) {
                                     if (value && currentEvent.config.whichRetreatsConfig[retreat]) {
-                                        installmentTotal += currentEvent.config.whichRetreatsConfig[retreat].offeringTotal;
+                                        const rc = currentEvent.config.whichRetreatsConfig[retreat];
+                                        installmentTotal += retreatNetDueMatchingHistory(rc, historyUsesCents);
                                         count += 1;
                                         if (count >= limitCount) break;
                                     }
@@ -2657,22 +2683,25 @@ const Home = () => {
                                 const installments = person.offeringHistory[selectedSubEvent].installments;
                                 for (const [installmentName, installmentEntry] of Object.entries<any>(installments)) {
                                     if (installmentName === 'refunded') {
-                                        installmentRefunded += installmentEntry.offeringAmount || 0;
+                                        installmentRefunded += installmentEntry?.offeringAmount || 0;
                                     } else {
-                                        installmentReceived += installmentEntry.offeringAmount || 0;
+                                        installmentReceived += installmentEntry?.offeringAmount || 0;
                                     }
                                 }
                             }
                         }
 
                         if (field === 'installmentsTotal') {
-                            rowValues[field] = installmentTotal;
+                            rowValues[field] = installmentAmountForDisplay(installmentTotal, historyUsesCents);
                         } else if (field === 'installmentsReceived') {
-                            rowValues[field] = installmentReceived;
+                            rowValues[field] = installmentAmountForDisplay(installmentReceived, historyUsesCents);
                         } else if (field === 'installmentsDue') {
-                            rowValues[field] = installmentTotal - installmentReceived;
+                            rowValues[field] = installmentAmountForDisplay(
+                                installmentTotal - installmentReceived,
+                                historyUsesCents
+                            );
                         } else if (field === 'installmentsRefunded') {
-                            rowValues[field] = installmentRefunded;
+                            rowValues[field] = installmentAmountForDisplay(installmentRefunded, historyUsesCents);
                         }
                     }
                 } else if (field === 'spokenLanguage') {

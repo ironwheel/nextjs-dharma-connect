@@ -1035,13 +1035,40 @@ async function dispatchOffering(
           res.setHeader('Allow', 'POST');
           return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
         }
-        const { paymentIntentId, pid, eventCode, cart, subEventNames } = req.body;
+        const { paymentIntentId, pid, eventCode, cart, subEventNames, mockPayment } = req.body;
         if (!paymentIntentId || !pid || !eventCode || !Array.isArray(cart)) {
           return res.status(400).json({ error: 'Missing required parameters (paymentIntentId, pid, eventCode, cart)' });
         }
         const subEvents = Array.isArray(subEventNames) ? subEventNames : [];
-        await completeOffering(paymentIntentId, pid, eventCode, cart, subEvents, appRole, oidcToken);
+        await completeOffering(paymentIntentId, pid, eventCode, cart, subEvents, { mockPayment: mockPayment === true }, appRole, oidcToken);
         return res.status(200).json({ success: true });
+      }
+      case 'mock-create': {
+        if (req.method !== 'POST') {
+          res.setHeader('Allow', 'POST');
+          return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
+        }
+        const { pid, amount, currency, description, cart, summaryString, skuSummary, eventCode, eventName, payerEmail } = req.body;
+        if (!pid || !amount || !currency || !description || !eventCode || !Array.isArray(cart)) {
+          return res.status(400).json({
+            error: 'Missing required parameters (pid, amount, currency, description, eventCode, cart)'
+          });
+        }
+        const mockId = `pi_mock_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        await putOfferingTransaction({
+          paymentIntentId: mockId,
+          pid,
+          eventCode,
+          amount: parseInt(String(amount), 10),
+          currency,
+          description,
+          cart,
+          summaryString: summaryString || '',
+          skuSummary: Array.isArray(skuSummary) ? skuSummary : [],
+          eventName: eventName || undefined,
+          payerEmail: payerEmail || undefined,
+        }, appRole, oidcToken);
+        return res.status(200).json({ id: mockId });
       }
       default:
         return res.status(404).json({ error: `Unknown offering action: ${action}` });

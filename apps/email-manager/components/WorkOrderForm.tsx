@@ -166,6 +166,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
     const [optionsLoaded, setOptionsLoaded] = useState(false)
     const [testers, setTesters] = useState<string[]>([])
     const [showTesterModal, setShowTesterModal] = useState(false)
+    const [s3HTMLPaths, setS3HTMLPaths] = useState<Record<string, string>>({})
     const [sendContinuously, setSendContinuously] = useState(false)
     const [sendUntil, setSendUntil] = useState('')
     const [sendInterval, setSendInterval] = useState(process.env.EMAIL_CONTINUOUS_SLEEP_SECS || '600')
@@ -260,6 +261,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     setLanguages({})
                     setSubjects({})
                     setIsTransactionReceipt(false)
+                    setS3HTMLPaths({})
                 }
                 setOptionsLoaded(true)
             } catch {
@@ -303,6 +305,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     setRevisionEnabled(!!response.revision)  // Enable if revision exists
                     setRevision(response.revision || '1')  // Set revision or default to "1"
                     setIsTransactionReceipt(response.transactionReceipt || false)
+                    setS3HTMLPaths(response.s3HTMLPaths || {})
                 }
             }).catch(error => {
                 console.error('Error loading work order:', error)
@@ -333,6 +336,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             setRevisionEnabled(!!response.revision)  // Enable if revision exists
             setRevision(response.revision || '1')  // Set revision or default to "1"
             setIsTransactionReceipt(response.transactionReceipt || false)
+            setS3HTMLPaths(response.s3HTMLPaths || {})
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [optionsLoaded])
@@ -563,6 +567,15 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     )
                 }
 
+                if (isTransactionReceipt) {
+                    const stableStringify = (o: Record<string, string>) =>
+                        JSON.stringify(Object.keys(o).sort().reduce((acc, k) => ({ ...acc, [k]: o[k] }), {}))
+                    const existingPaths = existingWorkOrder.s3HTMLPaths || {}
+                    const currentPaths = s3HTMLPaths || {}
+                    const receiptPathsChanged = stableStringify(existingPaths) !== stableStringify(currentPaths)
+                    if (receiptPathsChanged) resetReasons.push('S3 HTML paths changed')
+                }
+
                 structuralFieldsChanged = resetReasons.length > 0
 
                 shouldResetSteps = structuralFieldsChanged
@@ -660,8 +673,11 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             // 3. Otherwise, if editing, preserve the existing s3HTMLPaths
             // 4. Otherwise (new work order with no inheritance), leave undefined
             let s3HTMLPathsValue = inheritedFields.s3HTMLPaths;
-            // Check if revision changed - if so, clear s3HTMLPaths
-            if (id && loadedWorkOrderRef.current) {
+            if (isTransactionReceipt) {
+                // For transaction receipt work orders, operator-provided S3 paths are the source of truth.
+                s3HTMLPathsValue = s3HTMLPaths
+            } else if (id && loadedWorkOrderRef.current) {
+                // Check if revision changed - if so, clear s3HTMLPaths
                 const currentRevision = revisionEnabled ? revision : undefined
                 const existingRevision = loadedWorkOrderRef.current.revision
                 const revisionChanged = currentRevision !== existingRevision
@@ -923,6 +939,38 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     </Form.Text>
                 )}
             </Form.Group>
+
+            {isTransactionReceipt && (
+                <Form.Group className="mb-3">
+                    <Form.Label>S3 HTML Paths (Receipt Emails)</Form.Label>
+                    <Form.Text className="text-light" style={{ opacity: 0.8 }}>
+                        Provide a full `https://...` S3 URL per active language. When enabled, the agent will skip
+                        Mailchimp-to-S3 copying and will QA/read directly from these paths.
+                    </Form.Text>
+
+                    <div className="d-flex flex-column gap-2 mt-2">
+                        {languageList
+                            .filter(lang => Boolean(languages[lang]))
+                            .map(lang => (
+                                <div key={lang}>
+                                    <Form.Label className="mb-1">{lang.toUpperCase()} Template URL</Form.Label>
+                                    <Form.Control
+                                        type="url"
+                                        value={s3HTMLPaths[lang] || ''}
+                                        onChange={e => setS3HTMLPaths(prev => ({ ...prev, [lang]: e.target.value }))}
+                                        placeholder="https://bucket-name.s3.amazonaws.com/path/to/template.html"
+                                        disabled={Boolean(selectedStageRecord?.parentStages && selectedStageRecord.parentStages.length > 0)}
+                                        className="bg-dark text-light border-secondary"
+                                    />
+                                </div>
+                            ))}
+
+                        {languageList.filter(lang => Boolean(languages[lang])).length === 0 && (
+                            <div className="text-muted">Select at least one language to set S3 HTML paths.</div>
+                        )}
+                    </div>
+                </Form.Group>
+            )}
 
             <Form.Group className="mb-3">
                 <Form.Label>Account</Form.Label>

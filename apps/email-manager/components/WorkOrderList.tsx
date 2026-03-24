@@ -41,6 +41,7 @@ interface WorkOrder {
     sleepUntil?: string
     revision?: string
     transactionReceipt?: boolean
+    s3HTMLPaths?: Record<string, string>
 }
 
 interface RecipientEntry {
@@ -488,6 +489,7 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                     sleepUntil: workOrder.sleepUntil,
                     revision: workOrder.revision,
                     transactionReceipt: workOrder.transactionReceipt,
+                    s3HTMLPaths: workOrder.s3HTMLPaths,
                 }
 
                 setWorkOrdersLocal(prevOrders => {
