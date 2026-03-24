@@ -77,6 +77,61 @@ class PrepareStep:
         else:
             self.log('debug', f"[DEBUG] Stage '{work_order.stage}' has no parent stages. Using current stage for template lookup.")
 
+        # Transaction receipt mode:
+        # - Do NOT copy Mailchimp templates to S3.
+        # - Assume the operator-provided work_order.s3HTMLPaths already point to valid pre-existing HTML.
+        # - Still perform QA checks and update events.embeddedEmails pointers.
+        if getattr(work_order, 'transactionReceipt', False):
+            if not getattr(work_order, 's3HTMLPaths', None) or not isinstance(work_order.s3HTMLPaths, dict):
+                raise ValueError("transactionReceipt is enabled but work_order.s3HTMLPaths is missing or not a dict")
+
+            for lang in work_order.languages.keys():
+                if not work_order.languages[lang]:
+                    continue  # Skip disabled languages
+
+                await self._update_progress(work_order, f"Processing {lang} language...")
+
+                s3_url = work_order.s3HTMLPaths.get(lang)
+                if not s3_url:
+                    raise ValueError(f"transactionReceipt is enabled but missing s3HTMLPaths for language '{lang}'")
+
+                await self._update_progress(work_order, f"Retrieving pre-existing HTML from S3 for {lang}...")
+                html = self.aws_client.get_s3_object_content(s3_url) if self.aws_client else None
+                if not html:
+                    raise ValueError(f"Failed to retrieve HTML content from S3 for {lang} (URL: {s3_url})")
+
+                # Perform QA checks using the HTML as provided by the operator
+                await self._update_progress(work_order, f"Performing QA checks for {lang}...")
+                self._perform_qa(html, work_order, lang)
+
+                # Update embeddedEmails in events table to point at the operator-provided HTML
+                await self._update_progress(work_order, f"Updating embeddedEmails for {lang}...")
+                if self.aws_client:
+                    success = self.aws_client.update_event_embedded_emails(
+                        work_order.eventCode,
+                        work_order.subEvent,
+                        work_order.stage,
+                        lang,
+                        s3_url
+                    )
+                    if not success:
+                        error_msg = f"Failed to update embeddedEmails for {lang} - this is a critical error"
+                        self.log('error', f"[ERROR] {error_msg}")
+                        self.log('error', f"[ERROR] This failure indicates the events table update failed")
+                        raise ValueError(error_msg)
+                else:
+                    error_msg = f"No AWS client available - cannot update embeddedEmails for {lang}"
+                    self.log('error', f"[ERROR] {error_msg}")
+                    raise ValueError(error_msg)
+
+                await self._update_progress(work_order, f"Successfully completed {lang} language")
+
+            await self._update_progress(work_order, "Prepare step completed successfully")
+            step.message = "Prepare step completed successfully"
+            if hasattr(step, 'status'):
+                step.status = getattr(step, 'status', None) or 'complete'
+            return True
+
         # Process each language in the work order
         for lang in work_order.languages.keys():
             if not work_order.languages[lang]:

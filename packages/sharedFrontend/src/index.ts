@@ -9,6 +9,7 @@ export * from './httpClient';
 export * from './fingerprint';
 export * from './apiActions';
 export * from './eligible';
+export * from './installmentsHelpers';
 export * from './layout';
 export * from './prompts';
 export { default as AuthVerification } from './AuthVerification';

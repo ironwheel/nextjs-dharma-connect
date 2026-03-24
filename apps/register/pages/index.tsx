@@ -1,13 +1,39 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { getTableItem, getTableItemOrNull, getAllTableItemsFiltered, getAllTableItems, putTableItem, deleteTableItemWithSortKey, checkEligibility, completeOffering } from 'sharedFrontend';
+import {
+    getTableItem,
+    getTableItemOrNull,
+    getAllTableItemsFiltered,
+    getAllTableItems,
+    putTableItem,
+    deleteTableItemWithSortKey,
+    checkEligibility,
+    completeOffering,
+    sumInstallmentPaymentsCents,
+} from 'sharedFrontend';
 import { ScriptEngine } from '../components/script/ScriptEngine';
 import { promptLookup } from '../components/script/StepComponents';
 import { getScriptSteps, stepRegistry } from '../config/stepRegistry';
 import { ScriptDefinition, ScriptContext, ScriptStep } from '../components/script/types';
 import { Offer } from '../components/Offer';
 import { useTheme, type ThemeId } from '../context/ThemeContext';
+
+/** True if paymentIntentId appears on a subevent entry or nested installments line (stateless installments). */
+function offeringHistoryRecordsPaymentIntent(history: Record<string, any> | undefined, paymentIntentId: string): boolean {
+    if (!history || typeof paymentIntentId !== 'string') return false;
+    for (const entry of Object.values(history)) {
+        if (!entry || typeof entry !== 'object') continue;
+        if ((entry as any).offeringIntent === paymentIntentId) return true;
+        const inst = (entry as any).installments;
+        if (inst && typeof inst === 'object') {
+            for (const line of Object.values(inst)) {
+                if (line && typeof line === 'object' && (line as any).offeringIntent === paymentIntentId) return true;
+            }
+        }
+    }
+    return false;
+}
 
 /** One row per storage field for debug table. displayPath uses "events"; storagePath is path into student (no "student." prefix). */
 function getStepStorageRows(stepId: string, eventCode: string): Array<{ scriptStep: string; displayPath: string; storagePath: string | null }> {
@@ -84,6 +110,90 @@ function formatDisplayValue(val: any): string {
     } catch {
         return String(val);
     }
+}
+
+function currencySymbol(currency: string): string {
+    return currency === 'USD' ? '$' : currency === 'CAD' ? '$' : currency === 'EUR' ? '€' : '$';
+}
+
+function formatAmount(amountCents: number, currency: string): string {
+    return `${currencySymbol(currency)}${(amountCents / 100).toFixed(2)} ${currency}`;
+}
+
+/** Same subevent key as Offer.tsx installments (retreat if present, else earliest dated subevent). */
+function getInstallmentsSubEventNameForEvent(event: any): string {
+    if (event?.subEvents?.retreat) return 'retreat';
+    const subEvents = event?.subEvents ? Object.entries(event.subEvents) : [];
+    const withDate = subEvents.map(([name, se]: [string, any]) => {
+        const d = se?.date;
+        const t =
+            typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)
+                ? new Date(d + 'T12:00:00').getTime()
+                : Number.MAX_SAFE_INTEGER;
+        return { name, t };
+    });
+    withDate.sort((a, b) => a.t - b.t);
+    return withDate[0]?.name || (subEvents[0]?.[0] as string) || 'retreat';
+}
+
+function installmentsPersonLineTotals(
+    program: any,
+    event: any,
+    subEventName: string,
+): { maximumDueCents: number; offeredSoFarCents: number; balanceDueCents: number } | null {
+    const whichRetreatsConfig = event?.config?.whichRetreatsConfig || {};
+    const whichRetreats = program?.whichRetreats || {};
+    const selectedRetreats = Object.keys(whichRetreats).filter((k) => whichRetreats[k] === true);
+    if (selectedRetreats.length === 0) return null;
+    for (const k of selectedRetreats) {
+        if (!whichRetreatsConfig[k]) return null;
+    }
+    let maximumDueCents = 0;
+    for (const retreatKey of selectedRetreats) {
+        const cfg = whichRetreatsConfig[retreatKey];
+        const total = Number(cfg?.offeringTotal ?? 0);
+        const cashTotal = Number(cfg?.offeringCashTotal ?? 0);
+        maximumDueCents += Math.max(0, Math.round((total - cashTotal) * 100));
+    }
+    const historyEntry = program?.offeringHistory?.[subEventName] || {};
+    const installmentHistory = historyEntry?.installments || {};
+    const offeredSoFarCents = sumInstallmentPaymentsCents(installmentHistory);
+    const balanceDueCents = Math.max(0, maximumDueCents - offeredSoFarCents);
+    return { maximumDueCents, offeredSoFarCents, balanceDueCents };
+}
+
+async function fetchFafAggregatedInstallmentTotals(
+    student: any,
+    event: any,
+    activeEventCode: string,
+    pid: string,
+    hash: string,
+): Promise<{ offeringsReceivedCents: number; balanceDueCents: number }> {
+    const subEventName = getInstallmentsSubEventNameForEvent(event);
+    let offeringsReceivedCents = 0;
+    let balanceDueCents = 0;
+    const self = installmentsPersonLineTotals(student?.programs?.[activeEventCode], event, subEventName);
+    if (self) {
+        offeringsReceivedCents += self.offeredSoFarCents;
+        balanceDueCents += self.balanceDueCents;
+    }
+    const fafIds = Array.isArray(student?.faf) ? student.faf : [];
+    for (const fid of fafIds) {
+        try {
+            const f = await getTableItem('students', fid, pid, hash);
+            if (!f || (f as any).redirected) continue;
+            const fp = (f as any).programs?.[activeEventCode];
+            if (fp?.join !== true) continue;
+            const t = installmentsPersonLineTotals(fp, event, subEventName);
+            if (t) {
+                offeringsReceivedCents += t.offeredSoFarCents;
+                balanceDueCents += t.balanceDueCents;
+            }
+        } catch {
+            /* skip missing FAF row */
+        }
+    }
+    return { offeringsReceivedCents, balanceDueCents };
 }
 
 const THEMES: { id: ThemeId; label: string; subtitle: string }[] = [
@@ -219,11 +329,48 @@ export default function Home() {
     /** When phase is offeringCompleteCold: 'warm' = just completed via Stripe callback this session; 'cold' = loaded with existing offering. */
     const [offeringCompleteVariant, setOfferingCompleteVariant] = useState<'warm' | 'cold'>('cold');
 
+    /** Installments totals across registrant + joined FAF (loaded async on offering completion screen). */
+    const [fafAggregatedInstallments, setFafAggregatedInstallments] = useState<{
+        offeringsReceivedCents: number;
+        balanceDueCents: number;
+    } | null>(null);
+
     // Test mode config: clear student data options, oath pool eligibility override
     const [testModeClearStudent, setTestModeClearStudent] = useState(false);
     const [testModeClearStudentKeepPrograms, setTestModeClearStudentKeepPrograms] = useState(false);
+    const [testModeClearOfferingHistoryOnly, setTestModeClearOfferingHistoryOnly] = useState(false);
     const [testModeOathEligibility, setTestModeOathEligibility] = useState<'actual' | 'true' | 'false'>('actual');
     const [testModeConfigAccepted, setTestModeConfigAccepted] = useState(false);
+
+    useEffect(() => {
+        if (!data?.student || !data?.event) return;
+        if (phase !== 'offeringCompleteCold') {
+            setFafAggregatedInstallments(null);
+            return;
+        }
+        if (data.event?.config?.offeringPresentation !== 'installments') {
+            setFafAggregatedInstallments(null);
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            try {
+                const agg = await fetchFafAggregatedInstallmentTotals(
+                    data.student,
+                    data.event,
+                    activeEventCode,
+                    studentPid,
+                    studentHash,
+                );
+                if (!cancelled) setFafAggregatedInstallments(agg);
+            } catch {
+                if (!cancelled) setFafAggregatedInstallments(null);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [phase, data?.student, data?.event, activeEventCode, studentPid, studentHash]);
 
     useEffect(() => {
         if (!data) return;
@@ -241,9 +388,7 @@ export default function Home() {
             const historyForPi = progForPi?.offeringHistory || {};
             const alreadyAccounted =
                 typeof paymentIntentId === 'string' &&
-                Object.values(historyForPi).some(
-                    (entry: any) => entry && entry.offeringIntent === paymentIntentId,
-                );
+                offeringHistoryRecordsPaymentIntent(historyForPi as Record<string, any>, paymentIntentId);
 
             if (!alreadyAccounted) {
                 if (
@@ -259,12 +404,6 @@ export default function Home() {
             // Fall through when alreadyAccounted === true
         }
 
-        // Test mode: show config landing before script (only until user clicks Start Registration Test)
-        if (student?.debug?.registerTest === true && !testModeConfigAccepted) {
-            setPhase('testModeConfig');
-            return;
-        }
-
         // Check if already joined (supplication step complete: join and visibility must both be set)
         const prog = student.programs?.[activeEventCode];
         const hasJoinYes = prog?.join === true || prog?.joinMY === true || prog?.joinVY === true;
@@ -273,6 +412,12 @@ export default function Home() {
         const accepted = prog?.accepted;
         const offerOnly = event.config?.offerOnly;
         const needAcceptance = event.config?.needAcceptance === true;
+
+        // Test mode: always show config landing first (until user clicks Start Registration Test).
+        if (student?.debug?.registerTest === true && !testModeConfigAccepted) {
+            setPhase('testModeConfig');
+            return;
+        }
         const hasAnyOffering =
             !!prog?.offeringHistory && Object.keys(prog.offeringHistory).length > 0;
 
@@ -283,13 +428,39 @@ export default function Home() {
         const unpaidSubEvents = Object.keys(subEventsObj).filter((name) => !offeringHistory[name]);
         const hasUnpaidSubEvents = unpaidSubEvents.length > 0;
 
+        const whichRetreatsConfig = event.config?.whichRetreatsConfig || {};
+        const whichRetreats = prog?.whichRetreats || {};
+        const selectedRetreats = Object.keys(whichRetreats).filter((k) => whichRetreats[k] === true);
+        const installmentsDueCents = selectedRetreats.reduce((sum: number, retreatKey: string) => {
+            const cfg = whichRetreatsConfig?.[retreatKey];
+            const total = Number(cfg?.offeringTotal ?? 0);
+            const cash = Number(cfg?.offeringCashTotal ?? 0);
+            return sum + Math.max(0, Math.round((total - cash) * 100));
+        }, 0);
+        const installmentsOfferedCents = Object.values(offeringHistory || {}).reduce((sum: number, subEntry: any) => {
+            return sum + sumInstallmentPaymentsCents(subEntry?.installments);
+        }, 0);
+        const installmentsStatus: 'incomplete' | 'complete' | 'overpaid' =
+            installmentsOfferedCents > installmentsDueCents
+                ? 'overpaid'
+                : installmentsOfferedCents >= installmentsDueCents && installmentsDueCents > 0
+                    ? 'complete'
+                    : 'incomplete';
+
         // If an offering has already been recorded for this event:
-        // - when nextAndRemaining and there are unpaid subevents, stay on the offering card
-        // - otherwise, show the terminal "offeringCompleteCold" card.
+        // - nextAndRemaining: complete only when all subevents paid
+        // - installments: complete only when combined selected-retreat balance is fully paid
+        // - otherwise, show terminal offering completion card.
         if (hasAnyOffering) {
             if (offeringPresentation === 'nextAndRemaining' && hasUnpaidSubEvents) {
                 // Do not override the just-completed warm card; only redirect to offer
                 // when we're not currently showing the warm completion variant.
+                if (!(phase === 'offeringCompleteCold' && offeringCompleteVariant === 'warm')) {
+                    if (phase !== 'offer') {
+                        setPhase('offer');
+                    }
+                }
+            } else if (offeringPresentation === 'installments' && installmentsStatus !== 'complete') {
                 if (!(phase === 'offeringCompleteCold' && offeringCompleteVariant === 'warm')) {
                     if (phase !== 'offer') {
                         setPhase('offer');
@@ -483,23 +654,48 @@ export default function Home() {
         setPhase('debugTable');
     };
 
-    const handleTestModeConfigContinue = () => {
+    const handleTestModeConfigContinue = async () => {
         if (!data) return;
         setTestModeConfigAccepted(true);
         let student = data.student;
+        let didMutateStudent = false;
         if (testModeClearStudent) {
             const keepKeys = ['id', 'first', 'last', 'email', 'debug'];
             student = Object.fromEntries(
                 keepKeys.filter((k) => student[k] !== undefined).map((k) => [k, student[k]])
             ) as any;
+            didMutateStudent = true;
         } else if (testModeClearStudentKeepPrograms) {
             const keepKeys = ['id', 'first', 'last', 'email', 'debug', 'programs'];
             student = Object.fromEntries(
                 keepKeys.filter((k) => student[k] !== undefined).map((k) => [k, student[k]])
             ) as any;
+            didMutateStudent = true;
+        } else if (testModeClearOfferingHistoryOnly) {
+            student = JSON.parse(JSON.stringify(student));
+            const programs = student.programs || {};
+            if (programs[activeEventCode]) {
+                const eventProgram = { ...programs[activeEventCode] };
+                if (Object.prototype.hasOwnProperty.call(eventProgram, 'offeringHistory')) {
+                    delete eventProgram.offeringHistory;
+                }
+                programs[activeEventCode] = eventProgram;
+            }
+            student.programs = programs;
+            didMutateStudent = true;
+        }
+
+        if (didMutateStudent) {
+            try {
+                await putTableItem('students', studentPid, student, studentPid, studentHash);
+            } catch (err: any) {
+                console.error('Failed to persist test mode student reset option', err);
+                // Keep local state update so test mode can still proceed.
+            }
         }
         setData({ ...data, student });
-        setPhase('join');
+        // Re-run normal phase determination after test config is accepted.
+        setPhase('loading');
     };
 
     const handleLastStepNext = async () => {
@@ -595,6 +791,35 @@ export default function Home() {
         typeof rawEventImage === 'string' && (rawEventImage.startsWith('http://') || rawEventImage.startsWith('https://'))
             ? rawEventImage
             : null;
+    const activeProgram = data.student?.programs?.[activeEventCode] || {};
+    const activeOfferingHistory = activeProgram?.offeringHistory || {};
+    const isInstallmentsPresentation = data.event?.config?.offeringPresentation === 'installments';
+    const whichRetreatsConfig = data.event?.config?.whichRetreatsConfig || {};
+    const selectedRetreats = Object.entries(activeProgram?.whichRetreats || {})
+        .filter(([, selected]) => selected === true)
+        .map(([k]) => k);
+    const installmentsDueCents = selectedRetreats.reduce((sum: number, retreatKey: string) => {
+        const cfg = (whichRetreatsConfig as any)?.[retreatKey];
+        const total = Number(cfg?.offeringTotal ?? 0);
+        const cash = Number(cfg?.offeringCashTotal ?? 0);
+        return sum + Math.max(0, Math.round((total - cash) * 100));
+    }, 0);
+    const offeringsReceivedCents = Object.values(activeOfferingHistory || {}).reduce((sum: number, subEntry: any) => {
+        return sum + sumInstallmentPaymentsCents(subEntry?.installments);
+    }, 0);
+    const installmentsBalanceDueCents = Math.max(0, installmentsDueCents - offeringsReceivedCents);
+    const installmentsCurrency = (data.event?.config?.offeringCurrency as string) || 'USD';
+
+    const fafInstallTotalsForComplete =
+        phase === 'offeringCompleteCold' && isInstallmentsPresentation ? fafAggregatedInstallments : null;
+    const offeringsReceivedCentsDisplay =
+        fafInstallTotalsForComplete !== null
+            ? fafInstallTotalsForComplete.offeringsReceivedCents
+            : offeringsReceivedCents;
+    const installmentsBalanceDueCentsDisplay =
+        fafInstallTotalsForComplete !== null
+            ? fafInstallTotalsForComplete.balanceDueCents
+            : installmentsBalanceDueCents;
 
     return (
         <div className="min-h-screen bg-reg-page text-reg-text font-sans">
@@ -658,7 +883,10 @@ export default function Home() {
                                     checked={testModeClearStudent}
                                     onChange={(e) => {
                                         setTestModeClearStudent(e.target.checked);
-                                        if (e.target.checked) setTestModeClearStudentKeepPrograms(false);
+                                        if (e.target.checked) {
+                                            setTestModeClearStudentKeepPrograms(false);
+                                            setTestModeClearOfferingHistoryOnly(false);
+                                        }
                                     }}
                                     className="mt-1 rounded text-reg-accent"
                                 />
@@ -670,11 +898,29 @@ export default function Home() {
                                     checked={testModeClearStudentKeepPrograms}
                                     onChange={(e) => {
                                         setTestModeClearStudentKeepPrograms(e.target.checked);
-                                        if (e.target.checked) setTestModeClearStudent(false);
+                                        if (e.target.checked) {
+                                            setTestModeClearStudent(false);
+                                            setTestModeClearOfferingHistoryOnly(false);
+                                        }
                                     }}
                                     className="mt-1 rounded text-reg-accent"
                                 />
                                 <span>Clear student data, but leave event attendance history.</span>
+                            </label>
+                            <label className="flex items-start gap-3 text-reg-muted">
+                                <input
+                                    type="checkbox"
+                                    checked={testModeClearOfferingHistoryOnly}
+                                    onChange={(e) => {
+                                        setTestModeClearOfferingHistoryOnly(e.target.checked);
+                                        if (e.target.checked) {
+                                            setTestModeClearStudent(false);
+                                            setTestModeClearStudentKeepPrograms(false);
+                                        }
+                                    }}
+                                    className="mt-1 rounded text-reg-accent"
+                                />
+                                <span>Clear offeringHistory only for this event and current student.</span>
                             </label>
                             <div>
                                 <p className="text-reg-muted mb-2">Test student&apos;s eligibility in the &apos;oath&apos; pool (override for this run):</p>
@@ -752,7 +998,11 @@ export default function Home() {
                                 {(() => {
                                     const key =
                                         phase === 'offeringCompleteCold'
-                                            ? (offeringCompleteVariant === 'warm' ? 'offeringCompleteWarm' : 'offeringCompleteCold')
+                                            ? (
+                                                isInstallmentsPresentation && installmentsBalanceDueCentsDisplay > 0
+                                                    ? (offeringCompleteVariant === 'warm' ? 'offeringCompleteWarmPartial' : 'offeringCompleteCold')
+                                                    : (offeringCompleteVariant === 'warm' ? 'offeringCompleteWarm' : 'offeringCompleteCold')
+                                            )
                                             : phase === 'acceptanceThankYouWarm'
                                                 ? 'applyThankYouWarm'
                                                 : 'applyThankYouCold';
@@ -767,6 +1017,20 @@ export default function Home() {
                                     return <span dangerouslySetInnerHTML={{ __html: html }} />;
                                 })()}
                             </div>
+                            {phase === 'offeringCompleteCold' && isInstallmentsPresentation && (
+                                <div className="mt-4 pt-4 border-t border-reg-border space-y-2">
+                                    {offeringsReceivedCentsDisplay > 0 && (
+                                        <div className="flex items-center justify-between">
+                                            <p className="text-sm text-reg-text">{promptLookup(context, 'offeringsReceived') || 'Offerings Received:'}</p>
+                                            <p className="text-sm font-semibold tabular-nums">{formatAmount(offeringsReceivedCentsDisplay, installmentsCurrency)}</p>
+                                        </div>
+                                    )}
+                                    <div className="flex items-center justify-between">
+                                        <p className="text-sm text-reg-text">{promptLookup(context, 'balanceDue') || 'Balance Due:'}</p>
+                                        <p className="text-sm font-semibold tabular-nums">{formatAmount(installmentsBalanceDueCentsDisplay, installmentsCurrency)}</p>
+                                    </div>
+                                </div>
+                            )}
                             {data?.student?.debug?.registerTest === true && (
                                 <div className="mt-6">
                                     <button

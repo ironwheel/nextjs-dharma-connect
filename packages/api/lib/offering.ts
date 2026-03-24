@@ -2,6 +2,7 @@
  * @file packages/api/lib/offering.ts
  * @description Offering flow: offering-transactions table and completion (write offeringHistory to students).
  */
+import { nextSequentialInstallmentNumber } from 'sharedFrontend/installmentsHelpers';
 import { tableGetConfig } from './tableConfig';
 import { getOne, putOne, updateItem } from './dynamoClient';
 import { stripeRetrievePaymentIntentForOfferingAugmentation } from './stripe';
@@ -37,6 +38,13 @@ export interface OfferingTransactionRecord {
 
   // Card metadata for receipt display.
   card?: { brand?: string; last4?: string };
+}
+
+function stripInstallmentsSubeventPseudoFields(entry: Record<string, any>): void {
+  delete entry.offeringIntent;
+  delete entry.offeringSKU;
+  delete entry.offeringAmount;
+  delete entry.offeringTime;
 }
 
 /**
@@ -221,18 +229,31 @@ async function writeOfferingHistoryForPerson(
     const subKey = subEventName as string;
     if (!offeringHistory[subKey]) offeringHistory[subKey] = {};
     const entry = offeringHistory[subKey] as any;
+    const isInstallments = obj.offeringIntent === 'installments' || obj.installments === true;
+    if (isInstallments && obj.offeringAmount != null) {
+      entry.installments = entry.installments || {};
+      const installments = entry.installments as Record<string, any>;
+      stripInstallmentsSubeventPseudoFields(entry);
+
+      const paymentAmount = Number(obj.offeringAmount);
+      const installmentN = nextSequentialInstallmentNumber(installments);
+      const installmentKey = `installment${installmentN}`;
+
+      installments[installmentKey] = {
+        offeringAmount: paymentAmount,
+        offeringIntent: paymentIntentId,
+        offeringSKU: obj.offeringSKU,
+        offeringTime: now,
+      };
+      entry.installments = installments;
+      stripInstallmentsSubeventPseudoFields(entry);
+      continue;
+    }
+
     entry.offeringIntent = paymentIntentId;
     entry.offeringTime = now;
     if (obj.offeringSKU != null) entry.offeringSKU = obj.offeringSKU;
     if (obj.offeringAmount != null) entry.offeringAmount = obj.offeringAmount;
-    if (obj.installmentName != null && obj.offeringAmount != null) {
-      entry.installments = entry.installments || {};
-      (entry.installments as any)[obj.installmentName] = {
-        offeringAmount: obj.offeringAmount,
-        offeringIntent: paymentIntentId,
-        offeringSKU: obj.offeringSKU,
-      };
-    }
   }
 
   programs[eventCode].offeringHistory = offeringHistory;
@@ -252,12 +273,17 @@ export async function completeOffering(
   eventCode: string,
   cart: Array<{ id: string; name: string; currentOfferings?: Record<string, any>; offeringHistory?: Record<string, any> }>,
   subEventNames: string[],
+  options: { mockPayment?: boolean } | undefined,
   roleArn: string,
   oidcToken?: string
 ): Promise<void> {
-  const pi = await stripeRetrievePaymentIntentForOfferingAugmentation(paymentIntentId);
-  if (pi.status !== 'succeeded') {
-    throw new Error(`PaymentIntent ${paymentIntentId} is not succeeded (status: ${pi.status})`);
+  const useMockPayment = options?.mockPayment === true;
+  let pi: any = null;
+  if (!useMockPayment) {
+    pi = await stripeRetrievePaymentIntentForOfferingAugmentation(paymentIntentId);
+    if (pi.status !== 'succeeded') {
+      throw new Error(`PaymentIntent ${paymentIntentId} is not succeeded (status: ${pi.status})`);
+    }
   }
 
   const txCfg = tableGetConfig('offering-transactions');
@@ -269,10 +295,10 @@ export async function completeOffering(
   // Best-effort extraction from the single PI retrieve call.
   const latestCharge = (pi as any)?.latest_charge;
   const balanceTxnFee = (latestCharge as any)?.balance_transaction?.fee;
-  const dashboardStripeFeeCents = balanceTxnFee != null ? Number(balanceTxnFee) : undefined;
+  const dashboardStripeFeeCents = useMockPayment ? 0 : (balanceTxnFee != null ? Number(balanceTxnFee) : undefined);
 
-  const cardBrand = (latestCharge as any)?.payment_method_details?.card?.brand;
-  const cardLast4 = (latestCharge as any)?.payment_method_details?.card?.last4;
+  const cardBrand = useMockPayment ? 'visa' : (latestCharge as any)?.payment_method_details?.card?.brand;
+  const cardLast4 = useMockPayment ? '4242' : (latestCharge as any)?.payment_method_details?.card?.last4;
 
   const skuSummary = (existing as any)?.skuSummary ?? [];
   const kmLine = Array.isArray(skuSummary) ? skuSummary.find((x: any) => x?.subEvent === 'kmFee') : undefined;

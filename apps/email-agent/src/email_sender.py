@@ -9,6 +9,7 @@ import time
 import sys
 import os
 import hmac
+import html as html_escape
 from decimal import Decimal, InvalidOperation
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -27,6 +28,31 @@ from .steps.shared import code_to_full_language
 
 # Cache for email account credentials to avoid repeated DynamoDB calls
 _credentials_cache = {}
+
+
+def _retreat_net_offering_dollars(wrc_row: Dict) -> float:
+    """Net amount due for a retreat (matches register: offeringTotal - offeringCashTotal)."""
+    if not wrc_row:
+        return 0.0
+    try:
+        tot = float(wrc_row.get('offeringTotal') or 0)
+        cash = float(wrc_row.get('offeringCashTotal') or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, tot - cash)
+
+
+def _sum_installment_payments_received(installments: Dict) -> float:
+    """Sum installment line offeringAmount; skip refunded aggregate key."""
+    received = 0.0
+    for k, row in installments.items():
+        if k == 'refunded' or not isinstance(row, dict):
+            continue
+        try:
+            received += float(row.get('offeringAmount') or 0)
+        except (TypeError, ValueError):
+            continue
+    return received
 
 
 def _generate_auth_hash(guid: str, secret_key_hex: str) -> str:
@@ -142,6 +168,8 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
                     should_replace = (
                         'mcnImage' in tag
                         or ('data-file-id' in tag and 'mcusercontent.com/' in tag)
+                        # Deterministic targeting for custom receipt templates.
+                        or ('data-event-image="true"' in tag or "data-event-image='true'" in tag)
                     )
                     if should_replace:
                         return re.sub(r'src="[^"]+"', f'src="{event_image_url}"', tag)
@@ -159,10 +187,19 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
             try:
                 skus = transaction_data.get('skuSummary', [])
                 currency = transaction_data.get('currency', 'USD')
-                
-                receipt_text = ""
                 total_cents = Decimal('0')
-                
+
+                full_language = code_to_full_language(language)
+                title_text = html_escape.escape(
+                    prompt_lookup(prompts_array, 'title', full_language, event['aid']) or ''
+                )
+
+                # Spare / meadow-style receipt block: table rows (no textarea).
+                font = (
+                    "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,"
+                    "Arial,sans-serif"
+                )
+                line_rows: List[str] = []
                 for sku in skus:
                     raw_amount_cents = sku.get('amountCents', 0)
                     try:
@@ -172,41 +209,56 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
                     amount = amount_cents / Decimal('100')
                     total_cents += amount_cents
                     currency_str = sku.get('currency', currency).upper()
+                    amt_display = f"${float(amount):.2f} {currency_str}"
                     if sku.get('subEvent') == 'kmFee':
-                        line = f"Kalapa Media 5% Fee       ${float(amount):.2f} {currency_str}\n"
+                        desc = "Kalapa Media 5% Fee"
                     else:
-                        person_name = sku.get('personName', '')
-                        offering_sku = sku.get('offeringSKU', '')
-                        # Receipt line item format (no leading prefix, no parentheses)
-                        line = f"{person_name}, {offering_sku}  ${float(amount):.2f} {currency_str}\n"
-                    receipt_text += line
-                
-                receipt_text += "--------------\n"
-                receipt_text += f"${float(total_cents / Decimal('100')):.2f} {currency.upper()}"
-                
-                rows = len(skus) + 2
-                full_language = code_to_full_language(language)
-                title_text = prompt_lookup(prompts_array, 'title', full_language, event['aid'])
-                # Use a proportional font for receipt text (textarea defaults can be monospace).
+                        person_name = html_escape.escape(str(sku.get('personName', '') or ''))
+                        offering_sku = html_escape.escape(str(sku.get('offeringSKU', '') or ''))
+                        desc = f"{person_name}, {offering_sku}"
+                    line_rows.append(
+                        '<tr>'
+                        f'<td style="padding:6px 0;font-size:14px;line-height:20px;color:#374151;">{desc}</td>'
+                        f'<td style="padding:6px 0;font-size:14px;line-height:20px;color:#111827;'
+                        f'text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;">'
+                        f'{amt_display}</td>'
+                        '</tr>'
+                    )
+
+                total_display = f"${float(total_cents / Decimal('100')):.2f} {currency.upper()}"
                 receipt_html = (
-                    f'<div style="text-align: left;">'
-                    f'<span style="font-size:15px">'
-                    f'<div style="font-style: italic; font-family: helvetica neue,helvetica,arial,verdana,sans-serif; margin-bottom: 6px;">{title_text}</div>'
-                    f'<textarea readonly '
-                    f'style="text-align: right; font-family: helvetica neue,helvetica,arial,verdana,sans-serif;" '
-                    f'cols="70" rows="{rows}">'
-                    f'{receipt_text}'
-                    f'</textarea>'
-                    f'</span>'
-                    f'</div>'
+                    f'<div style="text-align:left;font-family:{font};">'
+                    f'<div style="font-style:italic;font-size:14px;line-height:20px;color:#0f766e;'
+                    f'margin-bottom:12px;">{title_text}</div>'
+                    f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
+                    f'width="100%" style="border-collapse:collapse;">'
+                    f'{"".join(line_rows)}'
+                    '<tr><td colspan="2" style="border-top:1px solid #e5e7eb;padding:0;height:1px;">'
+                    '</td></tr>'
+                    '<tr>'
+                    '<td style="padding:10px 0 0 0;font-size:14px;line-height:20px;font-weight:700;'
+                    'color:#111827;">Total</td>'
+                    f'<td style="padding:10px 0 0 0;font-size:14px;line-height:20px;font-weight:700;'
+                    f'color:#111827;text-align:right;white-space:nowrap;'
+                    f'font-variant-numeric:tabular-nums;">{total_display}</td>'
+                    '</tr>'
+                    '</table>'
+                    '</div>'
                 )
-                
+
                 html = html.replace("#receipt", receipt_html)
             except Exception as e:
                 print(f"Warning: Failed to construct #receipt: {e}")
         
         if "#paymentid" in html:
             html = html.replace("#paymentid", transaction_data.get('paymentIntentId', ''))
+
+        if "||cardbrand||" in html or "||cardlast4||" in html:
+            card = transaction_data.get('card') or {}
+            brand_raw = card.get('brand') or card.get('Brand') or ''
+            last4_raw = card.get('last4') or card.get('Last4') or ''
+            html = html.replace("||cardbrand||", html_escape.escape(str(brand_raw)))
+            html = html.replace("||cardlast4||", html_escape.escape(str(last4_raw)))
 
     # If #salutation directive in html, replace it with the langauge specific salutation
     # replacing the ||name|| field in the prompts with the person's name
@@ -311,18 +363,16 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
         keys = list(student['programs'][event['aid']]['whichRetreats'].keys())
         for key in keys:
             if student['programs'][event['aid']]['whichRetreats'][key]:
-                total += which_retreats_config[key]['offeringTotal']
+                total += _retreat_net_offering_dollars(which_retreats_config[key])
         
-        received = 0
+        received = 0.0
         try:
             some = student['programs'][event['aid']]['offeringHistory']['retreat']['installments']
         except:
             some = False
         
-        if some:
-            keys = list(some.keys())
-            for key in keys:
-                received += some[key]['offeringAmount']
+        if some and isinstance(some, dict):
+            received = _sum_installment_payments_received(some)
         
         try:
             currency = event['config']['currency']
@@ -408,9 +458,7 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
                         if not oh:
                             condition = False
                         else:
-                            total_received = 0
-                            for key in oh.keys():
-                                total_received += oh[key]['offeringAmount']
+                            total_received = _sum_installment_payments_received(oh)
 
                             try:
                                 wr = student['programs'][event['aid']]['whichRetreats']
@@ -444,7 +492,7 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
                                 count = 0
                                 for key in keys:
                                     if student['programs'][event['aid']]['whichRetreats'][key]:
-                                        total_required += which_retreats_config[key]['offeringTotal']
+                                        total_required += _retreat_net_offering_dollars(which_retreats_config[key])
                                         count += 1
                                         if count >= key_count:
                                             break

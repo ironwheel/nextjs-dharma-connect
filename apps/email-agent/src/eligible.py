@@ -8,6 +8,35 @@
 from typing import Dict, List, Any, Optional
 
 
+def _sum_installment_payments_cents(installments: Any) -> int:
+    """Sum offeringAmount for all installment lines (keys ignored; legacy deposit/balance included)."""
+    if not installments or not isinstance(installments, dict):
+        return 0
+    total = 0
+    for entry in installments.values():
+        if not isinstance(entry, dict):
+            continue
+        amt = entry.get('offeringAmount')
+        try:
+            n = float(amt)
+            if n == n and n != float('inf'):
+                total += int(n)
+        except (TypeError, ValueError):
+            pass
+    return total
+
+
+def subevent_has_offering_activity(sub_entry: Any) -> bool:
+    """True if classic offeringSKU exists or any installment payments recorded."""
+    if not sub_entry or not isinstance(sub_entry, dict):
+        return False
+    sku = sub_entry.get('offeringSKU')
+    if sku is not None and str(sku).strip() != '':
+        return True
+    inst = sub_entry.get('installments')
+    return _sum_installment_payments_cents(inst) > 0
+
+
 def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid: str, all_pools_data: List[Dict[str, Any]], current_subevent: str = None) -> bool:
     """
     Checks if a student is eligible for content based on pool definitions.
@@ -78,20 +107,20 @@ def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid:
                 is_eligible = False
                 for subevent_key in offering_history.keys():
                     subevent_data = offering_history.get(subevent_key, {})
-                    if bool(subevent_data.get('offeringSKU')):
+                    if subevent_has_offering_activity(subevent_data):
                         is_eligible = True
                         break
                 is_eligible = is_eligible and not bool(program.get('withdrawn'))
             else:
-                # Check specific subevent
+                # Check specific subevent (classic SKU or installments)
                 subevent_data = offering_history.get(subevent, {})
-                is_eligible = bool(subevent_data.get('offeringSKU')) and not bool(program.get('withdrawn')) 
+                is_eligible = subevent_has_offering_activity(subevent_data) and not bool(program.get('withdrawn'))
         elif attr_type == 'currenteventoffering':
             programs = student_data.get('programs', {})
             program = programs.get(current_aid, {})
             offering_history = program.get('offeringHistory', {})
             subevent_data = offering_history.get(current_subevent, {})
-            is_eligible = bool(subevent_data.get('offeringSKU')) and not bool(program.get('withdrawn'))   
+            is_eligible = subevent_has_offering_activity(subevent_data) and not bool(program.get('withdrawn'))
         elif attr_type == 'currenteventtest':
             programs = student_data.get('programs', {})
             program = programs.get(current_aid, {})
@@ -101,7 +130,7 @@ def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid:
             program = programs.get(current_aid, {})
             offering_history = program.get('offeringHistory', {})
             subevent_data = offering_history.get(current_subevent, {})
-            is_eligible = not bool(subevent_data.get('offeringSKU'))
+            is_eligible = not subevent_has_offering_activity(subevent_data)
         elif attr_type == 'offeringandpools':
             # Validate required fields
             if 'aid' not in attr:
@@ -114,7 +143,7 @@ def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid:
             programs = student_data.get('programs', {})
             program = programs.get(aid, {})
             offering_history = program.get('offeringHistory', {})
-            if subevent in offering_history:
+            if subevent_has_offering_activity(offering_history.get(subevent)):
                 is_eligible = any(check_eligibility(p, student_data, current_aid, all_pools_data, current_subevent) for p in pools)
         elif attr_type == 'oath':
             aid = attr.get('aid')
@@ -177,7 +206,7 @@ def check_eligibility(pool_name: str, student_data: Dict[str, Any], current_aid:
                     offering_history = program['offeringHistory']
                     offering_keys = list(offering_history.keys())
                     is_eligible = any(
-                        key.startswith(subevent) and bool(offering_history[key].get('offeringSKU'))
+                        key.startswith(subevent) and subevent_has_offering_activity(offering_history[key])
                         for key in offering_keys
                     )
         elif attr_type == 'eligible':

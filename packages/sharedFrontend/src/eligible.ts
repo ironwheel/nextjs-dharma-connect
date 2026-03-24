@@ -5,6 +5,8 @@
  * @description Utility function to check student eligibility based on pool definitions.
  */
 
+import { subeventHasOfferingActivity } from './installmentsHelpers';
+
 // TypeScript interfaces for the data structures
 export interface StudentData {
     programs?: Record<string, any>;
@@ -101,20 +103,23 @@ export function checkEligibility(
                         // Check if student has any offering in any subevent for this program
                         const offeringHistory = studentData.programs?.[attr.aid]?.offeringHistory;
                         if (offeringHistory) {
-                            isEligible = Object.keys(offeringHistory).some(subeventKey => 
-                                !!(offeringHistory[subeventKey]?.offeringSKU)
+                            isEligible = Object.keys(offeringHistory).some(subeventKey =>
+                                subeventHasOfferingActivity(offeringHistory[subeventKey]),
                             );
                         }
                     } else {
-                        // Check specific subevent
-                        isEligible = !!(studentData.programs?.[attr.aid]?.offeringHistory?.[attr.subevent]?.offeringSKU);
+                        // Check specific subevent (classic offeringSKU or installments payments)
+                        isEligible = subeventHasOfferingActivity(
+                            studentData.programs?.[attr.aid]?.offeringHistory?.[attr.subevent],
+                        );
                     }
                 }
                 break;
             case 'currenteventoffering':
                 if (attr.subevent && studentData.programs?.[currentAid]?.offeringHistory?.[attr.subevent]) {
-                    isEligible = !!(studentData.programs[currentAid].offeringHistory[attr.subevent]?.offeringSKU) && 
-                                !studentData.programs[currentAid]?.withdrawn;
+                    isEligible =
+                        subeventHasOfferingActivity(studentData.programs[currentAid].offeringHistory[attr.subevent]) &&
+                        !studentData.programs[currentAid]?.withdrawn;
                 }
                 break;
             case 'currenteventtest':
@@ -122,11 +127,18 @@ export function checkEligibility(
                 break;
             case 'currenteventnotoffering':
                 if (attr.subevent && studentData.programs?.[currentAid]?.offeringHistory?.[attr.subevent]) {
-                    isEligible = !(!!(studentData.programs[currentAid].offeringHistory[attr.subevent]?.offeringSKU));
+                    isEligible = !subeventHasOfferingActivity(
+                        studentData.programs[currentAid].offeringHistory[attr.subevent],
+                    );
                 }
                 break;
             case 'offeringandpools':
-                if (attr.aid && attr.subevent && attr.pools && studentData.programs?.[attr.aid]?.offeringHistory?.[attr.subevent]) {
+                if (
+                    attr.aid &&
+                    attr.subevent &&
+                    attr.pools &&
+                    subeventHasOfferingActivity(studentData.programs?.[attr.aid]?.offeringHistory?.[attr.subevent])
+                ) {
                     isEligible = !!(attr.pools.some((p) => checkEligibility(p, studentData, currentAid, allPoolsData)));
                 }
                 break;
@@ -182,8 +194,9 @@ export function checkEligibility(
                     if (hasRetreat && studentData.programs[attr.aid].offeringHistory) {
                         const offeringHistory = studentData.programs[attr.aid].offeringHistory;
                         const offeringKeys = Object.keys(offeringHistory);
-                        isEligible = offeringKeys.some((key) => 
-                            key.startsWith(attr.subevent!) && !!(offeringHistory[key]?.offeringSKU)
+                        isEligible = offeringKeys.some(
+                            (key) =>
+                                key.startsWith(attr.subevent!) && subeventHasOfferingActivity(offeringHistory[key]),
                         );
                     }
                 }

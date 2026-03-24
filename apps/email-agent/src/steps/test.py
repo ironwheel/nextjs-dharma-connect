@@ -5,9 +5,10 @@ Sends test emails to selected testers in all languages.
 
 import asyncio
 import time
-from typing import Dict, List, Any
+from typing import Any, Dict, List, Tuple
+
 from ..models import WorkOrder, Step, StepStatus
-from ..aws_client import AWSClient
+from ..aws_client import AWSClient, pick_receipt_transaction_for_test
 from ..email_sender import send_email
 from ..config import STUDENT_TABLE, POOLS_TABLE, PROMPTS_TABLE, EVENTS_TABLE
 
@@ -61,13 +62,13 @@ class TestStep:
             # Get required data
             await self._update_progress(work_order, "Loading required data...")
             
-            # Get testers' student data
-            testers_data = []
+            # Get testers' student data (keep work-order id for receipt txn matching)
+            testers_with_ids: List[Tuple[str, Dict[str, Any]]] = []
             for tester_id in work_order.testers:
                 student_data = self.aws_client.get_student(tester_id)
                 if not student_data:
                     raise Exception(f"Tester {tester_id} not found in student table")
-                testers_data.append(student_data)
+                testers_with_ids.append((tester_id, student_data))
             
             # Get pools data
             pools_data = self.aws_client.scan_table(POOLS_TABLE)
@@ -98,11 +99,19 @@ class TestStep:
             
             # Send test emails
             emails_sent = 0
-            total_emails = len(testers_data) * len(work_order.languages)
-            
+            total_emails = len(testers_with_ids) * len(work_order.languages)
+
+            eligible_receipt_txns: List[Dict] = []
+            if getattr(work_order, "transactionReceipt", False):
+                eligible_receipt_txns = self.aws_client.get_offering_transactions()
+                await self._update_progress(
+                    work_order,
+                    f"Receipt test: {len(eligible_receipt_txns)} offering-transactions eligible (same pool as Dry-Run)",
+                )
+
             await self._update_progress(work_order, f"Sending {total_emails} test emails...")
             
-            for tester in testers_data:
+            for tester_id, tester in testers_with_ids:
                 for lang in work_order.languages.keys():
                     if not work_order.languages[lang]:
                         continue  # Skip disabled languages
@@ -145,9 +154,15 @@ class TestStep:
                         transaction_data = None
                         event_for_email = event_data
                         if getattr(work_order, 'transactionReceipt', False):
-                            transaction_data = self.aws_client.get_single_offering_transaction()
+                            transaction_data = pick_receipt_transaction_for_test(
+                                eligible_receipt_txns, tester, tester_id
+                            )
                             if not transaction_data:
-                                raise Exception("Event transaction receipt test failed: no offering transaction found")
+                                raise Exception(
+                                    "Event transaction receipt test failed: no offering transaction found "
+                                    "(need status=succeeded, receipt not sent per Dry-Run rules). "
+                                    f"Eligible count was {len(eligible_receipt_txns)}."
+                                )
 
                             # For transaction receipts, use the event referenced by the offering transaction.
                             # The work order eventCode is typically "receipt" and won't have the banner image.
@@ -161,12 +176,15 @@ class TestStep:
                                 raise Exception(f"Event {tx_event_code} not found for transaction receipt test")
                             event_for_email = tx_event_data
 
+                        student_for_send = dict(tester)
+                        student_for_send.setdefault("id", tester_id)
+
                         success = send_email(
                             html=html_content,
                             subject=test_subject,
                             language=lang,
                             account=work_order.account,
-                            student=tester,
+                            student=student_for_send,
                             event=event_for_email,
                             pools_array=pools_data,
                             prompts_array=prompts_data,
@@ -192,7 +210,7 @@ class TestStep:
                         step.message = "Step interrupted by stop request."
                         return False
             
-            success_message = f"Test step completed successfully. Sent {emails_sent} test emails to {len(testers_data)} testers."
+            success_message = f"Test step completed successfully. Sent {emails_sent} test emails to {len(testers_with_ids)} testers."
             await self._update_progress(work_order, success_message)
             
             # Update the step message with the results

@@ -5,11 +5,24 @@ import { Elements, useStripe, useElements, PaymentElement } from '@stripe/react-
 /** React 19 JSX compatibility: @stripe/react-stripe-js types don't match React 19 ReactNode. */
 const StripeElements = Elements as unknown as React.JSX.ElementType;
 const StripePaymentElement = PaymentElement as unknown as React.JSX.ElementType;
-import { getTableItem, getStripeConfig, createStripePaymentIntent, completeOffering } from 'sharedFrontend';
+import {
+  getTableItem,
+  getStripeConfig,
+  createStripePaymentIntent,
+  createMockOfferingTransaction,
+  completeOffering,
+  sumInstallmentPaymentsCents,
+} from 'sharedFrontend';
 import { promptLookup } from './script/StepComponents';
 import type { ScriptContext } from './script/types';
 
 const eventCodeFromContext = (ctx: ScriptContext) => ctx.event?.aid ?? '';
+
+/** promptLookup returns `${aid}-${key}-${lang}-unknown` when missing; treat as no prompt. */
+function isPromptTextResolved(text: string | undefined): boolean {
+  const t = String(text ?? '').trim();
+  return t !== '' && !t.endsWith('-unknown');
+}
 
 function currencySymbol(currency: string): string {
   return currency === 'USD' ? '$' : currency === 'CAD' ? '$' : currency === 'EUR' ? '€' : '$';
@@ -26,6 +39,20 @@ function parseMoneyDollars(val: string): number {
   return Number.isFinite(n) ? n : Number.NaN;
 }
 
+function sanitizePromptHtml(raw: string): string {
+  if (!raw) return '';
+  return String(raw)
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '')
+    .replace(/\son\w+="[^"]*"/gi, '')
+    .replace(/\son\w+='[^']*'/gi, '')
+    .replace(/\s(href|src)=["']\s*javascript:[^"']*["']/gi, ' $1="#"');
+}
+
+function HtmlPrompt({ html, className }: { html: string; className?: string }) {
+  return <div className={className} dangerouslySetInnerHTML={{ __html: sanitizePromptHtml(html) }} />;
+}
+
 function clampMoney(n: number, min: number): number {
   if (!Number.isFinite(n)) return min;
   return Math.max(min, n);
@@ -34,6 +61,7 @@ function clampMoney(n: number, min: number): number {
 function AmountStepper({
   value,
   min,
+  max,
   step = 1,
   currency,
   onChange,
@@ -41,6 +69,7 @@ function AmountStepper({
 }: {
   value: string;
   min: number;
+  max?: number;
   step?: number;
   currency: string;
   onChange: (val: string) => void;
@@ -48,9 +77,13 @@ function AmountStepper({
 }) {
   const parsed = parseMoneyDollars(value);
   const current = Number.isFinite(parsed) ? parsed : min;
+  const hasMax = typeof max === 'number' && Number.isFinite(max);
+  const atOrBelowMin = current <= min;
+  const atOrAboveMax = hasMax ? current >= (max as number) : false;
 
   const bump = (delta: number) => {
-    const next = clampMoney(current + delta, min);
+    const nextRaw = clampMoney(current + delta, min);
+    const next = hasMax ? Math.min(nextRaw, max as number) : nextRaw;
     onChange(next.toFixed(2));
   };
 
@@ -60,8 +93,9 @@ function AmountStepper({
       <button
         type="button"
         onClick={() => bump(-step)}
+        disabled={atOrBelowMin}
         aria-label="Decrease amount"
-        className="w-12 rounded border border-reg-border bg-reg-card text-reg-text hover:bg-reg-card-muted transition-colors text-xl font-semibold"
+        className="w-12 rounded border border-reg-border bg-reg-card text-reg-text hover:bg-reg-card-muted transition-colors text-xl font-semibold disabled:bg-reg-button-disabled disabled:text-reg-text-disabled disabled:cursor-not-allowed"
       >
         −
       </button>
@@ -84,8 +118,9 @@ function AmountStepper({
       <button
         type="button"
         onClick={() => bump(step)}
+        disabled={atOrAboveMax}
         aria-label="Increase amount"
-        className="w-12 rounded border border-reg-border bg-reg-card text-reg-text hover:bg-reg-card-muted transition-colors text-xl font-semibold"
+        className="w-12 rounded border border-reg-border bg-reg-card text-reg-text hover:bg-reg-card-muted transition-colors text-xl font-semibold disabled:bg-reg-button-disabled disabled:text-reg-text-disabled disabled:cursor-not-allowed"
       >
         +
       </button>
@@ -144,13 +179,24 @@ type Person = {
   owyaaLease?: string;
 };
 
+type InstallmentsRetreatConfig = {
+  prompt?: string;
+  offeringMinimum?: number;
+  offeringTotal?: number;
+  offeringCashTotal?: number;
+  /** When true, retreat is at capacity; selected students may be wait-listed (see waitListWarning prompt). */
+  retreatFull?: boolean;
+};
+
+type InstallmentsStatus = 'incomplete' | 'complete' | 'overpaid';
+
 function useOfferingData(context: ScriptContext) {
   const [configs, setConfigs] = useState<Record<string, OfferingConfig>>({});
   const [fafFull, setFafFull] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!context.event?.subEvents) {
       setLoading(false);
       return;
@@ -340,11 +386,13 @@ function PaymentForm({
 export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | Promise<void> }> = ({ context, onComplete }) => {
   const eventCode = eventCodeFromContext(context);
   const event = context.event;
+  const isRegisterTestMode = context.student?.debug?.registerTest === true;
   const { configs, fafFull, setFafFull, loading, error } = useOfferingData(context);
   const [paymentStep, setPaymentStep] = useState<'selection' | 'owyaa' | 'heartGift' | 'sponsoring' | 'stripe'>('selection');
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [publishableKey, setPublishableKey] = useState<string | null>(null);
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
+  const [checkoutCart, setCheckoutCart] = useState<Array<{ id: string; name: string; currentOfferings?: Record<string, any>; offeringHistory?: Record<string, any> }> | null>(null);
   const [processing, setProcessing] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
   const [owyaaModal, setOwyaaModal] = useState<{ personIndex: number; subName: string; promptKey: string } | null>(null);
@@ -364,17 +412,21 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     minAmountDollars?: number;
   } | null>(null);
   const [sponsoringAmountInput, setSponsoringAmountInput] = useState('');
+  const [installmentsAmountInputByPerson, setInstallmentsAmountInputByPerson] = useState<Record<string, string>>({});
   // For series offerings: per-person choice between "next only" and "all remaining".
   const [seriesChoiceByPerson, setSeriesChoiceByPerson] = useState<Record<string, 'next' | 'remaining'>>({});
 
   const studentCountry = context.student?.country;
   const offeringCADPar = event?.config?.offeringCADPar === true;
   const offeringKMFee = event?.config?.offeringKMFee === true;
+  const offeringPresentation = event?.config?.offeringPresentation as string | undefined;
   const hasOwyaaInCart = cartHasOwyaaSelection(fafFull);
   const currency =
-    offeringCADPar && studentCountry === 'Canada'
-      ? 'CAD'
-      : ((event?.config?.offeringCurrency as string) || 'USD');
+    offeringPresentation === 'installments'
+      ? ((event?.config?.offeringCurrency as string) || 'USD')
+      : offeringCADPar && studentCountry === 'Canada'
+        ? 'CAD'
+        : ((event?.config?.offeringCurrency as string) || 'USD');
   const baseTotalCents = cartTotalCents(fafFull);
   const kmFeeCents = offeringKMFee && !hasOwyaaInCart ? Math.round(baseTotalCents * 0.05) : 0;
   const totalCents = baseTotalCents + kmFeeCents;
@@ -382,7 +434,17 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
   const subEventNames = subEvents.map(([name]) => name);
   const subEventCount = subEvents.length;
   const offeringIntro = promptLookup(context, 'offeringIntroduction') || '';
-  const offeringPresentation = event?.config?.offeringPresentation as string | undefined;
+  const isInstallmentsPresentation = offeringPresentation === 'installments';
+  const installmentStepDollarsRaw = Number(event?.config?.installmentStep);
+  const installmentStepDollars =
+    Number.isFinite(installmentStepDollarsRaw) && installmentStepDollarsRaw > 0
+      ? installmentStepDollarsRaw
+      : 1;
+  const installmentsIntroduction = promptLookup(context, 'installmentsIntroduction') || '';
+  const waitListWarningRaw = promptLookup(context, 'waitListWarning');
+  const waitListWarningHtml = isPromptTextResolved(waitListWarningRaw) ? waitListWarningRaw : '';
+  const offeringsReceivedPrompt = promptLookup(context, 'offeringsReceived') || 'Offerings Received:';
+  const balanceDuePrompt = promptLookup(context, 'balanceDue') || 'Balance Due:';
 
   /** Subevent names sorted by date ascending (earliest first). Missing/invalid dates go at the end. */
   const subEventNamesByDate = React.useMemo(() => {
@@ -402,6 +464,122 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     const history = person.offeringHistory || {};
     return subEventNamesByDate.filter((name) => !history[name]);
   };
+
+  const installmentsSubEventName = React.useMemo(() => {
+    if (!isInstallmentsPresentation) return '';
+    if (event?.subEvents?.retreat) return 'retreat';
+    return subEventNamesByDate[0] || subEventNames[0] || 'retreat';
+  }, [isInstallmentsPresentation, event?.subEvents, subEventNamesByDate, subEventNames]);
+
+  const installmentsRetreatConfig = React.useMemo(() => {
+    if (!isInstallmentsPresentation) return null;
+    const cfg = event?.config?.whichRetreatsConfig;
+    if (!cfg || typeof cfg !== 'object') return null;
+    return cfg as Record<string, InstallmentsRetreatConfig>;
+  }, [isInstallmentsPresentation, event?.config?.whichRetreatsConfig]);
+
+  const getInstallmentsSummary = useCallback((person: Person) => {
+    if (!isInstallmentsPresentation) {
+      return { ok: false as const, error: 'Installments mode is not active.' };
+    }
+    if (!installmentsRetreatConfig) {
+      return { ok: false as const, error: 'Installments configuration is missing for this event.' };
+    }
+    const whichRetreats = person.whichRetreats;
+    if (!whichRetreats || typeof whichRetreats !== 'object') {
+      return { ok: false as const, error: 'Your retreat selections were not found for this event.' };
+    }
+    const selectedRetreats = Object.entries(whichRetreats)
+      .filter(([, selected]) => selected === true)
+      .map(([retreatKey]) => retreatKey);
+    if (selectedRetreats.length === 0) {
+      return { ok: false as const, error: 'No retreats were selected for installments offering.' };
+    }
+    for (const retreatKey of selectedRetreats) {
+      if (!installmentsRetreatConfig[retreatKey]) {
+        return {
+          ok: false as const,
+          error: `Selected retreat "${retreatKey}" is missing from whichRetreatsConfig.`,
+        };
+      }
+      const promptKey = installmentsRetreatConfig[retreatKey]?.prompt;
+      if (typeof promptKey !== 'string' || promptKey.trim() === '') {
+        return {
+          ok: false as const,
+          error: `Selected retreat "${retreatKey}" is missing a prompt in whichRetreatsConfig.`,
+        };
+      }
+    }
+
+    const minimumDueCents = selectedRetreats.reduce((sum, retreatKey) => {
+      const n = Number(installmentsRetreatConfig[retreatKey]?.offeringMinimum ?? 0);
+      return sum + Math.max(0, Math.round(n * 100));
+    }, 0);
+    const maximumDueCents = selectedRetreats.reduce((sum, retreatKey) => {
+      const total = Number(installmentsRetreatConfig[retreatKey]?.offeringTotal ?? 0);
+      const cashTotal = Number(installmentsRetreatConfig[retreatKey]?.offeringCashTotal ?? 0);
+      return sum + Math.max(0, Math.round((total - cashTotal) * 100));
+    }, 0);
+
+    const historyEntry = person.offeringHistory?.[installmentsSubEventName] || {};
+    const installmentHistory = historyEntry?.installments || {};
+    const offeredSoFarCents = sumInstallmentPaymentsCents(installmentHistory);
+    const balanceDueCents = Math.max(0, maximumDueCents - offeredSoFarCents);
+    const status: InstallmentsStatus =
+      offeredSoFarCents > maximumDueCents ? 'overpaid' : offeredSoFarCents >= maximumDueCents ? 'complete' : 'incomplete';
+
+    const hasSelectedRetreatFull = selectedRetreats.some(
+      (k) => installmentsRetreatConfig[k]?.retreatFull === true,
+    );
+
+    return {
+      ok: true as const,
+      selectedRetreats,
+      minimumDueCents,
+      maximumDueCents,
+      offeredSoFarCents,
+      balanceDueCents,
+      status,
+      hasSelectedRetreatFull,
+      retreatPromptKeys: selectedRetreats.map((k) => installmentsRetreatConfig[k]?.prompt || k),
+    };
+  }, [isInstallmentsPresentation, installmentsRetreatConfig, installmentsSubEventName]);
+
+  useEffect(() => {
+    if (!isInstallmentsPresentation || paymentStep !== 'selection') return;
+    setFafFull((prev) =>
+      prev.map((person, pIdx) => {
+        if (!person.canOffer) return person;
+        const summary = getInstallmentsSummary(person);
+        if (!summary.ok || summary.status !== 'incomplete' || summary.balanceDueCents <= 0) return person;
+        const existing = person.currentOfferings?.[installmentsSubEventName];
+        if (existing && Number(existing.offeringAmount) > 0) return person;
+        const minCents = Math.max(1, Math.min(summary.minimumDueCents, summary.balanceDueCents));
+        const minDollars = minCents / 100;
+        setInstallmentsAmountInputByPerson((prevInputs) => ({
+          ...prevInputs,
+          [person.id]: minDollars.toFixed(2),
+        }));
+        const currentOfferings = { ...(person.currentOfferings || {}) };
+        currentOfferings[installmentsSubEventName] = {
+          offeringSelection: 'installments',
+          offeringIndex: -1,
+          offeringSKU: `${eventCode}-${installmentsSubEventName}-installments`,
+          offeringAmount: minCents,
+          offeringIntent: 'installments',
+          installments: true,
+        };
+        return { ...person, currentOfferings };
+      })
+    );
+  }, [
+    isInstallmentsPresentation,
+    paymentStep,
+    setFafFull,
+    getInstallmentsSummary,
+    installmentsSubEventName,
+    eventCode,
+  ]);
 
   /** Sum of amounts for this offering type across all remaining (unpaid) subevents; each subevent may have different amounts. */
   const getRemainingSumCents = useCallback(
@@ -463,11 +641,97 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     });
   }, [setFafFull]);
 
+  const setInstallmentsOfferingForPerson = useCallback((personIndex: number, amountDollars: number) => {
+    const subName = installmentsSubEventName;
+    const amountCents = Math.max(0, Math.round(amountDollars * 100));
+    setPersonOffering(personIndex, subName, {
+      offeringSelection: 'installments',
+      offeringIndex: -1,
+      offeringSKU: `${eventCode}-${subName}-installments`,
+      offeringAmount: amountCents,
+      offeringIntent: 'installments',
+      installments: true,
+    });
+  }, [eventCode, installmentsSubEventName, setPersonOffering]);
+
+  const checkoutTotalCents = React.useMemo(() => {
+    if (!isInstallmentsPresentation) return totalCents;
+    return fafFull.reduce((sum, person) => {
+      if (!person.canOffer) return sum;
+      const existing = Number(person.currentOfferings?.[installmentsSubEventName]?.offeringAmount);
+      if (Number.isFinite(existing) && existing > 0) return sum + existing;
+      const personSummary = getInstallmentsSummary(person);
+      if (!personSummary.ok || personSummary.status !== 'incomplete' || personSummary.balanceDueCents <= 0) return sum;
+      const personMinCents = Math.max(1, Math.min(personSummary.minimumDueCents, personSummary.balanceDueCents));
+      return sum + personMinCents;
+    }, 0);
+  }, [isInstallmentsPresentation, totalCents, fafFull, installmentsSubEventName, getInstallmentsSummary]);
+
   const handlePay = useCallback(async () => {
-    if (totalCents <= 0) return;
+    const amountForIntent = isInstallmentsPresentation ? checkoutTotalCents : totalCents;
+    if (amountForIntent <= 0) return;
     setProcessing(true);
     setPayError(null);
     try {
+      const effectiveFafFull = isInstallmentsPresentation
+        ? fafFull.map((person) => {
+            if (!person.canOffer) return person;
+            const existing = Number(person.currentOfferings?.[installmentsSubEventName]?.offeringAmount);
+            if (Number.isFinite(existing) && existing > 0) return person;
+            const personSummary = getInstallmentsSummary(person);
+            if (!personSummary.ok || personSummary.status !== 'incomplete' || personSummary.balanceDueCents <= 0) {
+              return person;
+            }
+            const personMinCents = Math.max(1, Math.min(personSummary.minimumDueCents, personSummary.balanceDueCents));
+            return {
+              ...person,
+              currentOfferings: {
+                ...(person.currentOfferings || {}),
+                [installmentsSubEventName]: {
+                  offeringSelection: 'installments',
+                  offeringIndex: -1,
+                  offeringSKU: `${eventCode}-${installmentsSubEventName}-installments`,
+                  offeringAmount: personMinCents,
+                  offeringIntent: 'installments',
+                  installments: true,
+                },
+              },
+            };
+          })
+        : fafFull;
+
+      let summaryString = effectiveFafFull.map((p) => p.name + ': ' + Object.keys(p.currentOfferings || {}).join(', ')).join('; ');
+      if (kmFeeCents > 0) {
+        summaryString += `; KM fee 5%: ${formatAmount(kmFeeCents, currency)}`;
+      }
+      const skuSummary = buildSkuSummary(effectiveFafFull, currency, kmFeeCents);
+      const cart = effectiveFafFull.filter((p) => p.canOffer).map((p) => ({
+        id: p.id,
+        name: p.name,
+        currentOfferings: p.currentOfferings,
+        offeringHistory: p.offeringHistory,
+      }));
+      setCheckoutCart(cart);
+
+      if (isRegisterTestMode) {
+        const createResp = await createMockOfferingTransaction(context.pid, context.hash, {
+          pid: context.pid,
+          amount: amountForIntent,
+          currency,
+          description: event?.name || 'Offering',
+          cart,
+          summaryString,
+          skuSummary,
+          eventCode,
+          eventName: event?.name,
+          payerEmail: context.student?.email,
+        });
+        if (createResp && 'redirected' in createResp) return;
+        setPaymentIntentId((createResp as { id: string }).id);
+        setPaymentStep('stripe');
+        return;
+      }
+
       let pk = publishableKey;
       if (!pk) {
         const configResp = await getStripeConfig(context.pid, context.hash);
@@ -475,21 +739,10 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
         pk = (configResp as { publishableKey: string }).publishableKey;
         if (pk) setPublishableKey(pk);
       }
-      let summaryString = fafFull.map((p) => p.name + ': ' + Object.keys(p.currentOfferings || {}).join(', ')).join('; ');
-      if (kmFeeCents > 0) {
-        summaryString += `; KM fee 5%: ${formatAmount(kmFeeCents, currency)}`;
-      }
-      const skuSummary = buildSkuSummary(fafFull, currency, kmFeeCents);
-      const cart = fafFull.filter((p) => p.canOffer).map((p) => ({
-        id: p.id,
-        name: p.name,
-        currentOfferings: p.currentOfferings,
-        offeringHistory: p.offeringHistory,
-      }));
       const createResp = await createStripePaymentIntent(context.pid, context.hash, {
         aid: eventCode,
         pid: context.pid,
-        amount: totalCents,
+        amount: amountForIntent,
         currency,
         description: event?.name || 'Offering',
         cart,
@@ -510,7 +763,21 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     } finally {
       setProcessing(false);
     }
-  }, [context, eventCode, event, fafFull, totalCents, currency, publishableKey]);
+  }, [
+    context,
+    eventCode,
+    event,
+    fafFull,
+    totalCents,
+    currency,
+    publishableKey,
+    isInstallmentsPresentation,
+    isRegisterTestMode,
+    checkoutTotalCents,
+    installmentsSubEventName,
+    getInstallmentsSummary,
+    kmFeeCents,
+  ]);
 
   const handlePaymentSuccess = useCallback(async () => {
     if (!paymentIntentId) return;
@@ -527,8 +794,9 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
         paymentIntentId,
         pid: context.pid,
         eventCode,
-        cart,
+        cart: checkoutCart ?? cart,
         subEventNames,
+        mockPayment: isRegisterTestMode,
       });
       const result = onComplete();
       if (result != null && typeof (result as Promise<unknown>).then === 'function') {
@@ -539,7 +807,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     } finally {
       setProcessing(false);
     }
-  }, [paymentIntentId, fafFull, context, eventCode, subEventNames, onComplete]);
+  }, [paymentIntentId, checkoutCart, fafFull, context, eventCode, subEventNames, onComplete, isRegisterTestMode]);
 
   if (loading) {
     return (
@@ -570,6 +838,38 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     typeof rawEventImage === 'string' && (rawEventImage.startsWith('http://') || rawEventImage.startsWith('https://'))
       ? rawEventImage
       : null;
+
+  if (paymentStep === 'stripe' && isRegisterTestMode && paymentIntentId) {
+    return (
+      <div className="max-w-2xl mx-auto rounded-lg shadow-xl border border-reg-border overflow-hidden bg-reg-panel text-reg-text">
+        {eventImageUrl && (
+          <img
+            src={eventImageUrl}
+            alt={event?.name ? `Event: ${event.name}` : 'Event'}
+            className="w-full h-auto block"
+          />
+        )}
+        <div className="p-6 space-y-4">
+          <h2 className="text-xl font-semibold text-reg-accent">Test Checkout</h2>
+          <p className="text-sm text-reg-muted">This is a simulated checkout page for register test mode.</p>
+          {payError && <p className="text-reg-error text-sm">{payError}</p>}
+          <div className="rounded border border-reg-border bg-reg-card p-4 flex items-center justify-between">
+            <span className="text-sm text-reg-muted">Amount</span>
+            <span className="text-sm font-semibold tabular-nums">{formatAmount(checkoutTotalCents, currency)}</span>
+          </div>
+          <button
+            type="button"
+            onClick={handlePaymentSuccess}
+            disabled={processing}
+            className="w-full flex items-center justify-between min-h-[2.75rem] px-6 py-2 rounded font-medium transition-colors shadow-lg bg-reg-accent-button text-reg-accent-button-text hover:bg-reg-accent-button-hover disabled:bg-reg-button-disabled disabled:text-reg-text-disabled disabled:cursor-not-allowed"
+          >
+            <span className="text-sm">{processing ? 'Please wait...' : 'Test Offering'}</span>
+            <span className="text-sm tabular-nums">{formatAmount(checkoutTotalCents, currency)}</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (paymentStep === 'stripe' && clientSecret && publishableKey) {
     const stripePromise = loadStripe(publishableKey);
@@ -665,6 +965,26 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     setPaymentStep('sponsoring');
   };
 
+  const openInstallmentsCard = (
+    personIndex: number,
+    promptKey: string,
+    minAmountDollars: number,
+    defaultAmountDollars: number,
+  ) => {
+    const subName = installmentsSubEventName;
+    const defaultCents = Math.round(defaultAmountDollars * 100);
+    setPersonOffering(personIndex, subName, {
+      offeringSelection: promptKey,
+      offeringIndex: -1,
+      offeringSKU: `${eventCode}-${subName}-${promptKey}`,
+      offeringAmount: defaultCents,
+      offeringIntent: 'installments',
+      installments: true,
+    });
+    setSponsoringAmountInput(Number(defaultAmountDollars).toFixed(2));
+    setSponsoringModal({ personIndex, subName, promptKey, minAmountDollars });
+    setPaymentStep('sponsoring');
+  };
   if (paymentStep === 'owyaa' && owyaaModal) {
     const person = fafFull[owyaaModal.personIndex];
     if (!person) return null;
@@ -716,7 +1036,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
         <div className="p-6 space-y-6">
           <div className="mb-4">
             {canEnterAmount && offeringIntroOwyaa ? (
-              <p className="text-base text-reg-text italic">{offeringIntroOwyaa}</p>
+              <HtmlPrompt html={offeringIntroOwyaa} className="text-base text-reg-text italic" />
             ) : (
               <h2 className="text-lg font-semibold text-reg-accent">{headerLabel}</h2>
             )}
@@ -835,7 +1155,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
         <div className="p-6 space-y-6">
           <div className="mb-4">
             {offeringIntroHeartGift ? (
-              <p className="text-base text-reg-text italic">{offeringIntroHeartGift}</p>
+              <HtmlPrompt html={offeringIntroHeartGift} className="text-base text-reg-text italic" />
             ) : (
               <h2 className="text-lg font-semibold text-reg-accent">{headerLabel}</h2>
             )}
@@ -951,7 +1271,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
         <div className="p-6 space-y-6">
           <div className="mb-4">
             {offeringIntroSponsoring ? (
-              <p className="text-base text-reg-text italic">{offeringIntroSponsoring}</p>
+              <HtmlPrompt html={offeringIntroSponsoring} className="text-base text-reg-text italic" />
             ) : null}
           </div>
           <div className="mt-4 flex flex-col md:flex-row gap-4 md:gap-6 items-start">
@@ -1037,11 +1357,11 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
               <div className="flex items-baseline justify-between mb-4 gap-4">
                 <h3 className="text-lg font-semibold text-reg-accent">{nextAndRemainingHeaderLabel}</h3>
                 {offeringIntro && (
-                  <p className="text-base text-reg-muted max-w-xs text-right italic">{offeringIntro}</p>
+                  <HtmlPrompt html={offeringIntro} className="text-base text-reg-muted max-w-xs text-right italic" />
                 )}
               </div>
             ) : offeringIntro ? (
-              <p className="mb-4 text-base text-reg-text italic">{offeringIntro}</p>
+              <HtmlPrompt html={offeringIntro} className="mb-4 text-base text-reg-text italic" />
             ) : null}
             {fafFull.map((person, pIdx) => {
               const unpaid = getUnpaidSubEventsForPerson(person);
@@ -1295,6 +1615,180 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     );
   }
 
+  if (offeringPresentation === 'installments') {
+    const canOfferInstallmentsPeople = fafFull.filter((p) => p.canOffer);
+    let installmentsSummaryError: string | null = null;
+    for (const p of canOfferInstallmentsPeople) {
+      const s = getInstallmentsSummary(p);
+      if (!s.ok) {
+        installmentsSummaryError = s.error;
+        break;
+      }
+    }
+    if (canOfferInstallmentsPeople.length === 0) {
+      return (
+        <div className="max-w-xl mx-auto p-6 rounded-lg border border-reg-error bg-reg-error-bg text-reg-error">
+          Installments cannot be offered because no eligible participant was found.
+        </div>
+      );
+    }
+    if (installmentsSummaryError) {
+      return (
+        <div className="max-w-xl mx-auto p-6 rounded-lg border border-reg-error bg-reg-error-bg text-reg-error">
+          {installmentsSummaryError}
+        </div>
+      );
+    }
+
+    let totalOfferedSoFarCents = 0;
+    let totalMaximumDueCents = 0;
+    let totalBalanceDueCents = 0;
+    const aggregatedRetreatPromptKeys: string[] = [];
+    const retreatPromptKeySeen = new Set<string>();
+    for (const p of canOfferInstallmentsPeople) {
+      const s = getInstallmentsSummary(p);
+      if (!s.ok) continue;
+      totalOfferedSoFarCents += s.offeredSoFarCents;
+      totalMaximumDueCents += s.maximumDueCents;
+      totalBalanceDueCents += s.balanceDueCents;
+      for (const pk of s.retreatPromptKeys) {
+        if (!retreatPromptKeySeen.has(pk)) {
+          retreatPromptKeySeen.add(pk);
+          aggregatedRetreatPromptKeys.push(pk);
+        }
+      }
+    }
+
+    const familyInstallmentsOverpaid = totalOfferedSoFarCents > totalMaximumDueCents;
+    const showFamilyInstallmentsComplete =
+      totalBalanceDueCents <= 0 && !familyInstallmentsOverpaid && totalMaximumDueCents > 0;
+    const installmentMaxCents = totalBalanceDueCents;
+    const showInstallmentsWaitListWarning =
+      waitListWarningHtml !== '' &&
+      fafFull.some((p) => {
+        if (!p.canOffer) return false;
+        const s = getInstallmentsSummary(p);
+        if (!s.ok) return false;
+        // Config marks a selected retreat as full (capacity) — show wait-list copy regardless of balance math.
+        if (s.hasSelectedRetreatFull) return true;
+        // Remaining balance is below the combined minimum installment (or step×retreats fallback).
+        if (s.status !== 'incomplete' || s.balanceDueCents <= 0) return false;
+        const n = Math.max(1, s.selectedRetreats.length);
+        const stepCents = Math.max(0, Math.round(installmentStepDollars * 100));
+        const fallbackMinimumCents = stepCents * n;
+        const effectiveMinimumCents =
+          s.minimumDueCents > 0 ? s.minimumDueCents : fallbackMinimumCents;
+        return effectiveMinimumCents > 0 && s.balanceDueCents < effectiveMinimumCents;
+      });
+    return (
+      <div className="max-w-2xl mx-auto rounded-lg shadow-xl border border-reg-border overflow-hidden bg-reg-panel text-reg-text">
+        {eventImageUrl && (
+          <img
+            src={eventImageUrl}
+            alt={event?.name ? `Event: ${event.name}` : 'Event'}
+            className="w-full h-auto block"
+          />
+        )}
+        <div className="p-6 space-y-6">
+          {payError && <p className="text-reg-error text-sm">{payError}</p>}
+          {offeringIntro && <HtmlPrompt html={offeringIntro} className="text-base text-reg-text italic" />}
+          {showInstallmentsWaitListWarning && (
+            <HtmlPrompt
+              html={waitListWarningHtml}
+              className="text-sm text-reg-text space-y-2 [&_a]:text-reg-accent [&_a]:underline"
+            />
+          )}
+          {installmentsIntroduction && (
+            <p className="text-sm text-reg-text whitespace-pre-wrap">{installmentsIntroduction}</p>
+          )}
+          <ul className="list-disc pl-6 text-sm text-reg-text space-y-1">
+            {aggregatedRetreatPromptKeys.map((promptKey) => (
+              <li key={promptKey}>{promptLookup(context, promptKey) || promptKey}</li>
+            ))}
+          </ul>
+          {totalOfferedSoFarCents > 0 && (
+            <div className="flex items-center justify-between border-t border-reg-border pt-4">
+              <p className="text-sm text-reg-text">{offeringsReceivedPrompt}</p>
+              <p className="text-sm font-semibold tabular-nums">{formatAmount(totalOfferedSoFarCents, currency)}</p>
+            </div>
+          )}
+          <div className={`flex items-center justify-between ${totalOfferedSoFarCents > 0 ? '' : 'border-t border-reg-border pt-4'}`}>
+            <p className="text-sm text-reg-text">{balanceDuePrompt}</p>
+            <p className="text-sm font-semibold tabular-nums">{formatAmount(totalBalanceDueCents, currency)}</p>
+          </div>
+          {familyInstallmentsOverpaid && (
+            <p className="text-sm text-reg-warning">
+              {(promptLookup(context, 'offeringOverpaid') || 'You have offered more than your current total due.') +
+                ` ${formatAmount(totalOfferedSoFarCents, currency)} / ${formatAmount(totalMaximumDueCents, currency)}`}
+            </p>
+          )}
+          {!familyInstallmentsOverpaid && installmentMaxCents > 0 && (
+            <div className="space-y-2">
+              {fafFull.map((person, pIdx) => {
+                if (!person.canOffer) return null;
+                const personSummary = getInstallmentsSummary(person);
+                if (!personSummary.ok) return null;
+                const personMinCents = Math.max(1, Math.min(personSummary.minimumDueCents, personSummary.balanceDueCents));
+                const personMinDollars = personMinCents / 100;
+                const personBalanceCents = personSummary.balanceDueCents;
+                const personBalanceDollars = personBalanceCents / 100;
+                const currentCents = Number(person.currentOfferings?.[installmentsSubEventName]?.offeringAmount);
+                const currentDollars = Number.isFinite(currentCents) ? currentCents / 100 : personMinDollars;
+                const entered = installmentsAmountInputByPerson[person.id];
+                const displayed = entered ?? currentDollars.toFixed(2);
+                return (
+                  <div key={person.id} className="pt-3 border-t border-reg-border space-y-2">
+                    <span className="text-reg-text text-sm block">{person.name}</span>
+                    <p className="text-xs text-reg-muted text-right">
+                      {`${formatAmount(personMinCents, currency)} - ${formatAmount(personBalanceCents, currency)}`}
+                    </p>
+                    <AmountStepper
+                      value={displayed}
+                      min={personMinDollars}
+                      max={personBalanceDollars}
+                      step={installmentStepDollars}
+                      currency={currency}
+                      onChange={(val) => {
+                        setInstallmentsAmountInputByPerson((prev) => ({ ...prev, [person.id]: val }));
+                        const parsed = parseMoneyDollars(val);
+                        if (!Number.isFinite(parsed)) {
+                          return;
+                        }
+                        const clamped = Math.min(Math.max(parsed, personMinDollars), personBalanceDollars);
+                        setInstallmentsOfferingForPerson(pIdx, clamped);
+                      }}
+                      placeholder={personMinDollars.toFixed(2)}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {showFamilyInstallmentsComplete && (
+            <p className="text-sm text-reg-muted">
+              {promptLookup(context, 'offeringCompleteCold') || 'Your offering is complete.'}
+            </p>
+          )}
+          {checkoutTotalCents > 0 && (
+            <div className="flex flex-col items-end pt-1 space-y-1">
+              <button
+                type="button"
+                onClick={handlePay}
+                disabled={processing}
+                className="w-full max-w-2xl flex items-center justify-between min-h-[2.75rem] px-6 py-2 rounded font-medium transition-colors shadow-lg bg-reg-accent-button text-reg-accent-button-text hover:bg-reg-accent-button-hover disabled:bg-reg-button-disabled disabled:text-reg-text-disabled disabled:cursor-not-allowed"
+              >
+                <span className="text-sm">
+                  {processing ? (promptLookup(context, 'pleaseWait') || 'Please wait...') : (promptLookup(context, 'offeringClick') || 'Click here to make an offering')}
+                </span>
+                <span className="text-sm tabular-nums">{formatAmount(checkoutTotalCents, currency)}</span>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-2xl mx-auto rounded-lg shadow-xl border border-reg-border overflow-hidden bg-reg-panel text-reg-text">
       {eventImageUrl && (
@@ -1335,9 +1829,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
           <div key={subName} className="p-6 rounded-lg border border-reg-border bg-reg-card-muted">
             {subEventCount === 1 ? (
               offeringIntro && (
-                <p className="mb-4 text-base text-reg-text italic">
-                  {offeringIntro}
-                </p>
+              <HtmlPrompt html={offeringIntro} className="mb-4 text-base text-reg-text italic" />
               )
             ) : (
               <div className="flex items-baseline justify-between mb-4 gap-4">
@@ -1345,9 +1837,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                   <h3 className="text-lg font-semibold text-reg-accent">{headerLabel}</h3>
                 )}
                 {offeringIntro && (
-                  <p className="text-base text-reg-muted max-w-xs text-right italic">
-                    {offeringIntro}
-                  </p>
+                  <HtmlPrompt html={offeringIntro} className="text-base text-reg-muted max-w-xs text-right italic" />
                 )}
               </div>
             )}

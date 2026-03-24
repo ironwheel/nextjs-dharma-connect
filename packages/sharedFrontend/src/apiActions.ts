@@ -1086,6 +1086,31 @@ export async function createStripePaymentIntent(
 }
 
 /**
+ * POST /api/offering/mock-create - create a mock offering-transaction record for register test mode.
+ * Returns { id }.
+ */
+export async function createMockOfferingTransaction(
+    pid: string,
+    hash: string,
+    body: {
+        pid: string;
+        amount: number;
+        currency: string;
+        description: string;
+        cart: any;
+        summaryString?: string;
+        skuSummary?: any[];
+        eventCode: string;
+        eventName?: string;
+        payerEmail?: string;
+    }
+): Promise<{ id: string } | RedirectedResponse> {
+    const response = await api.post(`${API_BASE_URL}/offering/mock-create`, pid, hash, body);
+    if (response && response.redirected) return { redirected: true };
+    return response;
+}
+
+/**
  * POST /api/stripe/update - update PaymentIntent amount.
  */
 export async function updateStripePaymentIntent(
@@ -1110,6 +1135,7 @@ export async function completeOffering(
         eventCode: string;
         cart: Array<{ id: string; name: string; currentOfferings?: Record<string, any>; offeringHistory?: Record<string, any> }>;
         subEventNames: string[];
+        mockPayment?: boolean;
     }
 ): Promise<{ success: boolean } | RedirectedResponse> {
     const response = await api.post(`${API_BASE_URL}/offering/complete`, pid, hash, body);
