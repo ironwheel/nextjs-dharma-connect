@@ -332,7 +332,7 @@ function PaymentForm({
   clientSecret: string;
   amount: number;
   currency: string;
-  onSuccess: () => void;
+  onSuccess: () => void | Promise<void>;
   onError: (msg: string) => void;
   context: ScriptContext;
 }) {
@@ -357,8 +357,15 @@ function PaymentForm({
       return;
     }
     if (paymentIntent?.status === 'succeeded') {
-      setLoading(false);
-      onSuccess();
+      // Keep the button disabled while we finalize the offering server-side.
+      // (Otherwise the form briefly re-enables before the UI transitions away.)
+      setMessage(promptLookup(context, 'stripeCaptureLoading') || 'Finalizing your offering…');
+      try {
+        await onSuccess();
+      } catch (e: any) {
+        onError(e?.message || 'Failed to complete offering');
+        setLoading(false);
+      }
       return;
     }
     setLoading(false);
@@ -1670,16 +1677,9 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
         if (!p.canOffer) return false;
         const s = getInstallmentsSummary(p);
         if (!s.ok) return false;
-        // Config marks a selected retreat as full (capacity) — show wait-list copy regardless of balance math.
-        if (s.hasSelectedRetreatFull) return true;
-        // Remaining balance is below the combined minimum installment (or step×retreats fallback).
-        if (s.status !== 'incomplete' || s.balanceDueCents <= 0) return false;
-        const n = Math.max(1, s.selectedRetreats.length);
-        const stepCents = Math.max(0, Math.round(installmentStepDollars * 100));
-        const fallbackMinimumCents = stepCents * n;
-        const effectiveMinimumCents =
-          s.minimumDueCents > 0 ? s.minimumDueCents : fallbackMinimumCents;
-        return effectiveMinimumCents > 0 && s.balanceDueCents < effectiveMinimumCents;
+        // Show only when paid so far is below the combined minimum for the selected retreats.
+        // (No dependence on retreatFull; no "balance < minimum" inference.)
+        return s.minimumDueCents > 0 && s.offeredSoFarCents < s.minimumDueCents;
       });
     return (
       <div className="max-w-2xl mx-auto rounded-lg shadow-xl border border-reg-border overflow-hidden bg-reg-panel text-reg-text">
