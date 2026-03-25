@@ -873,6 +873,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
 
   if (paymentStep === 'stripe' && clientSecret && publishableKey) {
     const stripePromise = loadStripe(publishableKey);
+    const paymentAmountCents = isInstallmentsPresentation ? checkoutTotalCents : totalCents;
     return (
       <div className="max-w-2xl mx-auto rounded-lg shadow-xl border border-reg-border overflow-hidden bg-reg-panel text-reg-text">
         {eventImageUrl && (
@@ -888,7 +889,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
           <StripeElements stripe={stripePromise} options={{ clientSecret }}>
             <PaymentForm
               clientSecret={clientSecret}
-              amount={totalCents}
+              amount={paymentAmountCents}
               currency={currency}
               onSuccess={handlePaymentSuccess}
               onError={setPayError}
