@@ -325,12 +325,12 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
     # Replace any ||name|| fields with the person's name
     html = html.replace("||name||", f"{student.get('first', '')} {student.get('last', '')}")
 
-    # Replace ||retreats|| with the contents of the whichRetreats field for this aid
-    if "#retreats" in html:
+    # Replace #retreats / ||retreats|| with the contents of the whichRetreats field for this aid
+    if ("#retreats" in html) or ("||retreats||" in html):
         try:
             which_retreats_config = event['config']['whichRetreatsConfig']
         except:
-            raise Exception("Can't use ||retreats||. No whichRetreatsConfig object found for event.")
+            raise Exception("Can't use #retreats/||retreats||. No whichRetreatsConfig object found for event.")
         
         retreats_html = "<ul>"
         keys = list(student['programs'][event['aid']]['whichRetreats'].keys())
@@ -343,13 +343,14 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
                 full_language = code_to_full_language(language)
                 prompt_text = prompt_lookup(prompts_array, which_retreats_config[key]['prompt'], full_language, event['aid'])
                 if not prompt_text:
-                    raise Exception(f"Can't use ||retreats||. No prompt found for: {which_retreats_config[key]['prompt']}, {full_language}")
+                    raise Exception(f"Can't use #retreats/||retreats||. No prompt found for: {which_retreats_config[key]['prompt']}, {full_language}")
                 at_least_one = True
                 retreats_html += f'<li><b>{prompt_text}</b></li>'
         
         retreats_html += "</ul>"
         if not at_least_one:
-            raise Exception(f"||retreats|| failed at least one rule: {student.get('first')}, {student.get('last')}, {student.get('id')}")
+            raise Exception(f"#retreats/||retreats|| failed at least one rule: {student.get('first')}, {student.get('last')}, {student.get('id')}")
+        html = html.replace("#retreats", retreats_html)
         html = html.replace("||retreats||", retreats_html)
 
     # Replace ||balance|| with the balance due, only supports installments
