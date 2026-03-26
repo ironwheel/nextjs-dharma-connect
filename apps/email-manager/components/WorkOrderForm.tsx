@@ -189,6 +189,12 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
     const lastValidationRef = useRef<{ eventCode: string, subEvent: string, stage: string } | null>(null)
     const attemptedStageRef = useRef<string>('')
 
+    const normalizeRevision = (value: unknown): string | undefined => {
+        if (value === null || value === undefined) return undefined
+        const asString = String(value).trim()
+        return asString.length > 0 ? asString : undefined
+    }
+
 
     // Fetch events and config on mount
     useEffect(() => {
@@ -541,8 +547,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             // When editing, check if structural fields changed
             const existingWorkOrder = loadedWorkOrderRef.current
             if (existingWorkOrder) {
-                const currentRevision = revisionEnabled ? revision : undefined
-                const existingRevision = existingWorkOrder.revision
+                const currentRevision = normalizeRevision(revisionEnabled ? revision : undefined)
+                const existingRevision = normalizeRevision(existingWorkOrder.revision)
                 const revisionChanged = currentRevision !== existingRevision
 
                 // Note: testers and sendContinuously are intentionally excluded from structuralFieldsChanged
@@ -678,8 +684,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 s3HTMLPathsValue = s3HTMLPaths
             } else if (id && loadedWorkOrderRef.current) {
                 // Check if revision changed - if so, clear s3HTMLPaths
-                const currentRevision = revisionEnabled ? revision : undefined
-                const existingRevision = loadedWorkOrderRef.current.revision
+                const currentRevision = normalizeRevision(revisionEnabled ? revision : undefined)
+                const existingRevision = normalizeRevision(loadedWorkOrderRef.current.revision)
                 const revisionChanged = currentRevision !== existingRevision
 
                 if (revisionChanged) {
