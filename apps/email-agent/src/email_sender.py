@@ -326,7 +326,7 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
     html = html.replace("||name||", f"{student.get('first', '')} {student.get('last', '')}")
 
     # Replace ||retreats|| with the contents of the whichRetreats field for this aid
-    if "||retreats||" in html:
+    if "#retreats" in html:
         try:
             which_retreats_config = event['config']['whichRetreatsConfig']
         except:
