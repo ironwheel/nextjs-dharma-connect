@@ -439,6 +439,11 @@ const Home = () => {
 
     // Helper: Fetch Raw Transactions (Lazy)
     const normalizeV2OfferingTransaction = (rec: any): Transaction => {
+        const rawStatus = typeof rec?.status === 'string' ? rec.status.toLowerCase() : '';
+        const dashboardStatus = typeof rec?.dashboardStatus === 'string' ? rec.dashboardStatus.toUpperCase() : '';
+        const isRefunded = rawStatus === 'refunded' || dashboardStatus === 'REFUNDED';
+        const isSucceeded = rawStatus === 'succeeded' || dashboardStatus === 'COMPLETED';
+
         const skuSummary: any[] = Array.isArray(rec?.skuSummary) ? rec.skuSummary : [];
         const kmLine = skuSummary.find((x: any) => x?.subEvent === 'kmFee');
         const kmFeeCents = kmLine?.amountCents != null ? Number(kmLine.amountCents) : 0;
@@ -448,9 +453,7 @@ const Home = () => {
         const dashboardStripeFeeCents =
             rec?.dashboardStripeFeeCents != null ? Number(rec.dashboardStripeFeeCents) : 0;
 
-        const status =
-            rec?.dashboardStatus ??
-            (rec?.status === 'refunded' ? 'REFUNDED' : 'COMPLETED');
+        const status = dashboardStatus || (isRefunded ? 'REFUNDED' : (isSucceeded ? 'COMPLETED' : rawStatus.toUpperCase()));
 
         // Dashboard formulas treat KM fee specially:
         // - For COMPLETED rows, Net subtracts (fee + km), so `payerData.amount` should include KM.
@@ -494,7 +497,8 @@ const Home = () => {
                 net: dashboardAmountCents - (dashboardStripeFeeCents + kmFeeCents),
             },
             refundedAt,
-            step: rec?.dashboardStep ?? 'confirmCardPayment',
+            // Keep non-terminal states out of the strict dashboard flow unless explicitly mapped.
+            step: rec?.dashboardStep ?? ((isSucceeded || isRefunded) ? 'confirmCardPayment' : ''),
             status,
             summary: rec?.summaryString ?? '',
             timestamp,
