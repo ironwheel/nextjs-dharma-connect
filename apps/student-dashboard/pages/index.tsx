@@ -183,7 +183,7 @@ const HomeContent = () => {
             const eventCodes: string[] = [];
             for (const parentEvent of events) {
                 if (typeof parentEvent.subEvents !== 'undefined' &&
-                    checkEligibility(parentEvent.config.pool, student, parentEvent.aid, pools)) {
+                    checkEligibility(parentEvent.config.pool, student, parentEvent.aid, pools, parentEvent)) {
                     eventCodes.push(parentEvent.aid);
                 }
             }
@@ -543,7 +543,7 @@ const HomeContent = () => {
                         const eventCodes: string[] = [];
                         for (const parentEvent of events) {
                             if (typeof parentEvent.subEvents !== 'undefined' &&
-                                checkEligibility(parentEvent.config.pool, student, parentEvent.aid, pools)) {
+                                checkEligibility(parentEvent.config.pool, student, parentEvent.aid, pools, parentEvent)) {
                                 eventCodes.push(parentEvent.aid);
                             }
                         }
@@ -804,7 +804,7 @@ const HomeContent = () => {
             }
 
             // Check eligibility
-            if (!checkEligibility(parentEvent.config.pool, student, parentEvent.aid, pools)) {
+            if (!checkEligibility(parentEvent.config.pool, student, parentEvent.aid, pools, parentEvent)) {
                 continue;
             }
 

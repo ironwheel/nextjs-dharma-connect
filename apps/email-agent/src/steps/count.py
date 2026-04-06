@@ -4,7 +4,7 @@ Counts the number of people who have received the email and those who will recei
 """
 
 import asyncio
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Tuple, Optional
 from ..models import WorkOrder, Step
 from ..aws_client import AWSClient
 from ..eligible import check_eligibility
@@ -197,7 +197,7 @@ class CountStep:
                 continue
                 
             is_eligible = check_eligibility(
-                pool_name, student, work_order.eventCode, pools_data, work_order.subEvent
+                pool_name, student, work_order.eventCode, pools_data, work_order.subEvent, event_data
             )
             
             if not is_eligible:
@@ -205,7 +205,7 @@ class CountStep:
             
             # Apply stage-specific filtering using shared function
             try:
-                if passes_stage_filter(stage_record, self._create_eligible_object(student, work_order.eventCode, pools_data, work_order.subEvent)):
+                if passes_stage_filter(stage_record, self._create_eligible_object(student, work_order.eventCode, pools_data, work_order.subEvent, event_data)):
                     will_receive_count += 1
             except ValueError as e:
                 # Re-raise with full context
@@ -213,19 +213,20 @@ class CountStep:
         
         return received_count, will_receive_count
 
-    def _create_eligible_object(self, student: Dict, event_code: str, pools_data: List[Dict], sub_event: str):
+    def _create_eligible_object(self, student: Dict, event_code: str, pools_data: List[Dict], sub_event: str, event_data: Optional[Dict] = None):
         """Create an object with check_eligibility method for the shared function"""
         class EligibleChecker:
-            def __init__(self, student, event_code, pools_data, sub_event):
+            def __init__(self, student, event_code, pools_data, sub_event, event_data):
                 self.student = student
                 self.event_code = event_code
                 self.pools_data = pools_data
                 self.sub_event = sub_event
+                self.event_data = event_data
             
             def check_eligibility(self, pool_name):
-                return check_eligibility(pool_name, self.student, self.event_code, self.pools_data, self.sub_event)
+                return check_eligibility(pool_name, self.student, self.event_code, self.pools_data, self.sub_event, self.event_data)
         
-        return EligibleChecker(student, event_code, pools_data, sub_event)
+        return EligibleChecker(student, event_code, pools_data, sub_event, event_data)
 
     async def _update_progress(self, work_order: WorkOrder, message: str):
         """Update the work order progress message."""

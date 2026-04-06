@@ -11,6 +11,7 @@ import {
     checkEligibility,
     completeOffering,
     sumInstallmentPaymentsCents,
+    applyInstallmentsLimitFeeToSelectedRetreats,
 } from 'sharedFrontend';
 import { ScriptEngine } from '../components/script/ScriptEngine';
 import { promptLookup } from '../components/script/StepComponents';
@@ -148,8 +149,13 @@ function installmentsPersonLineTotals(
     for (const k of selectedRetreats) {
         if (!whichRetreatsConfig[k]) return null;
     }
+    const retreatsForTotals = applyInstallmentsLimitFeeToSelectedRetreats(
+        selectedRetreats,
+        program,
+        event?.config?.offeringLimitFeeCount,
+    );
     let maximumDueCents = 0;
-    for (const retreatKey of selectedRetreats) {
+    for (const retreatKey of retreatsForTotals) {
         const cfg = whichRetreatsConfig[retreatKey];
         const total = Number(cfg?.offeringTotal ?? 0);
         const cashTotal = Number(cfg?.offeringCashTotal ?? 0);
@@ -431,7 +437,12 @@ export default function Home() {
         const whichRetreatsConfig = event.config?.whichRetreatsConfig || {};
         const whichRetreats = prog?.whichRetreats || {};
         const selectedRetreats = Object.keys(whichRetreats).filter((k) => whichRetreats[k] === true);
-        const installmentsDueCents = selectedRetreats.reduce((sum: number, retreatKey: string) => {
+        const retreatsForDue = applyInstallmentsLimitFeeToSelectedRetreats(
+            selectedRetreats,
+            prog,
+            event.config?.offeringLimitFeeCount,
+        );
+        const installmentsDueCents = retreatsForDue.reduce((sum: number, retreatKey: string) => {
             const cfg = whichRetreatsConfig?.[retreatKey];
             const total = Number(cfg?.offeringTotal ?? 0);
             const cash = Number(cfg?.offeringCashTotal ?? 0);
@@ -772,7 +783,7 @@ export default function Home() {
             ? undefined
             : (poolName: string, studentData: any, currentAid: string, allPoolsData: any[]) => {
                 if (poolName === 'oath') return !!oathEligibilityOverride;
-                return checkEligibility(poolName, studentData, currentAid, allPoolsData);
+                return checkEligibility(poolName, studentData, currentAid, allPoolsData, data.event);
             },
     };
 
@@ -784,7 +795,7 @@ export default function Home() {
     const isEligibleForEvent =
         data.student?.debug?.registerTest === true && testModeOathEligibility !== 'actual'
             ? (testModeOathEligibility === 'true')
-            : (!eventPool || checkEligForEvent(eventPool, data.student, activeEventCode, data.pools || []));
+            : (!eventPool || checkEligForEvent(eventPool, data.student, activeEventCode, data.pools || [], data.event));
 
     const rawEventImage = data.event?.config?.eventImage ?? context.config?.eventImage;
     const eventImageUrl =
@@ -798,7 +809,12 @@ export default function Home() {
     const selectedRetreats = Object.entries(activeProgram?.whichRetreats || {})
         .filter(([, selected]) => selected === true)
         .map(([k]) => k);
-    const installmentsDueCents = selectedRetreats.reduce((sum: number, retreatKey: string) => {
+    const retreatsForInstallmentsDue = applyInstallmentsLimitFeeToSelectedRetreats(
+        selectedRetreats,
+        activeProgram,
+        data.event?.config?.offeringLimitFeeCount,
+    );
+    const installmentsDueCents = retreatsForInstallmentsDue.reduce((sum: number, retreatKey: string) => {
         const cfg = (whichRetreatsConfig as any)?.[retreatKey];
         const total = Number(cfg?.offeringTotal ?? 0);
         const cash = Number(cfg?.offeringCashTotal ?? 0);
