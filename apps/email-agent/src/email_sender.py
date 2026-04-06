@@ -14,7 +14,7 @@ from decimal import Decimal, InvalidOperation
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.headerregistry import Address
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import boto3
 from botocore.exceptions import ClientError
 
@@ -23,7 +23,7 @@ from .config import (
     EMAIL_ACCOUNT_CREDENTIALS_TABLE, AWS_REGION, REGLINKV2_HASHGEN_SECRET
 )
 from .prompts import prompt_lookup
-from .eligible import check_eligibility, apply_installments_limit_fee_selected
+from .eligible import check_eligibility, apply_installments_limit_fee_selected, _installments_paid_cents
 from .steps.shared import code_to_full_language
 
 # Cache for email account credentials to avoid repeated DynamoDB calls
@@ -40,6 +40,53 @@ def _retreat_net_offering_dollars(wrc_row: Dict) -> float:
     except (TypeError, ValueError):
         return 0.0
     return max(0.0, tot - cash)
+
+
+def _installments_fee_limited_thresholds_cents(program: Dict, event: Dict) -> Tuple[int, int]:
+    """
+    Minimum and net-balance thresholds (cents) for selected retreats after apply_installments_limit_fee_selected.
+    Mirrors apps/email-agent eligible installment pool logic.
+    """
+    cfg = event.get('config') or {}
+    which_config = cfg.get('whichRetreatsConfig')
+    if not isinstance(which_config, dict):
+        raise Exception("Installments macros require config.whichRetreatsConfig.")
+    wr = program.get('whichRetreats')
+    if not wr or not isinstance(wr, dict):
+        raise Exception("Installments macros require student program whichRetreats.")
+    selected = [k for k, v in wr.items() if v]
+    if not selected:
+        raise Exception("Installments macros require at least one selected retreat.")
+    selected = apply_installments_limit_fee_selected(selected, program, cfg)
+    min_cents = 0
+    bal_cents = 0
+    for key in selected:
+        rc = which_config.get(key)
+        if not isinstance(rc, dict):
+            raise Exception(f"Installments macros: whichRetreatsConfig missing entry for retreat '{key}'.")
+        try:
+            om = float(rc.get('offeringMinimum') or 0)
+            min_cents += max(0, int(round(om * 100)))
+        except (TypeError, ValueError) as e:
+            raise Exception(f"Installments macros: invalid offeringMinimum for '{key}'.") from e
+        try:
+            tot = float(rc.get('offeringTotal') or 0)
+            cash = float(rc.get('offeringCashTotal') or 0)
+            bal_cents += max(0, int(round((tot - cash) * 100)))
+        except (TypeError, ValueError) as e:
+            raise Exception(f"Installments macros: invalid offering totals for '{key}'.") from e
+    return min_cents, bal_cents
+
+
+def _macro_currency_parts(event: Dict) -> Tuple[str, str]:
+    """(symbol, abbrev) matching ||balance|| conventions."""
+    try:
+        currency = event['config']['currency']
+    except Exception:
+        currency = 'USD'
+    if currency != 'EUR':
+        return '$', 'USD'
+    return '€', 'EUR'
 
 
 def _sum_installment_payments_received(installments: Dict) -> float:
@@ -389,6 +436,27 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
         
         balance = f"{currency_symbol}{total - received} {currency_abbrev}"
         html = html.replace("||balance||", balance)
+
+    # #depositdue / #balancedue — fee-limited minimum or net balance remaining vs paid (installments only)
+    if '#depositdue' in html or '#balancedue' in html:
+        cfg = event.get('config') or {}
+        if str(cfg.get('offeringPresentation') or '').lower() != 'installments':
+            raise Exception(
+                "Can't use #depositdue or #balancedue unless config.offeringPresentation is 'installments'."
+            )
+        try:
+            prog = student['programs'][event['aid']]
+        except Exception as e:
+            raise Exception("Can't use #depositdue or #balancedue: missing student programs for event aid.") from e
+        min_cents, bal_cents = _installments_fee_limited_thresholds_cents(prog, event)
+        paid_cents = _installments_paid_cents(prog.get('offeringHistory'), bool(cfg.get('reglinkv2')))
+        deposit_remaining = max(0, min_cents - paid_cents)
+        balance_remaining = max(0, bal_cents - paid_cents)
+        currency_symbol, currency_abbrev = _macro_currency_parts(event)
+        dep_str = f"{currency_symbol}{deposit_remaining / 100.0:.2f} {currency_abbrev}"
+        bal_str = f"{currency_symbol}{balance_remaining / 100.0:.2f} {currency_abbrev}"
+        html = html.replace('#depositdue', dep_str)
+        html = html.replace('#balancedue', bal_str)
 
     # Swap out the title and preview
     preview = DEFAULT_PREVIEW.replace('"', '')
