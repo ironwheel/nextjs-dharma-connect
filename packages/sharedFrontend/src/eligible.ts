@@ -5,7 +5,11 @@
  * @description Utility function to check student eligibility based on pool definitions.
  */
 
-import { subeventHasOfferingActivity } from './installmentsHelpers';
+import {
+  applyInstallmentsLimitFeeToSelectedRetreats,
+  installmentsPaidCentsForCompare,
+  subeventHasOfferingActivity,
+} from './installmentsHelpers';
 
 // TypeScript interfaces for the data structures
 export interface StudentData {
@@ -15,7 +19,7 @@ export interface StudentData {
 }
 
 export interface PoolAttribute {
-    type: 'true' | 'pool' | 'pooldiff' | 'pooland' | 'practice' | 'offering' | 'currenteventoffering' | 'currenteventtest' | 'currenteventnotoffering' | 'offeringandpools' | 'oath' | 'attended' | 'join' | 'currenteventjoin' | 'currenteventmanualinclude' | 'currenteventaccepted' | 'currenteventnotjoin' | 'joinwhich' | 'offeringwhich' | 'eligible' | 'specifiedAIDBool';
+    type: 'true' | 'pool' | 'pooldiff' | 'pooland' | 'practice' | 'offering' | 'currenteventoffering' | 'currenteventtest' | 'currenteventnotoffering' | 'currenteventminimumdue' | 'currenteventbalancedue' | 'offeringandpools' | 'oath' | 'attended' | 'join' | 'currenteventjoin' | 'currenteventmanualinclude' | 'currenteventaccepted' | 'currenteventnotjoin' | 'joinwhich' | 'offeringwhich' | 'eligible' | 'specifiedAIDBool';
     name?: string;
     inpool?: string;
     outpool?: string;
@@ -35,6 +39,51 @@ export interface Pool {
     [key: string]: any;
 }
 
+function currentEventInstallmentsPaidLtThreshold(
+    studentData: StudentData,
+    currentAid: string,
+    eventContext: Record<string, any> | undefined,
+    mode: 'minimum' | 'balance',
+): boolean {
+    if (!eventContext) return false;
+    const program = studentData.programs?.[currentAid];
+    if (!program || typeof program !== 'object' || (program as { withdrawn?: boolean }).withdrawn) return false;
+    const cfg = (eventContext as { config?: Record<string, unknown> }).config || {};
+    if (String(cfg.offeringPresentation || '').toLowerCase() !== 'installments') return false;
+    const whichConfig = cfg.whichRetreatsConfig;
+    if (!whichConfig || typeof whichConfig !== 'object') return false;
+    const wr = (program as { whichRetreats?: Record<string, boolean> }).whichRetreats;
+    if (!wr || typeof wr !== 'object') return false;
+    const selectedAll = Object.entries(wr)
+        .filter(([, v]) => v === true)
+        .map(([k]) => k);
+    if (!selectedAll.length) return false;
+    const selectedRetreats = applyInstallmentsLimitFeeToSelectedRetreats(
+        selectedAll,
+        program as { limitFee?: boolean },
+        cfg.offeringLimitFeeCount,
+    );
+    let minCents = 0;
+    let balCents = 0;
+    for (const key of selectedRetreats) {
+        const rc = (whichConfig as Record<string, unknown>)[key];
+        if (!rc || typeof rc !== 'object') return false;
+        const row = rc as { offeringMinimum?: unknown; offeringTotal?: unknown; offeringCashTotal?: unknown };
+        const om = Number(row.offeringMinimum ?? 0);
+        minCents += Math.max(0, Math.round(om * 100));
+        const total = Number(row.offeringTotal ?? 0);
+        const cashTotal = Number(row.offeringCashTotal ?? 0);
+        balCents += Math.max(0, Math.round((total - cashTotal) * 100));
+    }
+    const historyUsesCents = !!cfg.reglinkv2;
+    const paidCents = installmentsPaidCentsForCompare(
+        (program as { offeringHistory?: Record<string, unknown> }).offeringHistory,
+        historyUsesCents,
+    );
+    if (mode === 'minimum') return paidCents < minCents;
+    return paidCents < balCents;
+}
+
 /**
  * @function checkEligibility
  * @description Checks if a student is eligible for content based on pool definitions.
@@ -42,13 +91,15 @@ export interface Pool {
  * @param {StudentData} studentData - The student data object containing programs, practice info, etc.
  * @param {string} currentAid - The AID of the current event context, for program-specific checks.
  * @param {Pool[]} allPoolsData - The complete array of pool definition objects.
+ * @param eventContext - Optional event record (e.g. { config, aid }) for attributes that read event config.
  * @returns {boolean} True if the student is eligible according to the specified pool, false otherwise.
  */
 export function checkEligibility(
     poolName: string,
     studentData: StudentData,
     currentAid: string,
-    allPoolsData: Pool[]
+    allPoolsData: Pool[],
+    eventContext?: Record<string, any> | null,
 ): boolean {
     if (!Array.isArray(allPoolsData)) {
         console.error("Eligibility check error: Expected allPoolsData to be an array, but received:", typeof allPoolsData, allPoolsData);
@@ -77,19 +128,19 @@ export function checkEligibility(
                 break;
             case 'pool':
                 if (attr.name) {
-                    isEligible = checkEligibility(attr.name, studentData, currentAid, allPoolsData);
+                    isEligible = checkEligibility(attr.name, studentData, currentAid, allPoolsData, eventContext);
                 }
                 break;
             case 'pooldiff':
                 if (attr.inpool && attr.outpool) {
-                    isEligible = checkEligibility(attr.inpool, studentData, currentAid, allPoolsData) &&
-                        !checkEligibility(attr.outpool, studentData, currentAid, allPoolsData);
+                    isEligible = checkEligibility(attr.inpool, studentData, currentAid, allPoolsData, eventContext) &&
+                        !checkEligibility(attr.outpool, studentData, currentAid, allPoolsData, eventContext);
                 }
                 break;
             case 'pooland':
                 if (attr.pool1 && attr.pool2) {
-                    isEligible = checkEligibility(attr.pool1, studentData, currentAid, allPoolsData) &&
-                        checkEligibility(attr.pool2, studentData, currentAid, allPoolsData);
+                    isEligible = checkEligibility(attr.pool1, studentData, currentAid, allPoolsData, eventContext) &&
+                        checkEligibility(attr.pool2, studentData, currentAid, allPoolsData, eventContext);
                 }
                 break;
             case 'practice':
@@ -132,6 +183,12 @@ export function checkEligibility(
                     );
                 }
                 break;
+            case 'currenteventminimumdue':
+                isEligible = currentEventInstallmentsPaidLtThreshold(studentData, currentAid, eventContext ?? undefined, 'minimum');
+                break;
+            case 'currenteventbalancedue':
+                isEligible = currentEventInstallmentsPaidLtThreshold(studentData, currentAid, eventContext ?? undefined, 'balance');
+                break;
             case 'offeringandpools':
                 if (
                     attr.aid &&
@@ -139,7 +196,7 @@ export function checkEligibility(
                     attr.pools &&
                     subeventHasOfferingActivity(studentData.programs?.[attr.aid]?.offeringHistory?.[attr.subevent])
                 ) {
-                    isEligible = !!(attr.pools.some((p) => checkEligibility(p, studentData, currentAid, allPoolsData)));
+                    isEligible = !!(attr.pools.some((p) => checkEligibility(p, studentData, currentAid, allPoolsData, eventContext)));
                 }
                 break;
             case 'oath':

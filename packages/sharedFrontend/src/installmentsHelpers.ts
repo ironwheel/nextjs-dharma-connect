@@ -36,3 +36,41 @@ export function subeventHasOfferingActivity(subEntry: Record<string, unknown> | 
   const inst = (subEntry as { installments?: Record<string, unknown> }).installments;
   return sumInstallmentPaymentsCents(inst) > 0;
 }
+
+/**
+ * When installments + limitFee + config.offeringLimitFeeCount apply, only the first N selected
+ * retreats (in Object.entries iteration order) contribute to minimum/balance totals.
+ */
+export function applyInstallmentsLimitFeeToSelectedRetreats(
+  selectedRetreatsInOrder: string[],
+  program: { limitFee?: boolean } | undefined | null,
+  offeringLimitFeeCount: unknown,
+): string[] {
+  if (!selectedRetreatsInOrder.length) return selectedRetreatsInOrder;
+  if (!program?.limitFee) return selectedRetreatsInOrder;
+  if (typeof offeringLimitFeeCount === 'boolean') return selectedRetreatsInOrder;
+  const n = Number(offeringLimitFeeCount);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1 || n >= selectedRetreatsInOrder.length) {
+    return selectedRetreatsInOrder;
+  }
+  return selectedRetreatsInOrder.slice(0, n);
+}
+
+/** Sum installment payments across all subevents; convert to cents for comparison to config thresholds. */
+export function installmentsPaidCentsForCompare(
+  offeringHistory: Record<string, unknown> | undefined,
+  historyUsesCents: boolean,
+): number {
+  let raw = 0;
+  if (offeringHistory && typeof offeringHistory === 'object') {
+    for (const sub of Object.values(offeringHistory)) {
+      const inst =
+        sub && typeof sub === 'object'
+          ? (sub as { installments?: Record<string, unknown> }).installments
+          : undefined;
+      raw += sumInstallmentPaymentsCents(inst);
+    }
+  }
+  if (historyUsesCents) return Math.round(raw);
+  return Math.round(raw * 100);
+}

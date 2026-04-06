@@ -5,7 +5,7 @@ Provides shared functionality for scanning students and sending emails.
 
 import asyncio
 import time
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Tuple, Optional
 from datetime import datetime, timezone
 from ..models import WorkOrder, Step, StepStatus
 from ..aws_client import AWSClient
@@ -407,19 +407,20 @@ class SendBaseStep:
             print(f"[WARNING] Failed to get stage record for {stage}: {e}")
         return {}
 
-    def _create_eligible_object(self, student: Dict, event_code: str, pools_data: List[Dict], sub_event: str):
+    def _create_eligible_object(self, student: Dict, event_code: str, pools_data: List[Dict], sub_event: str, event_data: Optional[Dict] = None):
         """Create an object with check_eligibility method for the shared function"""
         class EligibleChecker:
-            def __init__(self, student, event_code, pools_data, sub_event):
+            def __init__(self, student, event_code, pools_data, sub_event, event_data):
                 self.student = student
                 self.event_code = event_code
                 self.pools_data = pools_data
                 self.sub_event = sub_event
+                self.event_data = event_data
             
             def check_eligibility(self, pool_name):
-                return check_eligibility(pool_name, self.student, self.event_code, self.pools_data, self.sub_event)
+                return check_eligibility(pool_name, self.student, self.event_code, self.pools_data, self.sub_event, self.event_data)
         
-        return EligibleChecker(student, event_code, pools_data, sub_event)
+        return EligibleChecker(student, event_code, pools_data, sub_event, event_data)
 
     async def _send_student_email(self, student: Dict, language: str, work_order: WorkOrder, 
                                  event_data: Dict, pools_data: List[Dict], prompts_data: List[Dict], 

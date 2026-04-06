@@ -21,7 +21,8 @@ import {
     getTableCount,
     checkEligibility,
     deleteTableItem,
-    Pool
+    Pool,
+    applyInstallmentsLimitFeeToSelectedRetreats,
 } from 'sharedFrontend';
 
 // Import custom DataTable component
@@ -247,7 +248,7 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
     // Use eligibility logic
     const getEligibility = (event: Event, subEventKey: string) => {
         if (!event.config?.pool) return false;
-        return checkEligibility(event.config.pool, student, event.aid, allPools);
+        return checkEligibility(event.config.pool, student, event.aid, allPools, event);
     };
     // Get offering info
     const getOffering = (event: Event, subEventKey: string) => {
@@ -801,7 +802,7 @@ const Home = () => {
                 }
                 */
                 if (currentEvent.config?.pool && Array.isArray(pools) && pools.length > 0) {
-                    const isEligible = checkEligibility(currentEvent.config.pool, student, currentEvent.aid, pools);
+                    const isEligible = checkEligibility(currentEvent.config.pool, student, currentEvent.aid, pools, currentEvent);
                     if (isEligible) {
                         eligibleStudents.push(student);
                     }
@@ -2277,7 +2278,7 @@ const Home = () => {
             } else if (cond.name === 'poolMember') {
                 let result = true;
                 if (typeof checkEligibility !== 'undefined') {
-                    result = checkEligibility(cond.pool, student, currentEvent.aid, allPools);
+                    result = checkEligibility(cond.pool, student, currentEvent.aid, allPools, currentEvent);
                 }
                 if (!result) return false;
             } else if (cond.name === 'offering' || cond.name === 'deposit') {
@@ -2290,17 +2291,18 @@ const Home = () => {
                         if (!cond.boolValue) return false;
                     } else {
                         const historyUsesCents = installmentOfferingHistoryUsesCents(currentEvent.config);
-                        let limitCount = 100;
-                        let count = 0;
-                        if (eventRecordForStudent.limitFee) limitCount = 2;
                         if (eventRecordForStudent.whichRetreats && currentEvent.config?.whichRetreatsConfig) {
-                            for (const [retreat, value] of Object.entries(eventRecordForStudent.whichRetreats)) {
-                                if (value && currentEvent.config.whichRetreatsConfig[retreat]) {
-                                    const rc = currentEvent.config.whichRetreatsConfig[retreat];
-                                    installmentTotal += retreatNetDueMatchingHistory(rc, historyUsesCents);
-                                    count += 1;
-                                    if (count >= limitCount) break;
-                                }
+                            const selectedOrdered = Object.entries(eventRecordForStudent.whichRetreats)
+                                .filter(([retreat, value]) => Boolean(value && currentEvent.config.whichRetreatsConfig[retreat]))
+                                .map(([retreat]) => retreat);
+                            const keysForTotals = applyInstallmentsLimitFeeToSelectedRetreats(
+                                selectedOrdered,
+                                eventRecordForStudent,
+                                currentEvent.config?.offeringLimitFeeCount,
+                            );
+                            for (const retreat of keysForTotals) {
+                                const rc = currentEvent.config.whichRetreatsConfig[retreat];
+                                installmentTotal += retreatNetDueMatchingHistory(rc, historyUsesCents);
                             }
                         }
                         const installments = eventRecordForStudent.offeringHistory[subEventKey]?.installments || {};
@@ -2481,12 +2483,16 @@ const Home = () => {
                     rowValues[field] = (typeof currentEvent.aid === 'string' && student.programs?.[currentEvent.aid]) ? student.programs[currentEvent.aid].allow ?? false : false;
                 } else if (field === 'withdrawn') {
                     rowValues[field] = (typeof currentEvent.aid === 'string' && student.programs?.[currentEvent.aid]) ? student.programs[currentEvent.aid].withdrawn ?? false : false;
+                } else if (field === 'installmentsLF') {
+                    const lfAid = currentEvent.aid;
+                    rowValues[field] =
+                        typeof lfAid === 'string' && student.programs?.[lfAid] ? !!student.programs[lfAid].limitFee : false;
                 } else if (field.includes('offeringCount')) {
                     const aid = columnMetaData[field]?.aid as string | undefined;
                     const offeringHistory = aid ? student.programs?.[aid]?.offeringHistory : undefined;
                     rowValues[field] = offeringHistory ? Object.keys(offeringHistory).length : 0;
                 } else if (field.includes('poolMember')) {
-                    rowValues[field] = typeof checkEligibility !== 'undefined' ? checkEligibility(columnMetaData[field]?.pool, student, currentEvent.aid, allPools) : false;
+                    rowValues[field] = typeof checkEligibility !== 'undefined' ? checkEligibility(columnMetaData[field]?.pool, student, currentEvent.aid, allPools, currentEvent) : false;
                 } else if (field.includes('emailSent')) {
                     rowValues[field] = student.emails?.[columnMetaData[field]?.campaign as string] ?? '';
                 } else if (field.includes('currentAIDBool')) {
@@ -2608,17 +2614,18 @@ const Home = () => {
                             offeringDate = person.offeringHistory[selectedSubEvent]?.offeringTime?.substring(0, 10) ?? '';
                         } else {
                             const historyUsesCents = installmentOfferingHistoryUsesCents(currentEvent.config);
-                            let limitCount = 100;
-                            let count = 0;
-                            if (person.limitFee) limitCount = 2;
                             if (person.whichRetreats && currentEvent.config?.whichRetreatsConfig) {
-                                for (const [retreat, value] of Object.entries(person.whichRetreats)) {
-                                    if (value && currentEvent.config.whichRetreatsConfig[retreat]) {
-                                        const rc = currentEvent.config.whichRetreatsConfig[retreat];
-                                        installmentTotal += retreatNetDueMatchingHistory(rc, historyUsesCents);
-                                        count += 1;
-                                        if (count >= limitCount) break;
-                                    }
+                                const selectedOrdered = Object.entries(person.whichRetreats)
+                                    .filter(([retreat, value]) => Boolean(value && currentEvent.config.whichRetreatsConfig[retreat]))
+                                    .map(([retreat]) => retreat);
+                                const keysForTotals = applyInstallmentsLimitFeeToSelectedRetreats(
+                                    selectedOrdered,
+                                    person,
+                                    currentEvent.config?.offeringLimitFeeCount,
+                                );
+                                for (const retreat of keysForTotals) {
+                                    const rc = currentEvent.config.whichRetreatsConfig[retreat];
+                                    installmentTotal += retreatNetDueMatchingHistory(rc, historyUsesCents);
                                 }
                             }
                             let lastOfferingTime = '';
@@ -2655,7 +2662,6 @@ const Home = () => {
                         rowValues[field] = 'N/A';
                     } else {
                         const aid = typeof currentEvent.aid === 'string' ? currentEvent.aid : undefined;
-                        const selectedSubEvent = typeof currentEvent.selectedSubEvent === 'string' ? currentEvent.selectedSubEvent : undefined;
                         const person = aid ? student.programs?.[aid] : undefined;
                         const historyUsesCents = installmentOfferingHistoryUsesCents(currentEvent.config);
                         let installmentTotal = 0;
@@ -2664,28 +2670,34 @@ const Home = () => {
 
                         if (person) {
                             // Calculate total from whichRetreats and whichRetreatsConfig
-                            let limitCount = 100;
-                            let count = 0;
-                            if (person.limitFee) limitCount = 2;
                             if (person.whichRetreats && currentEvent.config?.whichRetreatsConfig) {
-                                for (const [retreat, value] of Object.entries(person.whichRetreats)) {
-                                    if (value && currentEvent.config.whichRetreatsConfig[retreat]) {
-                                        const rc = currentEvent.config.whichRetreatsConfig[retreat];
-                                        installmentTotal += retreatNetDueMatchingHistory(rc, historyUsesCents);
-                                        count += 1;
-                                        if (count >= limitCount) break;
-                                    }
+                                const selectedOrdered = Object.entries(person.whichRetreats)
+                                    .filter(([retreat, value]) => Boolean(value && currentEvent.config.whichRetreatsConfig[retreat]))
+                                    .map(([retreat]) => retreat);
+                                const keysForTotals = applyInstallmentsLimitFeeToSelectedRetreats(
+                                    selectedOrdered,
+                                    person,
+                                    currentEvent.config?.offeringLimitFeeCount,
+                                );
+                                for (const retreat of keysForTotals) {
+                                    const rc = currentEvent.config.whichRetreatsConfig[retreat];
+                                    installmentTotal += retreatNetDueMatchingHistory(rc, historyUsesCents);
                                 }
                             }
 
-                            // Calculate received and refunded from installments
-                            if (selectedSubEvent && person.offeringHistory?.[selectedSubEvent]?.installments) {
-                                const installments = person.offeringHistory[selectedSubEvent].installments;
-                                for (const [installmentName, installmentEntry] of Object.entries<any>(installments)) {
-                                    if (installmentName === 'refunded') {
-                                        installmentRefunded += installmentEntry?.offeringAmount || 0;
-                                    } else {
-                                        installmentReceived += installmentEntry?.offeringAmount || 0;
+                            // Received/refunded: sum all subevents (matches register + email-agent; fee limit applies only to installmentTotal above)
+                            const oh = person.offeringHistory;
+                            if (oh && typeof oh === 'object') {
+                                for (const subEntry of Object.values(oh)) {
+                                    if (!subEntry || typeof subEntry !== 'object') continue;
+                                    const installments = (subEntry as { installments?: Record<string, unknown> }).installments;
+                                    if (!installments || typeof installments !== 'object') continue;
+                                    for (const [installmentName, installmentEntry] of Object.entries<any>(installments)) {
+                                        if (installmentName === 'refunded') {
+                                            installmentRefunded += installmentEntry?.offeringAmount || 0;
+                                        } else {
+                                            installmentReceived += installmentEntry?.offeringAmount || 0;
+                                        }
                                     }
                                 }
                             }
@@ -2696,10 +2708,8 @@ const Home = () => {
                         } else if (field === 'installmentsReceived') {
                             rowValues[field] = installmentAmountForDisplay(installmentReceived, historyUsesCents);
                         } else if (field === 'installmentsDue') {
-                            rowValues[field] = installmentAmountForDisplay(
-                                installmentTotal - installmentReceived,
-                                historyUsesCents
-                            );
+                            const balanceRaw = Math.max(0, installmentTotal - installmentReceived);
+                            rowValues[field] = installmentAmountForDisplay(balanceRaw, historyUsesCents);
                         } else if (field === 'installmentsRefunded') {
                             rowValues[field] = installmentAmountForDisplay(installmentRefunded, historyUsesCents);
                         }
@@ -2719,7 +2729,7 @@ const Home = () => {
     }
 
     // Helper function to update table data incrementally
-    const updateTableDataIncrementally = async (eligibleStudents: Student[], viewName?: string, currentEvent?: Event, currentPools?: Pool[]) => {
+    const updateTableDataIncrementally = async (eligibleStudents: Student[], viewName?: string, currentEvent?: Event | null, currentPools?: Pool[]) => {
         console.log('updateTableDataIncrementally called with:', {
             eligibleStudentsCount: eligibleStudents?.length,
             viewName,
@@ -3256,7 +3266,7 @@ const Home = () => {
             'installmentsReceived': { field: 'installmentsReceived', headerName: 'Received', sortable: true, width: 125 },
             'installmentsDue': { field: 'installmentsDue', headerName: 'Balance', sortable: true, width: 125 },
             'installmentsRefunded': { field: 'installmentsRefunded', headerName: 'Refunded', sortable: true, width: 125 },
-            'installmentsLF': { field: 'installmentsLF', headerName: 'LF', cellRenderer: 'checkboxRenderer', sortable: true, width: 100 }
+            'installmentsLF': { field: 'installmentsLF', headerName: 'LF', cellRenderer: 'checkboxRenderer', sortable: true, width: 100, writeEnabled: true }
         };
         // Use the helper:
         const { columns: columnLabels, columnMetaData: newColumnMetaData } = buildColumnLabelsAndMetaData(viewConfig.columnDefs, predefinedColumnDefinitions);
@@ -3366,7 +3376,7 @@ const Home = () => {
             'installmentsReceived': { field: 'installmentsReceived', headerName: 'Received', sortable: true, width: 125 },
             'installmentsDue': { field: 'installmentsDue', headerName: 'Balance', sortable: true, width: 125 },
             'installmentsRefunded': { field: 'installmentsRefunded', headerName: 'Refunded', sortable: true, width: 125 },
-            'installmentsLF': { field: 'installmentsLF', headerName: 'LF', cellRenderer: 'checkboxRenderer', sortable: true, width: 100 }
+            'installmentsLF': { field: 'installmentsLF', headerName: 'LF', cellRenderer: 'checkboxRenderer', sortable: true, width: 100, writeEnabled: true }
         };
 
         // Use the helper:

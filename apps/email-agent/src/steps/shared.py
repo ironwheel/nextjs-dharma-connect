@@ -102,7 +102,7 @@ def find_eligible_students(student_data, pools_data, work_order, campaign_string
         campaign_string: The campaign string for this language
         stage_record: The stage record from DynamoDB
         lang: The language code being processed
-        create_eligible_object_func: Function to create eligible object for stage filtering
+        create_eligible_object_func: (student, event_code, pools_data, sub_event, event_data) -> eligible checker
         event_data: Event data containing the latest configuration
         
     Returns:
@@ -143,7 +143,7 @@ def find_eligible_students(student_data, pools_data, work_order, campaign_string
             continue
             
         is_eligible = check_eligibility(
-            pool_name, student, work_order.eventCode, pools_data, work_order.subEvent
+            pool_name, student, work_order.eventCode, pools_data, work_order.subEvent, event_data
         )
         
         if not is_eligible:
@@ -151,7 +151,7 @@ def find_eligible_students(student_data, pools_data, work_order, campaign_string
         
         # Apply stage-specific filtering using shared function
         try:
-            if passes_stage_filter(stage_record, create_eligible_object_func(student, work_order.eventCode, pools_data, work_order.subEvent)):
+            if passes_stage_filter(stage_record, create_eligible_object_func(student, work_order.eventCode, pools_data, work_order.subEvent, event_data)):
                 eligible_students.append(student)
         except ValueError as e:
             # Re-raise with full context so it bubbles up with clear error message

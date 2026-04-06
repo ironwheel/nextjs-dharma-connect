@@ -12,6 +12,7 @@ import {
   createMockOfferingTransaction,
   completeOffering,
   sumInstallmentPaymentsCents,
+  applyInstallmentsLimitFeeToSelectedRetreats,
 } from 'sharedFrontend';
 import { promptLookup } from './script/StepComponents';
 import type { ScriptContext } from './script/types';
@@ -175,6 +176,7 @@ type Person = {
   currentOfferings: Record<string, any>;
   offeringHistory: Record<string, any>;
   whichRetreats?: Record<string, boolean>;
+  limitFee?: boolean;
   canOffer: boolean;
   owyaaLease?: string;
 };
@@ -227,6 +229,7 @@ function useOfferingData(context: ScriptContext) {
           currentOfferings: {},
           offeringHistory: selfHistory,
           whichRetreats: prog?.whichRetreats,
+          limitFee: prog?.limitFee,
           canOffer: true,
           owyaaLease: student.owyaaLease,
         });
@@ -245,6 +248,7 @@ function useOfferingData(context: ScriptContext) {
                   currentOfferings: {},
                   offeringHistory: fp?.offeringHistory ?? {},
                   whichRetreats: fp?.whichRetreats,
+                  limitFee: fp?.limitFee,
                   canOffer: fp?.join === true,
                   owyaaLease: f.owyaaLease,
                 });
@@ -518,11 +522,16 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
       }
     }
 
-    const minimumDueCents = selectedRetreats.reduce((sum, retreatKey) => {
+    const retreatsForTotals = applyInstallmentsLimitFeeToSelectedRetreats(
+      selectedRetreats,
+      person,
+      event?.config?.offeringLimitFeeCount,
+    );
+    const minimumDueCents = retreatsForTotals.reduce((sum, retreatKey) => {
       const n = Number(installmentsRetreatConfig[retreatKey]?.offeringMinimum ?? 0);
       return sum + Math.max(0, Math.round(n * 100));
     }, 0);
-    const maximumDueCents = selectedRetreats.reduce((sum, retreatKey) => {
+    const maximumDueCents = retreatsForTotals.reduce((sum, retreatKey) => {
       const total = Number(installmentsRetreatConfig[retreatKey]?.offeringTotal ?? 0);
       const cashTotal = Number(installmentsRetreatConfig[retreatKey]?.offeringCashTotal ?? 0);
       return sum + Math.max(0, Math.round((total - cashTotal) * 100));
@@ -550,7 +559,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
       hasSelectedRetreatFull,
       retreatPromptKeys: selectedRetreats.map((k) => installmentsRetreatConfig[k]?.prompt || k),
     };
-  }, [isInstallmentsPresentation, installmentsRetreatConfig, installmentsSubEventName]);
+  }, [isInstallmentsPresentation, installmentsRetreatConfig, installmentsSubEventName, event?.config?.offeringLimitFeeCount]);
 
   useEffect(() => {
     if (!isInstallmentsPresentation || paymentStep !== 'selection') return;

@@ -23,7 +23,7 @@ from .config import (
     EMAIL_ACCOUNT_CREDENTIALS_TABLE, AWS_REGION, REGLINKV2_HASHGEN_SECRET
 )
 from .prompts import prompt_lookup
-from .eligible import check_eligibility
+from .eligible import check_eligibility, apply_installments_limit_fee_selected
 from .steps.shared import code_to_full_language
 
 # Cache for email account credentials to avoid repeated DynamoDB calls
@@ -443,7 +443,7 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
                 index = line.index('#if')
                 largs = re.split("[ <]", line[index+4:])
                 if largs[0] == 'oathed':
-                    condition = check_eligibility('oath', student, event['aid'], pools_array, event.get('subevent'))
+                    condition = check_eligibility('oath', student, event['aid'], pools_array, event.get('subevent'), event)
                 elif largs[0] == 'offering':
                     try:
                         installments = event['config']['offeringPresentation'] == 'installments'
@@ -471,32 +471,20 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
                                 condition = False
                             else:
                                 try:
-                                    limit_fee = student['programs'][event['aid']]['limitFee']
-                                except:
-                                    limit_fee = False
-
-                                key_count = 0
-                                for key in wr.keys():
-                                    if wr[key]:
-                                        key_count += 1
-
-                                if limit_fee and key_count > 2:
-                                    key_count = 2
-
-                                try:
                                     which_retreats_config = event['config']['whichRetreatsConfig']
-                                except:
+                                except Exception:
                                     raise Exception("Can't use #if offering with installments in a non-multiple retreats event.")
 
-                                total_required = 0
-                                keys = list(student['programs'][event['aid']]['whichRetreats'].keys())
-                                count = 0
-                                for key in keys:
-                                    if student['programs'][event['aid']]['whichRetreats'][key]:
-                                        total_required += _retreat_net_offering_dollars(which_retreats_config[key])
-                                        count += 1
-                                        if count >= key_count:
-                                            break
+                                prog = student['programs'][event['aid']]
+                                selected_ordered = [k for k, v in wr.items() if v]
+                                limited_keys = apply_installments_limit_fee_selected(
+                                    selected_ordered,
+                                    prog,
+                                    event['config'],
+                                )
+                                total_required = 0.0
+                                for key in limited_keys:
+                                    total_required += _retreat_net_offering_dollars(which_retreats_config.get(key))
 
                                 condition = total_required <= total_received
                     else:
