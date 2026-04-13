@@ -16,6 +16,7 @@ import {
     RenderInPersonTeachings,
     RenderInterestedInSetup,
     RenderInterestedInTakedown,
+    RenderLrAcc,
     RenderShareEmail,
     RenderHealthcareProfessional,
     RenderServiceAlready,
@@ -170,6 +171,20 @@ export const stepRegistry: Record<string, ScriptStep> = {
             const anyMulti = multiKeys.some((k) => setup[k] === true);
             if (noChecked && anyMulti) return promptLookup(context, 'setupRequired');
             if (!noChecked && !anyMulti) return promptLookup(context, 'setupRequired');
+            return null;
+        }
+    },
+    'lrAcc': {
+        id: 'lrAcc',
+        type: 'custom',
+        component: RenderLrAcc as any,
+        field: 'student.programs',
+        promptKey: 'lrAcc',
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const lrAcc = value?.[eventCode]?.lrAcc;
+            if (typeof lrAcc !== 'boolean') return promptLookup(context, 'oneOptionRequired');
             return null;
         }
     },
