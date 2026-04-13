@@ -601,6 +601,42 @@ export const RenderShareEmail: React.FC<{ context: ScriptContext; engineOnChange
     return <RadioYesNo context={context} path={`student.programs.${eventCode}.shareEmail`} label="" engineOnChange={engineOnChange} />;
 };
 
+// --- Landguet-Reid accommodations (lrHousing vs ownHousing) ---
+export const RenderLrAcc: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
+    const eventCode = context.event?.aid;
+    const path = `student.programs.${eventCode}.lrAcc`;
+    const val = context.student?.programs?.[eventCode]?.lrAcc;
+    const isLr = val === true;
+    const isOwn = val === false;
+
+    return (
+        <div className="mb-2">
+            <div className="flex flex-col gap-2 items-start">
+                <label className="flex items-center text-reg-muted">
+                    <input
+                        type="radio"
+                        name={path}
+                        checked={isLr}
+                        onChange={() => engineOnChange(path, true)}
+                        className="mr-2 text-reg-accent"
+                    />
+                    <span>{promptLookup(context, 'lrHousing')}</span>
+                </label>
+                <label className="flex items-center text-reg-muted">
+                    <input
+                        type="radio"
+                        name={path}
+                        checked={isOwn}
+                        onChange={() => engineOnChange(path, false)}
+                        className="mr-2 text-reg-accent"
+                    />
+                    <span>{promptLookup(context, 'ownHousing')}</span>
+                </label>
+            </div>
+        </div>
+    );
+};
+
 // --- Healthcare professional (Yes/No; if Yes, healthcareTraining) ---
 export const RenderHealthcareProfessional: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
     const isPro = context.student?.healthcareProfessional;
