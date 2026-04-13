@@ -792,10 +792,9 @@ export default function Home() {
 
     const eventPool = data.event?.config?.pool;
     const checkEligForEvent = context.checkEligibility ?? checkEligibility;
-    const isEligibleForEvent =
-        data.student?.debug?.registerTest === true && testModeOathEligibility !== 'actual'
-            ? (testModeOathEligibility === 'true')
-            : (!eventPool || checkEligForEvent(eventPool, data.student, activeEventCode, data.pools || [], data.event));
+    // Always evaluate the event's configured pool normally. In test mode we only override
+    // membership for the pool named 'oath' via context.checkEligibility above.
+    const isEligibleForEvent = !eventPool || checkEligForEvent(eventPool, data.student, activeEventCode, data.pools || [], data.event);
 
     const rawEventImage = data.event?.config?.eventImage ?? context.config?.eventImage;
     const eventImageUrl =
