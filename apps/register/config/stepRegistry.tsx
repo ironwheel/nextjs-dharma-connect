@@ -17,6 +17,11 @@ import {
     RenderInterestedInSetup,
     RenderInterestedInTakedown,
     RenderLrAcc,
+    RenderLrAccChoice1,
+    RenderLrAccChoice2,
+    RenderLrAccChoice3,
+    RenderLrAccRoommatePreference,
+    RenderLrAccRoommate,
     RenderShareEmail,
     RenderHealthcareProfessional,
     RenderServiceAlready,
@@ -185,6 +190,120 @@ export const stepRegistry: Record<string, ScriptStep> = {
             if (!eventCode) return null;
             const lrAcc = value?.[eventCode]?.lrAcc;
             if (typeof lrAcc !== 'boolean') return promptLookup(context, 'oneOptionRequired');
+            return null;
+        }
+    },
+    'lrAccChoice1': {
+        id: 'lrAccChoice1',
+        type: 'custom',
+        component: RenderLrAccChoice1 as any,
+        field: 'student.programs',
+        promptKey: 'lrAccChoice1',
+        showWhen: { type: 'fieldEquals', field: 'programs.{{eventCode}}.lrAcc', value: true },
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const selected = value?.[eventCode]?.lrAccChoice1;
+            if (typeof selected !== 'string' || selected.trim() === '') return promptLookup(context, 'oneOptionRequired');
+            return null;
+        }
+    },
+    'lrAccChoice2': {
+        id: 'lrAccChoice2',
+        type: 'custom',
+        component: RenderLrAccChoice2 as any,
+        field: 'student.programs',
+        promptKey: 'lrAccChoice2',
+        showWhen: { type: 'fieldEquals', field: 'programs.{{eventCode}}.lrAcc', value: true },
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const selected = value?.[eventCode]?.lrAccChoice2;
+            if (typeof selected !== 'string' || selected.trim() === '') return promptLookup(context, 'oneOptionRequired');
+            return null;
+        }
+    },
+    'lrAccChoice3': {
+        id: 'lrAccChoice3',
+        type: 'custom',
+        component: RenderLrAccChoice3 as any,
+        field: 'student.programs',
+        promptKey: 'lrAccChoice3',
+        condition: (context: ScriptContext): boolean => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return false;
+            const prog = context.student?.programs?.[eventCode] || {};
+            if (prog.lrAcc !== true) return false;
+
+            const housing = context.config?.housingConfig || {};
+            const c1 = typeof prog.lrAccChoice1 === 'string' ? prog.lrAccChoice1 : '';
+            const c2 = typeof prog.lrAccChoice2 === 'string' ? prog.lrAccChoice2 : '';
+            const isBedroom = (k: string) => !!k && (housing as any)?.[k]?.bedroom === true;
+            const isNonBedroom = (k: string) => !!k && !isBedroom(k);
+
+            const hasBedroom = isBedroom(c1) || isBedroom(c2);
+            const hasAnyNonBedroom = isNonBedroom(c1) || isNonBedroom(c2);
+            return hasBedroom && !hasAnyNonBedroom;
+        },
+        showWhen: { type: 'fieldEquals', field: 'programs.{{eventCode}}.lrAcc', value: true },
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const selected = value?.[eventCode]?.lrAccChoice3;
+            if (typeof selected !== 'string' || selected.trim() === '') return promptLookup(context, 'oneOptionRequired');
+            return null;
+        }
+    },
+    'lrAccRoommatePreference': {
+        id: 'lrAccRoommatePreference',
+        type: 'custom',
+        component: RenderLrAccRoommatePreference as any,
+        field: 'student.programs',
+        promptKey: 'lrAccRoommatePreference',
+        condition: (context: ScriptContext): boolean => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return false;
+            const prog = context.student?.programs?.[eventCode] || {};
+            if (prog.lrAcc !== true) return false;
+            const housing = context.config?.housingConfig || {};
+            const c1 = typeof prog.lrAccChoice1 === 'string' ? prog.lrAccChoice1 : '';
+            const c2 = typeof prog.lrAccChoice2 === 'string' ? prog.lrAccChoice2 : '';
+            const isBedroom = (k: string) => !!k && (housing as any)?.[k]?.bedroom === true;
+            return isBedroom(c1) || isBedroom(c2);
+        },
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const pref = value?.[eventCode]?.lrAccRoommatePreference;
+            if (typeof pref !== 'boolean') return promptLookup(context, 'oneOptionRequired');
+            return null;
+        }
+    },
+    'lrAccRoommate': {
+        id: 'lrAccRoommate',
+        type: 'custom',
+        component: RenderLrAccRoommate as any,
+        field: 'student.programs',
+        promptKey: 'lrAccRoommate',
+        condition: (context: ScriptContext): boolean => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return false;
+            const prog = context.student?.programs?.[eventCode] || {};
+            if (prog.lrAcc !== true) return false;
+            // Show only when choice1 or choice2 is a bedroom option.
+            const housing = context.config?.housingConfig || {};
+            const c1 = typeof prog.lrAccChoice1 === 'string' ? prog.lrAccChoice1 : '';
+            const c2 = typeof prog.lrAccChoice2 === 'string' ? prog.lrAccChoice2 : '';
+            const isBedroom = (k: string) => !!k && (housing as any)?.[k]?.bedroom === true;
+            return isBedroom(c1) || isBedroom(c2);
+        },
+        showWhen: { type: 'fieldEquals', field: 'programs.{{eventCode}}.lrAccRoommatePreference', value: true },
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const roommate = value?.[eventCode]?.lrAccRoommate;
+            const s = typeof roommate === 'string' ? roommate.trim() : '';
+            if (!s) return promptLookup(context, 'roommateRequired');
             return null;
         }
     },

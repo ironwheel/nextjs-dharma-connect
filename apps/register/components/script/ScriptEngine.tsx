@@ -192,6 +192,10 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
 
     const stepTitle = step.promptKey ? promptLookup(context, step.promptKey) : step.id.replace(/([A-Z])/g, ' $1').trim();
     const showStepTitle = step.id !== 'introduction';
+    const stepTitleIsHtml =
+        step.promptKey === 'lrAccChoice1' ||
+        step.promptKey === 'lrAccChoice2' ||
+        step.promptKey === 'lrAccChoice3';
     const rawEventImage = context.config?.eventImage;
     const eventImageUrl =
         typeof rawEventImage === 'string' && (rawEventImage.startsWith('http://') || rawEventImage.startsWith('https://'))
@@ -208,7 +212,16 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
                 />
             )}
             <div className="p-4 sm:p-6">
-            {showStepTitle && <h2 className="text-xl font-semibold mb-4 text-reg-accent">{stepTitle}</h2>}
+            {showStepTitle && (
+                stepTitleIsHtml ? (
+                    <h2
+                        className="text-xl font-semibold mb-4 text-reg-accent"
+                        dangerouslySetInnerHTML={{ __html: stepTitle }}
+                    />
+                ) : (
+                    <h2 className="text-xl font-semibold mb-4 text-reg-accent">{stepTitle}</h2>
+                )
+            )}
 
             <div className="step-content min-h-[160px]">
                 {renderCurrentStep()}

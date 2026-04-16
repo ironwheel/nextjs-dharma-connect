@@ -637,6 +637,133 @@ export const RenderLrAcc: React.FC<{ context: ScriptContext; engineOnChange: (pa
     );
 };
 
+type HousingConfigEntry = { prompt?: string; order?: number; lrAccChoice3Only?: boolean; bedroom?: boolean };
+
+function getHousingEntries(context: ScriptContext): Array<{ key: string; prompt: string; order: number; lrAccChoice3Only: boolean; bedroom: boolean }> {
+    const config = context.config?.housingConfig as Record<string, HousingConfigEntry> | undefined;
+    if (!config) return [];
+    return Object.entries(config)
+        .map(([key, obj]) => ({
+            key,
+            prompt: (obj?.prompt ?? key) as string,
+            order: Number.isFinite(obj?.order as any) ? Number(obj!.order) : 0,
+            lrAccChoice3Only: obj?.lrAccChoice3Only === true,
+            bedroom: obj?.bedroom === true,
+        }))
+        .sort((a, b) => a.order - b.order);
+}
+
+function isBedroomHousingChoice(context: ScriptContext, key: string): boolean {
+    if (!key) return false;
+    const entry = getHousingEntries(context).find((e) => e.key === key);
+    return entry?.bedroom === true;
+}
+
+function HousingRadioGroup({
+    context,
+    engineOnChange,
+    choiceField,
+    filter,
+}: {
+    context: ScriptContext;
+    engineOnChange: (path: string, val: any) => void;
+    choiceField: 'lrAccChoice1' | 'lrAccChoice2' | 'lrAccChoice3';
+    filter: (entry: { key: string; lrAccChoice3Only: boolean; bedroom: boolean }) => boolean;
+}) {
+    const eventCode = context.event?.aid;
+    if (!eventCode) return null;
+    const basePath = `student.programs.${eventCode}.${choiceField}`;
+    const selected = context.student?.programs?.[eventCode]?.[choiceField];
+    const selectedKey = typeof selected === 'string' ? selected : '';
+    const entries = getHousingEntries(context).filter(filter);
+    if (entries.length === 0) {
+        return <div className="text-reg-muted text-sm">No housing options configured.</div>;
+    }
+    return (
+        <div className="mb-2">
+            <div className="space-y-2 border border-reg-border rounded p-3 bg-reg-card-muted">
+                {entries.map((e) => (
+                    <label key={e.key} className="flex items-center text-reg-muted">
+                        <input
+                            type="radio"
+                            name={basePath}
+                            checked={selectedKey === e.key}
+                            onChange={() => engineOnChange(basePath, e.key)}
+                            className="mr-2 rounded text-reg-accent"
+                        />
+                        <span>{promptLookup(context, e.prompt)}</span>
+                    </label>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+// --- LR accommodations choices (housingConfig-driven) ---
+export const RenderLrAccChoice1: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
+    const eventCode = context.event?.aid;
+    const choice1 = eventCode ? context.student?.programs?.[eventCode]?.lrAccChoice1 : undefined;
+    return (
+        <HousingRadioGroup
+            context={context}
+            engineOnChange={engineOnChange}
+            choiceField="lrAccChoice1"
+            filter={(e) => !e.lrAccChoice3Only}
+        />
+    );
+};
+
+export const RenderLrAccChoice2: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
+    const eventCode = context.event?.aid;
+    const exclude = eventCode ? context.student?.programs?.[eventCode]?.lrAccChoice1 : undefined;
+    const excludeKey = typeof exclude === 'string' ? exclude : '';
+    return (
+        <HousingRadioGroup
+            context={context}
+            engineOnChange={engineOnChange}
+            choiceField="lrAccChoice2"
+            filter={(e) => !e.lrAccChoice3Only && e.key !== excludeKey}
+        />
+    );
+};
+
+export const RenderLrAccChoice3: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
+    const eventCode = context.event?.aid;
+    const exclude1 = eventCode ? context.student?.programs?.[eventCode]?.lrAccChoice1 : undefined;
+    const exclude2 = eventCode ? context.student?.programs?.[eventCode]?.lrAccChoice2 : undefined;
+    const ex1 = typeof exclude1 === 'string' ? exclude1 : '';
+    const ex2 = typeof exclude2 === 'string' ? exclude2 : '';
+    return (
+        <HousingRadioGroup
+            context={context}
+            engineOnChange={engineOnChange}
+            choiceField="lrAccChoice3"
+            filter={(e) => e.bedroom !== true && e.key !== ex1 && e.key !== ex2}
+        />
+    );
+};
+
+export const RenderLrAccRoommatePreference: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
+    const eventCode = context.event?.aid;
+    const path = `student.programs.${eventCode}.lrAccRoommatePreference`;
+    return <RadioYesNo context={context} path={path} label="" engineOnChange={engineOnChange} />;
+};
+
+export const RenderLrAccRoommate: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
+    const eventCode = context.event?.aid;
+    if (!eventCode) return null;
+    const value = context.student?.programs?.[eventCode]?.lrAccRoommate ?? '';
+    return (
+        <div className="space-y-4">
+            <InputField
+                label=""
+                value={value}
+                onChange={(v: string) => engineOnChange(`student.programs.${eventCode}.lrAccRoommate`, v)}
+            />
+        </div>
+    );
+};
+
 // --- Healthcare professional (Yes/No; if Yes, healthcareTraining) ---
 export const RenderHealthcareProfessional: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
     const isPro = context.student?.healthcareProfessional;
