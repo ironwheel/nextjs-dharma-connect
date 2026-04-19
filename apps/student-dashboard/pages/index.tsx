@@ -70,6 +70,133 @@ let displayVideoControl: { [key: string]: boolean } = {};
 let pusherChannels: any = false;
 let pusherChannel: any = false;
 
+/**
+ * TEMPORARY: when false, tier 1/2 prompt loads read the full `prompts` table once per
+ * session (per pid/hash) instead of `sd-prompts-cache`. Set back to true to restore
+ * cached Dynamo reads after comparing load/UX cost.
+ */
+const USE_SD_PROMPTS_CACHE = false;
+
+let _sourcePromptsCacheKey: string | null = null;
+let _sourcePromptsNested: Record<string, Record<string, Record<string, string>>> | null = null;
+
+function sourcePromptRowsToNested(rows: any[]): Record<string, Record<string, Record<string, string>>> {
+    const out: Record<string, Record<string, Record<string, string>>> = {};
+    if (!Array.isArray(rows)) {
+        return out;
+    }
+    for (const row of rows) {
+        const language = row.language;
+        const text = row.text;
+        const aid = row.aid ?? '';
+        const promptField = String(row.prompt ?? '');
+        if (!language || typeof text !== 'string' || !promptField) {
+            continue;
+        }
+
+        let eventCode: string;
+        let promptName: string;
+
+        if (aid === 'descriptions') {
+            eventCode = 'descriptions';
+            promptName = promptField;
+        } else {
+            const dash = promptField.indexOf('-');
+            if (dash === -1) {
+                eventCode = 'default';
+                promptName = promptField;
+            } else {
+                eventCode = promptField.slice(0, dash);
+                promptName = promptField.slice(dash + 1);
+            }
+            if (aid === 'default' || (aid === 'dashboard' && eventCode === 'default')) {
+                eventCode = 'dashboard';
+            }
+        }
+
+        if (!out[eventCode]) {
+            out[eventCode] = {};
+        }
+        if (!out[eventCode][promptName]) {
+            out[eventCode][promptName] = {};
+        }
+        out[eventCode][promptName][language] = text;
+    }
+    return out;
+}
+
+function extractNestedForEventsAndLanguage(
+    full: Record<string, Record<string, Record<string, string>>>,
+    eventCodes: string[],
+    language: string,
+): Record<string, Record<string, Record<string, string>>> {
+    const result: Record<string, Record<string, Record<string, string>>> = {};
+    for (const ec of eventCodes) {
+        const block = full[ec];
+        if (!block) {
+            continue;
+        }
+        result[ec] = {};
+        for (const [promptName, langs] of Object.entries(block)) {
+            const t = langs[language];
+            if (typeof t === 'string') {
+                result[ec][promptName] = { [language]: t };
+            }
+        }
+    }
+    return result;
+}
+
+async function getSourcePromptsNestedRecord(
+    pid: string,
+    hash: string | string[] | undefined,
+): Promise<{ data: Record<string, Record<string, Record<string, string>>>; error?: string }> {
+    const key = `${pid}::${String(hash ?? '')}`;
+    if (_sourcePromptsCacheKey === key && _sourcePromptsNested) {
+        return { data: _sourcePromptsNested };
+    }
+    try {
+        const rows = await getAllTableItems('prompts', pid, hash as string);
+        if (rows && typeof rows === 'object' && 'redirected' in rows) {
+            return { data: {}, error: 'Authentication required' };
+        }
+        if (!Array.isArray(rows)) {
+            return { data: {}, error: 'Unexpected prompts response' };
+        }
+        _sourcePromptsCacheKey = key;
+        _sourcePromptsNested = sourcePromptRowsToNested(rows);
+        return { data: _sourcePromptsNested };
+    } catch (e) {
+        return { data: {}, error: e instanceof Error ? e.message : 'Unknown error loading prompts' };
+    }
+}
+
+async function fetchTier1PromptsFromSource(
+    pid: string,
+    hash: string | string[] | undefined,
+    language: string,
+): Promise<{ data: Record<string, Record<string, Record<string, string>>>; error?: string }> {
+    const r = await getSourcePromptsNestedRecord(pid, hash);
+    if (r.error) {
+        return { data: {}, error: r.error };
+    }
+    return { data: extractNestedForEventsAndLanguage(r.data, ['dashboard', 'descriptions'], language) };
+}
+
+async function fetchTier2PromptsFromSource(
+    pid: string,
+    hash: string | string[] | undefined,
+    eventCodesCsv: string,
+    language: string,
+): Promise<{ data: Record<string, Record<string, Record<string, string>>>; error?: string }> {
+    const codes = eventCodesCsv.split(',').map((s) => s.trim()).filter(Boolean);
+    const r = await getSourcePromptsNestedRecord(pid, hash);
+    if (r.error) {
+        return { data: {}, error: r.error };
+    }
+    return { data: extractNestedForEventsAndLanguage(r.data, codes, language) };
+}
+
 // Event object
 export let event = { aid: 'dashboard' };
 
@@ -266,6 +393,9 @@ const HomeContent = () => {
 
     // API functions using standardized table operations
     async function fetchTier1Prompts(language: string) {
+        if (!USE_SD_PROMPTS_CACHE) {
+            return fetchTier1PromptsFromSource(pid as string, hash, language);
+        }
         try {
             const promptKey = `1#${language}#`;
             const results = await queryGetTableItems('sd-prompts-cache', 'dashboard', promptKey, pid as string, hash as string);
@@ -286,6 +416,9 @@ const HomeContent = () => {
     }
 
     async function fetchTier2Prompts(eventCodes: string, language: string) {
+        if (!USE_SD_PROMPTS_CACHE) {
+            return fetchTier2PromptsFromSource(pid as string, hash, eventCodes, language);
+        }
         try {
             const promptKey = `2#${language}#`;
             const results = await queryGetTableItems('sd-prompts-cache', eventCodes, promptKey, pid as string, hash as string);
@@ -327,6 +460,9 @@ const HomeContent = () => {
 
         // API functions using standardized table operations
         const fetchTier1Prompts = async (language: string) => {
+            if (!USE_SD_PROMPTS_CACHE) {
+                return fetchTier1PromptsFromSource(pid as string, hash, language);
+            }
             try {
                 const promptKey = `1#${language}#`;
                 const results = await queryGetTableItems('sd-prompts-cache', 'dashboard', promptKey, pid as string, hash as string);
@@ -347,6 +483,9 @@ const HomeContent = () => {
         };
 
         const fetchTier2Prompts = async (eventCodes: string, language: string) => {
+            if (!USE_SD_PROMPTS_CACHE) {
+                return fetchTier2PromptsFromSource(pid as string, hash, eventCodes, language);
+            }
             try {
                 const promptKey = `2#${language}#`;
                 const results = await queryGetTableItems('sd-prompts-cache', eventCodes, promptKey, pid as string, hash as string);
