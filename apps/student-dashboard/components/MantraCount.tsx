@@ -399,9 +399,11 @@ const MantraCount: React.FC<MantraCountProps> = ({ studentId, pid, hash, student
     if (isLoading) {
         return (
             <div className="min-h-screen bg-gray-900 text-white">
-                <TopNavBar title={promptLookup('title')} />
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-center min-h-[calc(100vh-120px)]">
-                    <div className="text-white text-xl">{promptLookup('mantraCountLoading')}</div>
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <TopNavBar title={promptLookup('title')} />
+                    <div className="flex items-center justify-center min-h-[calc(100vh-120px)]">
+                        <div className="text-white text-xl">{promptLookup('mantraCountLoading')}</div>
+                    </div>
                 </div>
             </div>
         );
@@ -410,9 +412,11 @@ const MantraCount: React.FC<MantraCountProps> = ({ studentId, pid, hash, student
     if (error) {
         return (
             <div className="min-h-screen bg-gray-900 text-white">
-                <TopNavBar title={promptLookup('title')} />
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-center min-h-[calc(100vh-120px)]">
-                    <div className="text-red-400 text-xl">{error}</div>
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <TopNavBar title={promptLookup('title')} />
+                    <div className="flex items-center justify-center min-h-[calc(100vh-120px)]">
+                        <div className="text-red-400 text-xl">{error}</div>
+                    </div>
                 </div>
             </div>
         );
@@ -422,8 +426,8 @@ const MantraCount: React.FC<MantraCountProps> = ({ studentId, pid, hash, student
         <div className="min-h-screen bg-gray-900 text-white">
             {/* Ensure Tailwind includes color classes */}
             <div className="hidden bg-blue-600 bg-green-600 bg-purple-600 bg-red-600 bg-orange-600 border-blue-500 border-green-500 border-purple-500 border-red-500 border-orange-500"></div>
-            <TopNavBar title={promptLookup('controlTitleMantraCounter')} />
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
+                <TopNavBar title={promptLookup('controlTitleMantraCounter')} />
                 {/* Header */}
                 <div className="text-center mb-8">
                     <p className="text-gray-300 mb-2">

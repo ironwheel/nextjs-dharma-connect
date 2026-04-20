@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from 'next/router';
 import { createPortal } from 'react-dom';
 import ReactSrcDocIframe from 'react-srcdoc-iframe';
@@ -43,7 +43,7 @@ import {
 } from 'sharedFrontend';
 
 // Import API actions
-import { api, getAllTableItems, getAllTableItemsFiltered, getTableItem, updateTableItem, queryGetTableItems } from 'sharedFrontend';
+import { api, getAllTableItems, getAllTableItemsFiltered, getTableItem, updateTableItem, queryGetTableItems, authGetRegistrationLink } from 'sharedFrontend';
 
 // Import MantraCount component
 import MantraCount from '../components/MantraCount';
@@ -75,7 +75,7 @@ let pusherChannel: any = false;
  * session (per pid/hash) instead of `sd-prompts-cache`. Set back to true to restore
  * cached Dynamo reads after comparing load/UX cost.
  */
-const USE_SD_PROMPTS_CACHE = false;
+const USE_SD_PROMPTS_CACHE = true;
 
 let _sourcePromptsCacheKey: string | null = null;
 let _sourcePromptsNested: Record<string, Record<string, Record<string, string>>> | null = null;
@@ -235,6 +235,42 @@ const HomeContent = () => {
     const { initializeLanguage, currentLanguage, setLanguage: originalSetLanguage } = useLanguage();
 
     event.aid = 'dashboard';
+
+    // Registration link v2 support (server-side hashed link generation)
+    const [regLinkV2ByAid, setRegLinkV2ByAid] = useState<Record<string, string>>({});
+    const regLinkV2InFlight = useRef<Set<string>>(new Set());
+
+    const appendCallbackParam = useCallback((link: string) => {
+        if (!link) return link;
+        const separator = link.includes('?') ? '&' : '?';
+        return `${link}${separator}callback=${encodeURIComponent(REGCOMPLETE_WEBHOOK_CHANNEL)}`;
+    }, [REGCOMPLETE_WEBHOOK_CHANNEL]);
+
+    const ensureRegLinkV2 = useCallback(async (eventAid: string) => {
+        if (!pid || !hash) return;
+        if (regLinkV2ByAid[eventAid]) return;
+        if (regLinkV2InFlight.current.has(eventAid)) return;
+
+        regLinkV2InFlight.current.add(eventAid);
+        try {
+            const linkOrRedirect = await authGetRegistrationLink(
+                pid as string,
+                hash as string,
+                pid as string,
+                eventAid
+            );
+            if (linkOrRedirect && typeof linkOrRedirect === 'object' && 'redirected' in linkOrRedirect) {
+                return;
+            }
+            const link = appendCallbackParam(String(linkOrRedirect || ''));
+            if (!link) return;
+            setRegLinkV2ByAid((prev) => (prev[eventAid] ? prev : { ...prev, [eventAid]: link }));
+        } catch (e) {
+            console.warn('Failed to fetch v2 registration link:', eventAid, e);
+        } finally {
+            regLinkV2InFlight.current.delete(eventAid);
+        }
+    }, [pid, hash, regLinkV2ByAid, appendCallbackParam]);
 
     // Function declarations for prompt reloading
     async function reloadPromptsForLanguage(language: string) {
@@ -442,6 +478,8 @@ const HomeContent = () => {
     useEffect(() => {
         if (tier2PromptsLoaded) {
             updateMediaList();
+            // updateMediaList() mutates module-level lists; force a render so UI reflects new prompt text
+            setValue((v) => v + 1);
         }
     }, [tier2PromptsLoaded]);
 
@@ -947,6 +985,11 @@ const HomeContent = () => {
                 continue;
             }
 
+            // Pre-fetch v2 registration links for eligible events when configured
+            if (parentEvent?.config?.reglinkv2) {
+                void ensureRegLinkV2(parentEvent.aid);
+            }
+
             // Set regional coordinator email
             if (student.country === "United States" ||
                 student.country === "Canada" ||
@@ -1108,49 +1151,137 @@ const HomeContent = () => {
         }
     };
 
-    const DisplayEmailIFrame = (el: any, state: string, prompt?: string) => {
+    const DisplayEmailIFrame = (
+        el: any,
+        state: string,
+        prompt?: string,
+        embeddedEmailLinksOverride?: Record<string, string>,
+        options?: { rootLevelStages?: boolean }
+    ) => {
         const [iFrameData, setIFrameData] = useState("<p>Loading...</p>");
         const [englishOnlyNote, setEnglishOnlyNote] = useState<string | null>(null);
 
         useEffect(() => {
-            if (typeof el.subEvent.embeddedEmails[state] === 'undefined') {
-                return;
-            }
+            const embeddedEmailLinks =
+                embeddedEmailLinksOverride ||
+                (el?.subEvent?.embeddedEmails ? el.subEvent.embeddedEmails[state] : undefined);
+            if (!embeddedEmailLinks) return;
 
-            let language = 'English';
-            if (typeof student.writtenLangPref !== 'undefined') {
-                language = student.writtenLangPref;
-            }
+            const languageName = typeof student.writtenLangPref !== 'undefined' ? student.writtenLangPref : 'English';
+            const languageNameToCode: Record<string, string> = {
+                English: 'EN',
+                Spanish: 'SP',
+                Portuguese: 'PT',
+                French: 'FR',
+                German: 'DE',
+                Italian: 'IT',
+                Czech: 'CZ',
+            };
+
+            // Root-level embedded emails use 2-letter language codes; sub-event embedded emails use names.
+            // Try both to keep backward compatibility.
+            const preferredKeys: string[] = [];
+            preferredKeys.push(languageName);
+            if (languageNameToCode[languageName]) preferredKeys.push(languageNameToCode[languageName]);
+            // Common fallbacks
+            preferredKeys.push('English');
+            preferredKeys.push('EN');
 
             let pageLink: string | undefined;
-            if (typeof el.subEvent.embeddedEmails[state][language] !== 'undefined') {
-                pageLink = el.subEvent.embeddedEmails[state][language];
-            } else {
-                if (language != 'English') {
-                    if (typeof el.subEvent.embeddedEmails[state]['English'] !== 'undefined') {
-                        pageLink = el.subEvent.embeddedEmails[state]['English'];
-                        setEnglishOnlyNote(promptLookup('emailLanguageNotAvailable'));
-                    }
+            let usedFallback = false;
+            for (const key of preferredKeys) {
+                if (typeof embeddedEmailLinks[key] !== 'undefined') {
+                    pageLink = embeddedEmailLinks[key];
+                    usedFallback = key !== languageName && key !== languageNameToCode[languageName];
+                    break;
                 }
             }
 
-            if (pageLink) {
-                fetch(pageLink).then((response) => {
-                    response.text().then((pageData) => {
-                        pageData = pageData.replace(/\|\|name\|\|/g, student.first + ' ' + student.last);
-                        pageData = pageData.replace(/\|\|coord-email\|\|/g, el.parentEvent.coordEmail);
-                        pageData = pageData.replace(/123456789/g, pid as string);
-                        setIFrameData(pageData);
-                    }).catch((err) => {
-                        setIFrameData("<p>Error: Embedded Email fails: " + JSON.stringify(err) + "</p>");
-                    });
-                });
+            if (usedFallback) {
+                setEnglishOnlyNote(promptLookup('emailLanguageNotAvailable'));
             }
-        }, []);
+
+            if (pageLink) {
+                (async () => {
+                    try {
+                        const response = await fetch(pageLink);
+                        let pageData = await response.text();
+
+                        // Macro support (subset of email-agent email_sender() behavior)
+                        const fullName = `${student.first || ''} ${student.last || ''}`.trim();
+                        const pidString = String(pid || '');
+                        const aidString = String(el?.parentEvent?.aid || '');
+                        const tangra = String(el?.parentEvent?.config?.tangra || '').trim();
+
+                        // Determine the correct hash for reglinkv2 expansion:
+                        // - Dashboard auth flow uses `hash` for student-dashboard host
+                        // - Registration links require the register app hash (server-generated)
+                        let regAppHash: string | null = null;
+                        try {
+                            if (el?.parentEvent?.config?.reglinkv2 && pid && hash) {
+                                const linkOrRedirect = await authGetRegistrationLink(
+                                    pid as string,
+                                    hash as string,
+                                    pid as string,
+                                    aidString
+                                );
+                                if (!(linkOrRedirect && typeof linkOrRedirect === 'object' && 'redirected' in linkOrRedirect)) {
+                                    const url = new URL(String(linkOrRedirect));
+                                    regAppHash = url.searchParams.get('hash');
+                                }
+                            }
+                        } catch (e) {
+                            // best-effort; will fall back below
+                        }
+
+                        // Strip leading image banner for root-level stage emails (banner is already shown on the card)
+                        if (options?.rootLevelStages) {
+                            // Remove the first <img ...> tag (self-closing or paired). Root-level stage emails
+                            // already have the event banner displayed in the UI.
+                            pageData = pageData.replace(/<img\b[^>]*\/>/i, '');
+                            pageData = pageData.replace(/<img\b[^>]*>\s*(?:<\/img>)?/i, '');
+                        }
+
+                        // Support selected #macros used by email-agent templates
+                        if (pageData.includes('#salutation')) {
+                            const salutation = promptLookup('salutation');
+                            pageData = pageData.replace(/#salutation/g, salutation);
+                        }
+                        if (pageData.includes('#reglink')) {
+                            const promptKey = el?.parentEvent?.config?.reglinkv2 ? 'reglinkv2' : 'reglink';
+                            const eventSpecific = promptLookupAIDSpecific(el.parentEvent.aid, el.parentEvent.config?.aidAlias, promptKey);
+                            const reglinkText = eventSpecific.includes('-unknown')
+                                ? promptLookup(promptKey) // fall back to dashboard aid
+                                : eventSpecific;
+                            pageData = pageData.replace(/#reglink/g, reglinkText);
+                        }
+
+                        pageData = pageData.replace(/\|\|name\|\|/g, fullName);
+                        pageData = pageData.replace(/\|\|coord-email\|\|/g, el.parentEvent.coordEmail);
+                        pageData = pageData.replace(/123456789/g, pidString);
+                        pageData = pageData.replace(/\|\|pid\|\|/g, pidString);
+                        pageData = pageData.replace(/\|\|aid\|\|/g, aidString);
+                        // Prefer the register app hash for reglinkv2; fall back to dashboard hash if unavailable
+                        pageData = pageData.replace(/\|\|hash\|\|/g, regAppHash || String(hash || ''));
+                        if (tangra) {
+                            pageData = pageData.replace(/\|\|taid\|\|/g, tangra);
+                        }
+
+                        setIFrameData(pageData);
+                    } catch (err) {
+                        setIFrameData("<p>Error: Embedded Email fails: " + JSON.stringify(err) + "</p>");
+                    }
+                })();
+            } else {
+                setIFrameData("<p>Error: No embedded email available for your language.</p>");
+            }
+        }, [embeddedEmailLinksOverride, state, options?.rootLevelStages]);
 
         return (
             <>
                 {englishOnlyNote ? <>{englishOnlyNote} <br></br></> : null}
+                <br></br>
+                <div dangerouslySetInnerHTML={promptLookupHTML('relatedEmail')} />
                 <ReactSrcDocIframe srcDoc={iFrameData} width="640" height="360" frameBorder="1" />
             </>
         );
@@ -1158,25 +1289,38 @@ const HomeContent = () => {
 
     const mediaElement = (el: any) => {
         // Not offered, build reg link
-        let regLink = "https://reg.slsupport.link/?pid=" + pid + "&aid=" + el.parentEvent.aid + "&callback=" + REGCOMPLETE_WEBHOOK_CHANNEL;
+        const regLinkV1 = "https://reg.slsupport.link/?pid=" + pid + "&aid=" + el.parentEvent.aid + "&callback=" + REGCOMPLETE_WEBHOOK_CHANNEL;
+        const useRegLinkV2 = Boolean(el?.parentEvent?.config?.reglinkv2);
+        if (useRegLinkV2) {
+            void ensureRegLinkV2(el.parentEvent.aid);
+        }
+        const regLink = (useRegLinkV2 && regLinkV2ByAid[el.parentEvent.aid]) ? regLinkV2ByAid[el.parentEvent.aid] : regLinkV1;
 
-        const ConditionalEMail = (state: string, prompt?: string) => {
-            if (typeof el.subEvent.embeddedEmails === 'undefined') {
-                return null;
-            }
-            if (!el.subEvent.embeddedEmails[state]) {
-                return null;
-            }
-
-            if (state == 'accept' && el.subEvent.embeddedEmails['reg-confirm']) {
-                state = 'reg-confirm';
+        const ConditionalEMail = (state: string, prompt?: string, rootStageOverride?: 'eligible-registration' | 'welcome' | 'acceptance') => {
+            // Prefer sub-event embeddedEmails (existing behavior)
+            const subEventEmails = el?.subEvent?.embeddedEmails;
+            if (subEventEmails && subEventEmails[state]) {
+                if (state == 'accept' && subEventEmails['reg-confirm']) {
+                    state = 'reg-confirm';
+                }
+                return <>{DisplayEmailIFrame(el, state, prompt)}</>;
             }
 
-            return (
-                <>
-                    {DisplayEmailIFrame(el, state, prompt)}
-                </>
-            );
+            // Optional new location: event-level embeddedEmails keyed by subevent then stage
+            const rootEmailsForSubEvent = el?.parentEvent?.embeddedEmails?.[el?.subEventName];
+            if (!rootEmailsForSubEvent) return null;
+
+            // Map legacy states to root stages unless explicitly overridden
+            const stage =
+                rootStageOverride ||
+                (state === 'reg-confirm' ? 'welcome'
+                    : state === 'reg' ? 'eligible-registration'
+                        : undefined);
+            if (!stage) return null;
+
+            const links = rootEmailsForSubEvent?.[stage];
+            if (!links) return null;
+            return <>{DisplayEmailIFrame(el, state, prompt, links, { rootLevelStages: true })}</>;
         };
 
         if (!el.complete) {
@@ -1243,7 +1387,7 @@ const HomeContent = () => {
                             <>
                                 <ConditionalTimes />
                                 <div dangerouslySetInnerHTML={promptLookupHTMLWithArgs('acceptedNotOffered', regLink)} />
-                                {ConditionalEMail('reg')}
+                                {ConditionalEMail('reg', undefined, 'acceptance')}
                             </>
                         );
                     } else {
@@ -1868,6 +2012,17 @@ const HomeContent = () => {
             <>
                 <div className="bg-gray-900 border border-gray-700 text-white rounded-lg overflow-hidden mb-6 shadow-lg">
                     <div className="p-6">
+                        {el?.parentEvent?.config?.eventImage ? (
+                            <div className="mb-4">
+                                <img
+                                    src={el.parentEvent.config.eventImage}
+                                    alt=""
+                                    className="w-full max-h-64 object-cover rounded-md border border-gray-700"
+                                    loading="lazy"
+                                    decoding="async"
+                                />
+                            </div>
+                        ) : null}
                         <h3 className="text-xl font-semibold mb-4">
                             {eventDate()}{el.eventname}{subEventName()}
                         </h3>
@@ -2083,9 +2238,11 @@ const HomeContent = () => {
     if (!loaded) {
         return (
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="sticky top-0 z-50 bg-gray-900 border border-gray-700 rounded-lg p-4 mb-4 flex items-center justify-between shadow-lg">
-                    <div className="flex items-center">
-                        <div className="text-xl font-bold text-white" id="load-status">{loadStatus}</div>
+                <div className="sticky top-0 z-50 w-full pt-3">
+                    <div className="w-full bg-gray-900 border border-gray-700 text-white rounded-lg overflow-hidden p-4 mb-4 flex items-center justify-between shadow-lg">
+                        <div className="flex items-center">
+                            <div className="text-xl font-bold" id="load-status">{loadStatus}</div>
+                        </div>
                     </div>
                 </div>
                 {error && (
@@ -2110,12 +2267,12 @@ const HomeContent = () => {
                 />
             ) : (
                 <>
-                    <TopNavBar
-                        title={promptLookup('title')}
-                        pid={pid as string}
-                        hash={hash as string}
-                    />
                     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                        <TopNavBar
+                            title={promptLookup('title')}
+                            pid={pid as string}
+                            hash={hash as string}
+                        />
                         {mediaDashboard()}
                     </div>
                     <div className="mb-8"></div>
