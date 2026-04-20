@@ -1256,6 +1256,47 @@ const HomeContent = () => {
                             pageData = pageData.replace(/#reglink/g, reglinkText);
                         }
 
+                        // #retreats / ||retreats|| (root-level embedded emails)
+                        // Mirrors email-agent behavior: list selected whichRetreats as localized labels.
+                        // Note: Some editors escape '#' as '&#35;' or '&#x23;'.
+                        const retreatsMacroRe = /(#retreats|\|\|retreats\|\||&#35;retreats;?|&#x23;retreats;?)/gi;
+                        if (retreatsMacroRe.test(pageData)) {
+                            try {
+                                const event = el?.parentEvent;
+                                const eventAid = String(event?.aid || '');
+                                const whichCfg = event?.config?.whichRetreatsConfig;
+                                const whichSelected = student?.programs?.[eventAid]?.whichRetreats;
+                                if (!whichCfg || typeof whichCfg !== 'object') {
+                                    throw new Error(`Missing event.config.whichRetreatsConfig for aid='${eventAid}'`);
+                                }
+                                if (!whichSelected || typeof whichSelected !== 'object') {
+                                    throw new Error(`Missing student.programs['${eventAid}'].whichRetreats`);
+                                }
+
+                                const keys = Object.keys(whichSelected).sort();
+                                const items: string[] = [];
+                                for (const key of keys) {
+                                    if (!whichSelected[key]) continue;
+                                    const cfg = (whichCfg as any)[key];
+                                    const promptKey = cfg?.prompt;
+                                    if (!promptKey) continue;
+
+                                    const eventSpecific = promptLookupAIDSpecific(eventAid, event?.config?.aidAlias, promptKey);
+                                    const label = eventSpecific.includes('-unknown')
+                                        ? promptLookup(promptKey) // fall back to dashboard aid
+                                        : eventSpecific;
+                                    items.push(`<li><b>${label}</b></li>`);
+                                }
+
+                                const retreatsHtml = items.length ? `<ul>${items.join('')}</ul>` : '';
+                                pageData = pageData.replace(retreatsMacroRe, retreatsHtml);
+                            } catch (e) {
+                                console.warn('Embedded email #retreats macro expansion failed:', e);
+                                // Fail soft: remove the macro so it doesn't show raw tokens to the user
+                                pageData = pageData.replace(retreatsMacroRe, '');
+                            }
+                        }
+
                         pageData = pageData.replace(/\|\|name\|\|/g, fullName);
                         pageData = pageData.replace(/\|\|coord-email\|\|/g, el.parentEvent.coordEmail);
                         pageData = pageData.replace(/123456789/g, pidString);
