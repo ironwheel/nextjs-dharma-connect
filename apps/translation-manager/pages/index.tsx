@@ -698,8 +698,8 @@ const Home = () => {
 
     return (
         <>
-            <TopNavBar updateParent={forceRender} />
             <Container>
+                <TopNavBar updateParent={forceRender} />
                 {translationDashboard()}
             </Container>
             <br></br>
