@@ -20,7 +20,8 @@ from botocore.exceptions import ClientError
 
 from .config import (
     SMTP_SERVER, SMTP_PORT, DEFAULT_PREVIEW, DEFAULT_FROM_NAME,
-    EMAIL_ACCOUNT_CREDENTIALS_TABLE, AWS_REGION, REGLINKV2_HASHGEN_SECRET
+    EMAIL_ACCOUNT_CREDENTIALS_TABLE, AWS_REGION, REGLINKV2_HASHGEN_SECRET,
+    STUDENT_DASHBOARD_HASHGEN_SECRET,
 )
 from .prompts import prompt_lookup
 from .eligible import check_eligibility, apply_installments_limit_fee_selected, _installments_paid_cents
@@ -110,6 +111,51 @@ def _generate_auth_hash(guid: str, secret_key_hex: str) -> str:
         raise ValueError('Secret key must be a 64-character hexadecimal string')
     key_bytes = bytes.fromhex(secret_key_hex)
     return hmac.new(key_bytes, guid.encode('utf-8'), 'sha256').hexdigest()
+
+
+def _rewrite_student_dashboard_footer_link(html: str, pid: str, auth_hash: str) -> str:
+    """
+    Rewrite any legacy student dashboard links in email HTML.
+
+    Legacy form:
+      https://student.slsupport.link/?pid=<pid>
+    New form:
+      https://student-dashboard.slsupport.link/?pid=<pid>&hash=<hash>
+    """
+    if not html or not pid or not auth_hash:
+        return html
+
+    legacy_host_re = r"(?:https?://)?student\.slsupport\.link"
+    new_host = "https://student-dashboard.slsupport.link"
+
+    def _repl(match: re.Match) -> str:
+        href = match.group(1)
+        rest = match.group(2) or ""
+
+        # Normalize to new host, preserve path/query/fragment.
+        href2 = new_host + rest
+
+        # Ensure pid present (it should be, but be defensive).
+        if re.search(r"([?&])pid=", href2, flags=re.IGNORECASE) is None:
+            joiner = "&" if "?" in href2 else "?"
+            href2 = f"{href2}{joiner}pid={pid}"
+
+        # Append hash if missing; replace if present but not this one.
+        if re.search(r"([?&])hash=", href2, flags=re.IGNORECASE):
+            href2 = re.sub(r"([?&])hash=[^&#\"]*", rf"\1hash={auth_hash}", href2, flags=re.IGNORECASE)
+        else:
+            joiner = "&" if "?" in href2 else "?"
+            href2 = f"{href2}{joiner}hash={auth_hash}"
+
+        return f'href="{href2}"'
+
+    # Target hrefs that point at the legacy host; keep the remainder of the URL.
+    return re.sub(
+        rf'href="({legacy_host_re})([^"]*)"',
+        _repl,
+        html,
+        flags=re.IGNORECASE,
+    )
 
 
 def lookup_email_account_credentials(account: str, country: str) -> tuple[str, str]:
@@ -481,6 +527,16 @@ def send_email(html: str, subject: str, language: str, account: str, student: Di
     # Replace placeholder pid with student ID
     html = html.replace("123456789", student.get('id', ''))
     html = html.replace("||pid||", student.get('id', ''))
+
+    # Rewrite legacy student dashboard link in email footers to new app + auth hash
+    if "student.slsupport.link" in html:
+        if not STUDENT_DASHBOARD_HASHGEN_SECRET:
+            raise Exception(
+                "Can't rewrite student dashboard link. STUDENT_DASHBOARD_HASHGEN_SECRET environment variable not set."
+            )
+        pid = student.get('id', '')
+        dash_hash = _generate_auth_hash(pid, STUDENT_DASHBOARD_HASHGEN_SECRET)
+        html = _rewrite_student_dashboard_footer_link(html, pid, dash_hash)
 
     # Replace ||hash|| with HMAC-SHA256(pid, secret) using REGLINKV2_HASHGEN_SECRET (same algo as API authUtils)
     if "||hash||" in html:
