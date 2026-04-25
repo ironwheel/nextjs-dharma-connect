@@ -13,6 +13,7 @@ import {
   completeOffering,
   sumInstallmentPaymentsCents,
   applyInstallmentsLimitFeeToSelectedRetreats,
+  checkEligibility,
 } from 'sharedFrontend';
 import { promptLookup } from './script/StepComponents';
 import type { ScriptContext } from './script/types';
@@ -426,11 +427,41 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
   const [installmentsAmountInputByPerson, setInstallmentsAmountInputByPerson] = useState<Record<string, string>>({});
   // For series offerings: per-person choice between "next only" and "all remaining".
   const [seriesChoiceByPerson, setSeriesChoiceByPerson] = useState<Record<string, 'next' | 'remaining'>>({});
+  // For pool-based subevent selection: per-person selection of unpaid subevents to include.
+  const [selectedSubEventsByPerson, setSelectedSubEventsByPerson] = useState<Record<string, Record<string, boolean>>>({});
 
   const studentCountry = context.student?.country;
   const offeringCADPar = event?.config?.offeringCADPar === true;
   const offeringKMFee = event?.config?.offeringKMFee === true;
   const offeringPresentation = event?.config?.offeringPresentation as string | undefined;
+  const allowSubeventSelectionRaw = (event?.config as any)?.allowSubeventSelection;
+  const allowSubeventSelectionObj =
+    allowSubeventSelectionRaw && typeof allowSubeventSelectionRaw === 'object' ? (allowSubeventSelectionRaw as any) : null;
+  const allowSubeventSelectionPool = allowSubeventSelectionObj?.pool as string | undefined;
+  const allowSubeventSelectionBool = allowSubeventSelectionObj?.boolean as boolean | undefined;
+  const poolsData = Array.isArray((context as any).pools) ? ((context as any).pools as any[]) : [];
+  const checkElig = context.checkEligibility ?? checkEligibility;
+  const isEligibleForSubeventSelection =
+    offeringPresentation === 'nextAndRemaining' &&
+    (allowSubeventSelectionBool === true ||
+      (allowSubeventSelectionBool !== false &&
+        typeof allowSubeventSelectionPool === 'string' &&
+        allowSubeventSelectionPool.trim() !== '' &&
+        typeof checkElig === 'function' &&
+        !!eventCode &&
+        checkElig(allowSubeventSelectionPool, context.student, eventCode, poolsData, event)));
+
+  if (isRegisterTestMode && offeringPresentation === 'nextAndRemaining') {
+    // eslint-disable-next-line no-console
+    console.debug('[Offer] allowSubeventSelection eligibility', {
+      allowSubeventSelectionRaw,
+      allowSubeventSelectionBool,
+      allowSubeventSelectionPool,
+      eventCode,
+      poolsCount: poolsData.length,
+      eligible: isEligibleForSubeventSelection,
+    });
+  }
   const hasOwyaaInCart = cartHasOwyaaSelection(fafFull);
   const currency =
     offeringPresentation === 'installments'
@@ -475,6 +506,52 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     const history = person.offeringHistory || {};
     return subEventNamesByDate.filter((name) => !history[name]);
   };
+
+  const getSelectedUnpaidSubEventsForPerson = useCallback(
+    (person: Person): string[] => {
+      const unpaid = getUnpaidSubEventsForPerson(person);
+      const selectedMap = selectedSubEventsByPerson[person.id] || {};
+      return unpaid.filter((name) => selectedMap[name] === true);
+    },
+    [selectedSubEventsByPerson, subEventNamesByDate],
+  );
+
+  const getSelectedSumCentsForNames = useCallback(
+    (selectedNames: string[], promptKey: string): number => {
+      let sum = 0;
+      for (const name of selectedNames) {
+        const subEv = event?.subEvents?.[name];
+        const oid = subEv?.offeringMode;
+        const oc = oid ? configs[oid] : null;
+        if (!oc) continue;
+        const promptIdx = oc.prompts?.indexOf(promptKey) ?? -1;
+        if (promptIdx >= 0) sum += Math.round((oc.amounts[promptIdx] ?? 0) * 100);
+      }
+      return sum;
+    },
+    [event?.subEvents, configs],
+  );
+
+  useEffect(() => {
+    if (!isEligibleForSubeventSelection) return;
+    setSelectedSubEventsByPerson((prev) => {
+      let changed = false;
+      const next: Record<string, Record<string, boolean>> = { ...prev };
+      for (const person of fafFull) {
+        if (!person?.canOffer) continue;
+        const unpaid = getUnpaidSubEventsForPerson(person);
+        if (unpaid.length === 0) continue;
+        const cur = next[person.id] ? { ...next[person.id] } : {};
+        const hasAnySelected = unpaid.some((n) => cur[n] === true);
+        if (!hasAnySelected) {
+          cur[unpaid[0]] = true;
+          next[person.id] = cur;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [isEligibleForSubeventSelection, fafFull, subEventNamesByDate]);
 
   const installmentsSubEventName = React.useMemo(() => {
     if (!isInstallmentsPresentation) return '';
@@ -1383,7 +1460,9 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
             {fafFull.map((person, pIdx) => {
               const unpaid = getUnpaidSubEventsForPerson(person);
               if (unpaid.length === 0) return null;
-              const nextSubName = unpaid[0];
+              const selectedNames = isEligibleForSubeventSelection ? getSelectedUnpaidSubEventsForPerson(person) : [];
+              const selectedCount = selectedNames.length;
+              const nextSubName = (isEligibleForSubeventSelection ? selectedNames[0] : null) ?? unpaid[0];
               const subEv = event?.subEvents?.[nextSubName];
               const oid = subEv?.offeringMode;
               const oc = oid ? configs[oid] : null;
@@ -1400,7 +1479,73 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                   </p>
                   {person.canOffer ? (
                     <div className="space-y-2">
-                      {unpaid.length >= 2 && (() => {
+                      {unpaid.length >= 2 && (isEligibleForSubeventSelection ? (() => {
+                        const selectQuestion =
+                          promptLookup(context, 'selectSubEvents') ||
+                          'Please select which events in the series you would like to make an offering for:';
+                        const alreadyOfferedLabel = promptLookup(context, 'alreadyOffered') || 'Already offered';
+                        const selectedMap = selectedSubEventsByPerson[person.id] || {};
+                        return (
+                          <>
+                            <div className="mb-3 space-y-2">
+                              <HtmlPrompt html={selectQuestion} className="text-sm text-reg-text" />
+                              <div className="space-y-1">
+                                {subEventNamesByDate.map((name) => {
+                                  const offered = !!person.offeringHistory?.[name];
+                                  const label = promptLookup(context, name) || name;
+                                  const isComplete = event?.subEvents?.[name]?.eventComplete === true;
+                                  const videoOnlyLabel = promptLookup(context, 'videoOnly') || 'Video only';
+                                  if (offered) {
+                                    return (
+                                      <div key={name} className="flex items-center justify-between gap-3 text-sm">
+                                        <span className="text-reg-text">
+                                          {label}
+                                          {isComplete ? (
+                                            <span className="ml-2 text-reg-muted italic">{videoOnlyLabel}</span>
+                                          ) : null}
+                                        </span>
+                                        <span className="text-reg-muted italic">{alreadyOfferedLabel}</span>
+                                      </div>
+                                    );
+                                  }
+                                  const checked = selectedMap[name] === true;
+                                  return (
+                                    <label key={name} className="flex items-center justify-between gap-3 text-sm">
+                                      <span className="text-reg-text">
+                                        {label}
+                                        {isComplete ? (
+                                          <span className="ml-2 text-reg-muted italic">{videoOnlyLabel}</span>
+                                        ) : null}
+                                      </span>
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={() => {
+                                          setSelectedSubEventsByPerson((prev) => {
+                                            const next = { ...prev };
+                                            const cur = { ...(next[person.id] || {}) };
+                                            const unpaidNow = getUnpaidSubEventsForPerson(person);
+                                            const nextChecked = !checked;
+                                            cur[name] = nextChecked;
+                                            const countAfter = unpaidNow.filter((n) => cur[n] === true).length;
+                                            if (countAfter === 0 && unpaidNow.length > 0) {
+                                              cur[name] = true;
+                                            }
+                                            next[person.id] = cur;
+                                            return next;
+                                          });
+                                        }}
+                                        className="h-4 w-4 accent-reg-accent"
+                                      />
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                            <div className="border-t border-reg-border my-3" />
+                          </>
+                        );
+                      })() : (() => {
                         const remainingCount = unpaid.length;
                         const choice = seriesChoiceByPerson[person.id] || 'next';
                         const nextLabel = promptLookup(context, 'next') || 'Next event only';
@@ -1446,7 +1591,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                             <div className="border-t border-reg-border my-3" />
                           </>
                         );
-                      })()}
+                      })())}
                       {oc.prompts.map((promptKey, idx) => {
                         const amount = oc.amounts[idx] ?? 0;
                         const baseAmountCents = Math.round((amount ?? 0) * 100);
@@ -1478,23 +1623,62 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                         const remainingCount = unpaid.length;
                         const seriesChoice = seriesChoiceByPerson[person.id] || 'next';
                         const isNextAndRemainingContext = remainingCount >= 2;
+                        const isSelectContext = isEligibleForSubeventSelection && remainingCount >= 2;
+                        const selectedUnpaid = isSelectContext ? selectedNames : [];
+                        const selectedUnpaidCount = selectedUnpaid.length;
                         const displayAmountCents =
-                          isNextAndRemainingContext && seriesChoice === 'remaining' && remainingCount > 1
+                          isSelectContext
+                            ? getSelectedSumCentsForNames(selectedUnpaid, promptKey)
+                            : isNextAndRemainingContext && seriesChoice === 'remaining' && remainingCount > 1
                             ? getRemainingSumCents(person, promptKey)
                             : baseAmountCents;
                         const defaultSponsoringDisplayCents =
-                          isNextAndRemainingContext && seriesChoice === 'remaining' && remainingCount > 1
+                          isSelectContext
+                            ? getSelectedSumCentsForNames(selectedUnpaid, promptKey)
+                            : isNextAndRemainingContext && seriesChoice === 'remaining' && remainingCount > 1
                             ? getRemainingSumCents(person, promptKey)
                             : defaultSponsoringCents;
                         const sponsoringButtonLabel = formatAmount(
                           sponsoringSelectedAmountCents ?? defaultSponsoringDisplayCents,
                           currency,
                         );
-                        if (isNextAndRemainingContext && seriesChoice === 'remaining' && isOwyaa) {
+                        if (
+                          (isNextAndRemainingContext && seriesChoice === 'remaining' && isOwyaa) ||
+                          (isSelectContext && selectedUnpaidCount !== 1 && isOwyaa)
+                        ) {
+                          return null;
+                        }
+                        if (isSelectContext && selectedUnpaidCount !== 1 && isHeartGift) {
                           return null;
                         }
                         const handleSelectFixedAmount = () => {
-                          if (isNextAndRemainingContext && seriesChoice === 'remaining') {
+                          if (isSelectContext) {
+                            if (selectedUnpaidCount === 0) return;
+                            setFafFull((prev) => {
+                              const next = prev.map((p, i) => {
+                                if (i !== pIdx) return p;
+                                const cur = { ...(p.currentOfferings || {}) };
+                                selectedUnpaid.forEach((name) => {
+                                  const subEvFor = event?.subEvents?.[name];
+                                  const oidFor = subEvFor?.offeringMode;
+                                  const ocForSub = oidFor ? configs[oidFor] : null;
+                                  const promptIdxForSub = ocForSub?.prompts?.indexOf(promptKey) ?? -1;
+                                  const amountForSub =
+                                    promptIdxForSub >= 0
+                                      ? Math.round((ocForSub!.amounts[promptIdxForSub] ?? 0) * 100)
+                                      : 0;
+                                  cur[name] = {
+                                    offeringSelection: promptKey,
+                                    offeringIndex: promptIdxForSub >= 0 ? promptIdxForSub : idx,
+                                    offeringSKU: `${eventCode}-${name}-${promptKey}`,
+                                    offeringAmount: amountForSub,
+                                  };
+                                });
+                                return { ...p, currentOfferings: cur };
+                              });
+                              return next;
+                            });
+                          } else if (isNextAndRemainingContext && seriesChoice === 'remaining') {
                             setFafFull((prev) => {
                               const next = prev.map((p, i) => {
                                 if (i !== pIdx) return p;
@@ -1866,7 +2050,8 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                     {offeringPresentation === 'nextAndRemaining' && (() => {
                       const unpaid = getUnpaidSubEventsForPerson(person);
                       if (unpaid.length <= 1) return null;
-                      const nextSubName = unpaid[0];
+                      const selectedNames = isEligibleForSubeventSelection ? getSelectedUnpaidSubEventsForPerson(person) : [];
+                      const nextSubName = (isEligibleForSubeventSelection ? selectedNames[0] : null) ?? unpaid[0];
                       if (subName !== nextSubName) return null;
                       const remainingCount = unpaid.length;
                       const choice = seriesChoiceByPerson[person.id] || 'next';
@@ -1880,35 +2065,104 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                       return (
                         <>
                           <div className="mb-3 space-y-2">
-                            <p className="text-sm text-reg-text">{question}</p>
-                            <div className="flex flex-wrap gap-3">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setSeriesChoiceByPerson((prev) => ({ ...prev, [person.id]: 'next' }))
-                                }
-                                className={`px-3 py-1 rounded text-xs font-medium border ${
-                                  choice === 'next'
-                                    ? 'bg-reg-accent-button text-reg-accent-button-text border-reg-accent-button'
-                                    : 'bg-reg-card border-reg-border text-reg-text hover:border-reg-border-light'
-                                }`}
-                              >
-                                {nextLabel}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setSeriesChoiceByPerson((prev) => ({ ...prev, [person.id]: 'remaining' }))
-                                }
-                                className={`px-3 py-1 rounded text-xs font-medium border ${
-                                  choice === 'remaining'
-                                    ? 'bg-reg-accent-button text-reg-accent-button-text border-reg-accent-button'
-                                    : 'bg-reg-card border-reg-border text-reg-text hover:border-reg-border-light'
-                                }`}
-                              >
-                                {remainingLabel}
-                              </button>
-                            </div>
+                            {isEligibleForSubeventSelection ? (
+                              <>
+                                <HtmlPrompt
+                                  html={
+                                    promptLookup(context, 'selectSubEvents') ||
+                                    'Please select which events in the series you would like to make an offering for:'
+                                  }
+                                  className="text-sm text-reg-text"
+                                />
+                                <div className="space-y-1">
+                                  {subEventNamesByDate.map((name) => {
+                                    const offered = !!person.offeringHistory?.[name];
+                                    const label = promptLookup(context, name) || name;
+                                    const isComplete = event?.subEvents?.[name]?.eventComplete === true;
+                                    const videoOnlyLabel = promptLookup(context, 'videoOnly') || 'Video only';
+                                    if (offered) {
+                                      return (
+                                        <div key={name} className="flex items-center justify-between gap-3 text-sm">
+                                          <span className="text-reg-text">
+                                            {label}
+                                            {isComplete ? (
+                                              <span className="ml-2 text-reg-muted italic">{videoOnlyLabel}</span>
+                                            ) : null}
+                                          </span>
+                                          <span className="text-reg-muted italic">
+                                            {promptLookup(context, 'alreadyOffered') || 'Already offered'}
+                                          </span>
+                                        </div>
+                                      );
+                                    }
+                                    const selectedMap = selectedSubEventsByPerson[person.id] || {};
+                                    const checked = selectedMap[name] === true;
+                                    return (
+                                      <label key={name} className="flex items-center justify-between gap-3 text-sm">
+                                        <span className="text-reg-text">
+                                          {label}
+                                          {isComplete ? (
+                                            <span className="ml-2 text-reg-muted italic">{videoOnlyLabel}</span>
+                                          ) : null}
+                                        </span>
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={() => {
+                                            setSelectedSubEventsByPerson((prev) => {
+                                              const next = { ...prev };
+                                              const cur = { ...(next[person.id] || {}) };
+                                              const unpaidNow = getUnpaidSubEventsForPerson(person);
+                                              const nextChecked = !checked;
+                                              cur[name] = nextChecked;
+                                              const countAfter = unpaidNow.filter((n) => cur[n] === true).length;
+                                              if (countAfter === 0 && unpaidNow.length > 0) {
+                                                cur[name] = true;
+                                              }
+                                              next[person.id] = cur;
+                                              return next;
+                                            });
+                                          }}
+                                          className="h-4 w-4 accent-reg-accent"
+                                        />
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <p className="text-sm text-reg-text">{question}</p>
+                                <div className="flex flex-wrap gap-3">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setSeriesChoiceByPerson((prev) => ({ ...prev, [person.id]: 'next' }))
+                                    }
+                                    className={`px-3 py-1 rounded text-xs font-medium border ${
+                                      choice === 'next'
+                                        ? 'bg-reg-accent-button text-reg-accent-button-text border-reg-accent-button'
+                                        : 'bg-reg-card border-reg-border text-reg-text hover:border-reg-border-light'
+                                    }`}
+                                  >
+                                    {nextLabel}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setSeriesChoiceByPerson((prev) => ({ ...prev, [person.id]: 'remaining' }))
+                                    }
+                                    className={`px-3 py-1 rounded text-xs font-medium border ${
+                                      choice === 'remaining'
+                                        ? 'bg-reg-accent-button text-reg-accent-button-text border-reg-accent-button'
+                                        : 'bg-reg-card border-reg-border text-reg-text hover:border-reg-border-light'
+                                    }`}
+                                  >
+                                    {remainingLabel}
+                                  </button>
+                                </div>
+                              </>
+                            )}
                           </div>
                           <div className="border-t border-reg-border my-3" />
                         </>
@@ -1963,13 +2217,22 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                         }
                       }
 
+                      const isSelectContext = isEligibleForSubeventSelection && isNextAndRemainingContext && remainingCount >= 2;
+                      const selectedUnpaid = isSelectContext ? getSelectedUnpaidSubEventsForPerson(person) : [];
+                      const selectedUnpaidCount = selectedUnpaid.length;
+                      const isMultiSelected = isSelectContext && selectedUnpaidCount > 1;
+
                       const displayAmountCents =
-                        isNextAndRemainingContext && seriesChoice === 'remaining' && remainingCount > 1
+                        isSelectContext
+                          ? getSelectedSumCentsForNames(selectedUnpaid, promptKey)
+                          : isNextAndRemainingContext && seriesChoice === 'remaining' && remainingCount > 1
                           ? getRemainingSumCents(person, promptKey)
                           : baseAmountCents;
 
                       const defaultSponsoringDisplayCents =
-                        isNextAndRemainingContext && seriesChoice === 'remaining' && remainingCount > 1
+                        isSelectContext
+                          ? getSelectedSumCentsForNames(selectedUnpaid, promptKey)
+                          : isNextAndRemainingContext && seriesChoice === 'remaining' && remainingCount > 1
                           ? getRemainingSumCents(person, promptKey)
                           : defaultSponsoringCents;
                       const sponsoringButtonLabel = formatAmount(
@@ -1978,12 +2241,44 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                       );
 
                       // When covering all remaining events, OWYAA is not offered.
-                      if (isNextAndRemainingContext && seriesChoice === 'remaining' && isOwyaa) {
+                      if (
+                        (isNextAndRemainingContext && seriesChoice === 'remaining' && isOwyaa) ||
+                        (isSelectContext && selectedUnpaidCount !== 1 && isOwyaa)
+                      ) {
+                        return null;
+                      }
+                      if (isSelectContext && selectedUnpaidCount !== 1 && isHeartGift) {
                         return null;
                       }
 
                       const handleSelectFixedAmount = () => {
-                        if (isNextAndRemainingContext && seriesChoice === 'remaining') {
+                        if (isSelectContext) {
+                          if (selectedUnpaidCount === 0) return;
+                          setFafFull((prev) => {
+                            const next = prev.map((p, i) => {
+                              if (i !== pIdx) return p;
+                              const cur = { ...(p.currentOfferings || {}) };
+                              selectedUnpaid.forEach((name) => {
+                                const subEv = event?.subEvents?.[name];
+                                const oid = subEv?.offeringMode;
+                                const ocForSub = oid ? configs[oid] : null;
+                                const promptIdxForSub = ocForSub?.prompts?.indexOf(promptKey) ?? -1;
+                                const amountForSub =
+                                  promptIdxForSub >= 0
+                                    ? Math.round((ocForSub!.amounts[promptIdxForSub] ?? 0) * 100)
+                                    : 0;
+                                cur[name] = {
+                                  offeringSelection: promptKey,
+                                  offeringIndex: promptIdxForSub >= 0 ? promptIdxForSub : idx,
+                                  offeringSKU: `${eventCode}-${name}-${promptKey}`,
+                                  offeringAmount: amountForSub,
+                                };
+                              });
+                              return { ...p, currentOfferings: cur };
+                            });
+                            return next;
+                          });
+                        } else if (isNextAndRemainingContext && seriesChoice === 'remaining') {
                           const unpaid = getUnpaidSubEventsForPerson(person);
                           setFafFull((prev) => {
                             const next = prev.map((p, i) => {
@@ -2051,29 +2346,43 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                               {owyaaButtonLabel}
                             </button>
                           ) : isSponsoring ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const minDollars =
-                                  isNextAndRemainingContext && seriesChoice === 'remaining' && remainingCount > 1
-                                    ? getRemainingMinDollars(person)
-                                    : undefined;
-                                openSponsoringCard(
-                                  pIdx,
-                                  subName,
-                                  promptKey,
-                                  defaultSponsoringDollars,
-                                  minDollars,
-                                );
-                              }}
-                              className={`min-w-[8rem] px-4 py-2 rounded text-sm font-medium transition-colors shadow-lg text-right ${
-                                isSelected
-                                  ? 'bg-reg-accent-button text-reg-accent-button-text hover:bg-reg-accent-button-hover'
-                                  : 'bg-reg-card border border-reg-border text-reg-text hover:border-reg-border-light hover:bg-reg-card-muted'
-                              }`}
-                            >
-                              {sponsoringButtonLabel}
-                            </button>
+                            isMultiSelected ? (
+                              <button
+                                type="button"
+                                onClick={handleSelectFixedAmount}
+                                className={`min-w-[8rem] px-4 py-2 rounded text-sm font-medium transition-colors shadow-lg text-right ${
+                                  isSelected
+                                    ? 'bg-reg-accent-button text-reg-accent-button-text hover:bg-reg-accent-button-hover'
+                                    : 'bg-reg-card border border-reg-border text-reg-text hover:border-reg-border-light hover:bg-reg-card-muted'
+                                }`}
+                              >
+                                {formatAmount(displayAmountCents, currency)}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const minDollars =
+                                    isNextAndRemainingContext && seriesChoice === 'remaining' && remainingCount > 1
+                                      ? getRemainingMinDollars(person)
+                                      : undefined;
+                                  openSponsoringCard(
+                                    pIdx,
+                                    subName,
+                                    promptKey,
+                                    defaultSponsoringDollars,
+                                    minDollars,
+                                  );
+                                }}
+                                className={`min-w-[8rem] px-4 py-2 rounded text-sm font-medium transition-colors shadow-lg text-right ${
+                                  isSelected
+                                    ? 'bg-reg-accent-button text-reg-accent-button-text hover:bg-reg-accent-button-hover'
+                                    : 'bg-reg-card border border-reg-border text-reg-text hover:border-reg-border-light hover:bg-reg-card-muted'
+                                }`}
+                              >
+                                {sponsoringButtonLabel}
+                              </button>
+                            )
                           ) : (
                             <button
                               type="button"
