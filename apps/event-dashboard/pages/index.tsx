@@ -17,6 +17,7 @@ import {
     authGetViews,
     authGetConfigValue,
     authGetRegistrationLink,
+    authLinkEmailSend,
     useWebSocket,
     getTableCount,
     checkEligibility,
@@ -162,12 +163,14 @@ function fromDynamo(item: any): any {
 }
 
 // StudentHistoryModal component
-const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, allPools, emailDisplayPermission, userEventAccess, pid, hash }) => {
+const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, allPools, userEventAccess, pid, hash }) => {
     const [copying, setCopying] = React.useState(false);
     const [sortColumn, setSortColumn] = React.useState<'date' | 'event' | 'eligible' | 'joined' | 'offering'>('date');
     const [sortDirection, setSortDirection] = React.useState<'asc' | 'desc'>('desc');
     const [regDomain, setRegDomain] = React.useState<string>('');
     const [fallbackUrl, setFallbackUrl] = React.useState<string | null>(null);
+    const [studentDashboardLinkHost, setStudentDashboardLinkHost] = React.useState<string>('');
+    const [sendingStudentDashboardLink, setSendingStudentDashboardLink] = React.useState<boolean>(false);
 
     // Pre-fetch registration domain when modal opens (fixes Safari clipboard issue)
     React.useEffect(() => {
@@ -187,13 +190,28 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
         }
     }, [show, fetchConfig]);
 
-    // Helper function to mask email in demo mode
-    const maskEmail = (email: string, emailDisplayValue: boolean = emailDisplayPermission): string => {
-        if (!emailDisplayValue && email) {
-            return '**********';
-        }
-        return email;
-    };
+    // Fetch student dashboard link host when modal opens
+    React.useEffect(() => {
+        if (!show) return;
+
+        let cancelled = false;
+        setStudentDashboardLinkHost('');
+
+        (async () => {
+            try {
+                const cfg = await fetchConfig('studentDashboardLinkHost');
+                if (cancelled) return;
+                const value = (typeof cfg === 'string') ? cfg : cfg?.value;
+                if (typeof value === 'string') setStudentDashboardLinkHost(value);
+            } catch (err) {
+                console.error('Error fetching student dashboard link host:', err);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [show, fetchConfig]);
 
     if (!student) return null;
     // Define SubEvent type
@@ -403,15 +421,50 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
                     <b>Email:</b>{' '}
                     <span
                         style={{
-                            cursor: emailDisplayPermission ? 'pointer' : 'default',
-                            textDecoration: emailDisplayPermission ? 'underline dotted' : 'none',
-                            color: emailDisplayPermission ? '#60a5fa' : '#888'
+                            cursor: 'pointer',
+                            textDecoration: 'underline dotted',
+                            color: '#60a5fa'
                         }}
-                        title={emailDisplayPermission ? "Click to copy email" : "Email copy disabled"}
-                        onClick={emailDisplayPermission ? () => handleCopy(student.email, 'email') : undefined}
+                        title="Click to copy email"
+                        onClick={() => handleCopy(student.email, 'email')}
                     >
-                        {maskEmail(student.email, emailDisplayPermission)}
+                        {student.email}
                     </span>
+                    <Button
+                        size="sm"
+                        variant="outline-primary"
+                        disabled={!studentDashboardLinkHost || sendingStudentDashboardLink}
+                        className="ms-2"
+                        onClick={async () => {
+                            if (!studentDashboardLinkHost) return;
+                            if (sendingStudentDashboardLink) return;
+                            setSendingStudentDashboardLink(true);
+                            try {
+                                const result = await authLinkEmailSend(pid as string, hash as string, studentDashboardLinkHost, student.id);
+                                if (result === true) {
+                                    toast.success('Student dashboard link email sent', { autoClose: 3000 });
+                                } else if (result && typeof result === 'object' && 'redirected' in result) {
+                                    toast.error('Authentication required');
+                                } else {
+                                    toast.error('Failed to send student dashboard link email');
+                                }
+                            } catch (err) {
+                                console.error('Error sending student dashboard link email:', err);
+                                toast.error('Failed to send student dashboard link email');
+                            } finally {
+                                setSendingStudentDashboardLink(false);
+                            }
+                        }}
+                    >
+                        {sendingStudentDashboardLink ? (
+                            <>
+                                <Spinner animation="border" size="sm" className="me-2" />
+                                Sending…
+                            </>
+                        ) : (
+                            'Send Student Dashboard Link'
+                        )}
+                    </Button>
                     <br />
                     <b>Country:</b> {student.country || 'Unknown'} <br />
                     <b>Languages:</b> {student.spokenLangPref || ''}{student.writtenLangPref ? ` / ${student.writtenLangPref}` : ''} <br />
@@ -760,7 +813,6 @@ const Home = () => {
     const [currentViewConditions, setCurrentViewConditions] = useState<any[]>([]);
     const [canViewStudentHistory, setCanViewStudentHistory] = useState<boolean>(false);
     const [currentUserName, setCurrentUserName] = useState<string>("Unknown");
-    const [emailDisplayPermission, setEmailDisplayPermission] = useState<boolean>(false);
     const [userEventAccess, setUserEventAccess] = useState<string[]>([]);
     const [userListAccess, setUserListAccess] = useState<boolean>(false);
     const [canRefreshCache, setCanRefreshCache] = useState<boolean>(false);
@@ -828,14 +880,6 @@ const Home = () => {
         } catch (error) {
             console.error('Error creating eligibility cache record:', error);
         }
-    };
-
-    // Helper function to mask email based on email display permission
-    const maskEmail = (email: string, emailDisplayValue: boolean = emailDisplayPermission): string => {
-        if (!emailDisplayValue && email) {
-            return '**********';
-        }
-        return email;
     };
 
     // API functions using sharedFrontend
@@ -1437,12 +1481,8 @@ const Home = () => {
             setSelectedStudent(student || null);
             setShowHistoryModal(true);
         } else if (field === 'email') {
-            if (emailDisplayPermission) {
-                navigator.clipboard.writeText(rowData.email);
-                toast.info(`Copied ${rowData.email} to the clipboard`, { autoClose: 3000 });
-            } else {
-                toast.info('Email copy disabled', { autoClose: 2000 });
-            }
+            navigator.clipboard.writeText(rowData.email);
+            toast.info(`Copied ${rowData.email} to the clipboard`, { autoClose: 3000 });
         } else if (field === 'owyaa') {
             handleOWYAA(rowData.id, rowData.name);
         }
@@ -2454,8 +2494,7 @@ const Home = () => {
         columnLabels: Column[],
         columnMetaData: Record<string, any>,
         currentEvent: Event,
-        allPools: Pool[],
-        emailDisplayValue: boolean = emailDisplayPermission
+        allPools: Pool[]
     ): Record<string, any> | null {
         const rowValues: Record<string, any> = {};
         for (let i = 0; i < columnLabels.length; i++) {
@@ -2474,7 +2513,7 @@ const Home = () => {
                 } else if (field === 'last') {
                     rowValues[field] = student.last;
                 } else if (field === 'email') {
-                    rowValues[field] = maskEmail(student.email, emailDisplayValue);
+                    rowValues[field] = student.email;
                 } else if (field === 'joined') {
                     rowValues[field] = (typeof currentEvent.aid === 'string' && student.programs?.[currentEvent.aid]) ? student.programs[currentEvent.aid].join ?? false : false;
                 } else if (field === 'accepted') {
@@ -3312,7 +3351,7 @@ const Home = () => {
         const rowValues: any[] = [];
         if (evShadow) {
             for (const student of filteredStudents) {
-                const row = getRowValuesForStudent(student, columnLabels, columnMetaData, evShadow, allPools, emailDisplayPermission);
+                const row = getRowValuesForStudent(student, columnLabels, columnMetaData, evShadow, allPools);
                 if (row !== null) {
                     rowValues.push(row);
                 }
@@ -3423,7 +3462,7 @@ const Home = () => {
         const rowValues: any[] = [];
         if (currentEvent) {
             for (const student of filteredStudents) {
-                const row = getRowValuesForStudent(student, columnLabels, columnMetaData, currentEvent, pools, emailDisplayPermission);
+                const row = getRowValuesForStudent(student, columnLabels, columnMetaData, currentEvent, pools);
                 if (row !== null) {
                     rowValues.push(row);
                 }
@@ -3510,21 +3549,6 @@ const Home = () => {
                     console.log('Demo mode set during initial load:', demoMode);
                 } else {
                     console.log('No demo mode config found, using default (false)');
-                }
-
-                // Fetch email display permission
-                try {
-                    const emailDisplayPermissionResult = await authGetConfigValue(pid as string, hash as string, 'emailDisplay');
-                    if (emailDisplayPermissionResult && typeof emailDisplayPermissionResult === 'boolean') {
-                        console.log('Email display permission:', emailDisplayPermissionResult);
-                        setEmailDisplayPermission(emailDisplayPermissionResult);
-                    } else {
-                        console.log('Email display permission fetch redirected or failed, using default (false)');
-                        setEmailDisplayPermission(false);
-                    }
-                } catch (error) {
-                    console.error('Error fetching email display permission:', error);
-                    setEmailDisplayPermission(false);
                 }
 
                 // Fetch events, pools, and views in parallel (but not students yet)
@@ -3860,7 +3884,7 @@ const Home = () => {
                                 </div>
                             )}
                         </div>
-                        {viewMotif !== 'graph' && (
+                        {viewMotif !== 'graph' && !loadingEligibilityCache && (
                         <div className="navbar-right">
                             <div className="search-container">
                                 <input
@@ -3915,7 +3939,6 @@ const Home = () => {
                 fetchConfig={fetchConfig}
                 allEvents={allEvents}
                 allPools={allPools}
-                emailDisplayPermission={emailDisplayPermission}
                 userEventAccess={userEventAccess}
                 pid={pid as string}
                 hash={hash as string}

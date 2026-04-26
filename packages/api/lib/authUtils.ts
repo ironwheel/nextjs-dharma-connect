@@ -399,7 +399,7 @@ function generateAuthHash(guid: string, secretKeyHex: string): string {
  * @returns { Promise<string> } The access link in format: https://${linkHost}/?pid=${studentId}&hash=${appSpecificHash}
  * @throws { Error } If the student doesn't have access to the domain or configuration is missing.
  */
-async function authGetLink(studentId: string, linkHost: string, oidcToken?: string): Promise<string> {
+export async function authGetLink(studentId: string, linkHost: string, oidcToken?: string): Promise<string> {
     // Parse and validate APP_ACCESS_JSON
     const accessJson = process.env.APP_ACCESS_JSON;
     if (!accessJson) {

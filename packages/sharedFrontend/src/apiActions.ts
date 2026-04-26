@@ -897,6 +897,43 @@ export async function authGetRegistrationLink(
 
 /**
  * @async
+ * @function authGetStudentDashboardLink
+ * @description Get a student dashboard access link for a participant.
+ * @param {string} pid - The participant ID (current user).
+ * @param {string} hash - The verification hash (current user).
+ * @param {string} targetUserPid - The participant ID to generate a link for.
+ * @returns {Promise<string | RedirectedResponse>} A promise that resolves to the link.
+ */
+export async function authGetStudentDashboardLink(
+    pid: string,
+    hash: string,
+    targetUserPid: string
+): Promise<string | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/auth/getStudentDashboardLink`, pid, hash, {
+            targetUserPid
+        });
+
+        if (response && response.redirected) {
+            console.log('[API] authGetStudentDashboardLink redirected - authentication required');
+            return { redirected: true };
+        }
+
+        return response?.link as string;
+    } catch (error: any) {
+        console.error('[API] authGetStudentDashboardLink failed:', error);
+
+        if (error.message && (error.message.includes('unauthorized') || error.message.includes('authentication'))) {
+            console.log('[API] authGetStudentDashboardLink authentication failed - returning redirected response');
+            return { redirected: true };
+        }
+
+        throw new Error(error.message || 'Failed to get student dashboard link');
+    }
+}
+
+/**
+ * @async
  * @function authGetActionsProfiles
  * @description Get the actions profiles.
  * @param {string} pid - The participant ID.
