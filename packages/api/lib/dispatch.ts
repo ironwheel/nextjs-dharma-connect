@@ -6,7 +6,7 @@
  */
 
 import { NextApiRequest, NextApiResponse } from 'next';
-import { tables, TableConfig } from './tableConfig';
+import { tables, TableConfig, tableGetConfig } from './tableConfig';
 import { websockets, WebSocketConfig, websocketGetConfig } from './websocketConfig';
 import { listAll, listAllChunked, getOne, deleteOne, deleteOneWithSort, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll, batchGetItems, listAllQueryBeginsWithSortKeyMultiple, queryIndex } from './dynamoClient';
 import { verificationEmailSend, verificationEmailCallback, verificationCheck, createToken, getActionsProfiles, getAuthList, getViews, getViewsProfiles, putAuthItem, linkEmailSend, getConfigValue, authGetRegisterLink } from './authUtils';
@@ -379,6 +379,24 @@ async function dispatchAuth(
             return res.status(400).json({ error: 'Missing required parameter: eventCode' });
           }
           const link = await authGetRegisterLink(targetUserPid, eventCode, oidcToken);
+          return res.status(200).json({ link });
+        }
+      case 'getStudentDashboardLink':
+        {
+          const { targetUserPid } = req.body;
+          if (!targetUserPid) {
+            return res.status(400).json({ error: 'Missing required parameter: targetUserPid' });
+          }
+
+          // Link host comes from config table: key = 'studentDashboardLinkHost'
+          const cfg = tableGetConfig('config');
+          const configItem = await getOne(cfg.tableName, cfg.pk, 'studentDashboardLinkHost', process.env.AUTH_ROLE_ARN!, oidcToken);
+          const linkHost = configItem?.value;
+          if (!linkHost || typeof linkHost !== 'string') {
+            return res.status(500).json({ error: 'Missing or invalid config: studentDashboardLinkHost' });
+          }
+
+          const link = await authGetLink(targetUserPid, linkHost, oidcToken);
           return res.status(200).json({ link });
         }
       default:

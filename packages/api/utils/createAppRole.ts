@@ -227,6 +227,14 @@ function mapAppActionsToPermissions(appActions) {
                     readTables.add(authArn);
                 } catch (e) { console.warn(e.message); }
                 break;
+            case 'POST/auth/getStudentDashboardLink':
+                try {
+                    const authArn = getTableArn('auth');
+                    const configArn = getTableArn('config');
+                    readTables.add(authArn);
+                    readTables.add(configArn);
+                } catch (e) { console.warn(e.message); }
+                break;
 
             // Pools Table - POST can be used for chunked listing (Scan)
             case 'POST/table/pools':
