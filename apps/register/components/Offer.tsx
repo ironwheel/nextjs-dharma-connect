@@ -41,6 +41,39 @@ function parseMoneyDollars(val: string): number {
   return Number.isFinite(n) ? n : Number.NaN;
 }
 
+/** Split totalCents across buckets proportionally to weights (e.g. per-weekend config amounts); sum of result equals totalCents. */
+function allocateProportionalCents(weights: number[], totalCents: number): number[] {
+  const n = weights.length;
+  if (n === 0) return [];
+  let t = totalCents;
+  if (!Number.isFinite(t) || t < 0) t = 0;
+  const sumW = weights.reduce((a, b) => a + b, 0);
+  if (sumW <= 0) {
+    const base = Math.floor(t / n);
+    const out = Array.from({ length: n }, () => base);
+    let r = t - base * n;
+    for (let i = n - 1; i >= 0 && r > 0; i--) {
+      out[i]++;
+      r--;
+    }
+    return out;
+  }
+  const floors = weights.map((w) => Math.floor((t * w) / sumW));
+  let assigned = floors.reduce((a, b) => a + b, 0);
+  let rem = t - assigned;
+  const order = weights
+    .map((w, i) => ({
+      i,
+      frac: (t * w) / sumW - floors[i],
+    }))
+    .sort((a, b) => b.frac - a.frac);
+  const out = [...floors];
+  for (let k = 0; k < rem; k++) {
+    out[order[k % n].i]++;
+  }
+  return out;
+}
+
 function sanitizePromptHtml(raw: string): string {
   if (!raw) return '';
   return String(raw)
@@ -422,6 +455,8 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     subName: string;
     promptKey: string;
     minAmountDollars?: number;
+    /** When set with length > 1, sponsoring total is split across these subevents (proportional to config amounts for promptKey). */
+    fanOutSubEventNames?: string[];
   } | null>(null);
   const [sponsoringAmountInput, setSponsoringAmountInput] = useState('');
   const [installmentsAmountInputByPerson, setInstallmentsAmountInputByPerson] = useState<Record<string, string>>({});
@@ -1040,13 +1075,62 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     promptKey: string,
     defaultAmountDollars: number,
     minAmountDollars?: number,
+    opts?: { fanOutSubEventNames?: string[] },
   ) => {
-    const effectiveDefault =
-      minAmountDollars !== undefined ? Math.max(defaultAmountDollars, minAmountDollars) : defaultAmountDollars;
-    const defaultCents = Math.round(effectiveDefault * 100);
     const subEv = event?.subEvents?.[subName];
     const oid = subEv?.offeringMode;
     const ocLocal = oid ? configs[oid] : null;
+    const fallbackIdx = ocLocal?.prompts?.indexOf(promptKey) ?? -1;
+
+    const names = opts?.fanOutSubEventNames?.filter(Boolean);
+    if (names && names.length > 1) {
+      const weights = names.map((name) => {
+        const se = event?.subEvents?.[name];
+        const ocid = se?.offeringMode;
+        const oc = ocid ? configs[ocid] : null;
+        const pi = oc?.prompts?.indexOf(promptKey) ?? -1;
+        return pi >= 0 ? Math.round((oc!.amounts[pi] ?? 0) * 100) : 0;
+      });
+      const sumConfig = weights.reduce((a, b) => a + b, 0);
+      const minCents = minAmountDollars != null ? Math.round(minAmountDollars * 100) : 0;
+      const totalCents = Math.max(sumConfig, minCents);
+      const parts = allocateProportionalCents(weights, totalCents);
+
+      setFafFull((prev) =>
+        prev.map((p, i) => {
+          if (i !== personIndex) return p;
+          const cur = { ...(p.currentOfferings || {}) };
+          names.forEach((name, j) => {
+            const se = event?.subEvents?.[name];
+            const ocid = se?.offeringMode;
+            const oc = ocid ? configs[ocid] : null;
+            const promptIdx = oc?.prompts?.indexOf(promptKey) ?? -1;
+            const oidx = promptIdx >= 0 ? promptIdx : fallbackIdx;
+            cur[name] = {
+              offeringSelection: promptKey,
+              offeringIndex: oidx,
+              offeringSKU: `${eventCode}-${name}-${promptKey}`,
+              offeringAmount: parts[j],
+            };
+          });
+          return { ...p, currentOfferings: cur };
+        }),
+      );
+      setSponsoringAmountInput((totalCents / 100).toFixed(2));
+      setSponsoringModal({
+        personIndex,
+        subName,
+        promptKey,
+        minAmountDollars,
+        fanOutSubEventNames: [...names],
+      });
+      setPaymentStep('sponsoring');
+      return;
+    }
+
+    const effectiveDefault =
+      minAmountDollars !== undefined ? Math.max(defaultAmountDollars, minAmountDollars) : defaultAmountDollars;
+    const defaultCents = Math.round(effectiveDefault * 100);
     const idx = ocLocal?.prompts?.indexOf(promptKey) ?? -1;
     setPersonOffering(personIndex, subName, {
       offeringSelection: promptKey,
@@ -1330,13 +1414,64 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
       // If entered value is below the minimum or invalid, snap back to the minimum.
       setSponsoringAmountInput(effectiveDollars.toFixed(2));
 
+      const fanNames = sponsoringModal.fanOutSubEventNames;
+
       if (effectiveDollars <= 0) {
-        setPersonOffering(sponsoringModal.personIndex, subName, null);
+        if (fanNames && fanNames.length > 1) {
+          setFafFull((prev) =>
+            prev.map((p, i) => {
+              if (i !== sponsoringModal.personIndex) return p;
+              const cur = { ...(p.currentOfferings || {}) };
+              for (const name of fanNames) delete cur[name];
+              return { ...p, currentOfferings: cur };
+            }),
+          );
+        } else {
+          setPersonOffering(sponsoringModal.personIndex, subName, null);
+        }
         return;
       }
 
       const amountCents = Math.round(effectiveDollars * 100);
       const idx = ocLocal?.prompts?.indexOf(promptKey) ?? -1;
+
+      if (fanNames && fanNames.length > 1) {
+        const weights = fanNames.map((name) => {
+          const se = event?.subEvents?.[name];
+          const ocid = se?.offeringMode;
+          const oc = ocid ? configs[ocid] : null;
+          const pi = oc?.prompts?.indexOf(promptKey) ?? -1;
+          return pi >= 0 ? Math.round((oc!.amounts[pi] ?? 0) * 100) : 0;
+        });
+        const parts = allocateProportionalCents(weights, amountCents);
+        const subEv0 = event?.subEvents?.[subName];
+        const oid0 = subEv0?.offeringMode;
+        const oc0 = oid0 ? configs[oid0] : null;
+        const fallbackIdx = oc0?.prompts?.indexOf(promptKey) ?? -1;
+
+        setFafFull((prev) =>
+          prev.map((p, i) => {
+            if (i !== sponsoringModal.personIndex) return p;
+            const cur = { ...(p.currentOfferings || {}) };
+            fanNames.forEach((name, j) => {
+              const se = event?.subEvents?.[name];
+              const ocid = se?.offeringMode;
+              const oc = ocid ? configs[ocid] : null;
+              const promptIdx = oc?.prompts?.indexOf(promptKey) ?? -1;
+              const oidx = promptIdx >= 0 ? promptIdx : fallbackIdx;
+              cur[name] = {
+                offeringSelection: promptKey,
+                offeringIndex: oidx,
+                offeringSKU: `${eventCode}-${name}-${promptKey}`,
+                offeringAmount: parts[j],
+              };
+            });
+            return { ...p, currentOfferings: cur };
+          }),
+        );
+        return;
+      }
+
       setPersonOffering(sponsoringModal.personIndex, subName, {
         offeringSelection: promptKey,
         offeringIndex: idx,
@@ -1598,9 +1733,30 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                         const isOwyaa = isOwyaaPrompt(promptKey);
                         const isHeartGift = isHeartGiftConfig(oc);
                         const isSponsoring = isSponsoringPrompt(promptKey, context);
+                        const remainingCount = unpaid.length;
+                        const seriesChoice = seriesChoiceByPerson[person.id] || 'next';
+                        const isNextAndRemainingContext = remainingCount >= 2;
+                        const isSelectContext = isEligibleForSubeventSelection && remainingCount >= 2;
+                        const selectedUnpaid = isSelectContext ? selectedNames : [];
+                        const selectedUnpaidCount = selectedUnpaid.length;
+                        /** Subevents over which sponsoring can be fanned out; label must sum these, not only nextSubName. */
+                        const namesForSponsoringSeries =
+                          isNextAndRemainingContext && seriesChoice === 'remaining' && remainingCount > 1
+                            ? unpaid
+                            : isSelectContext && selectedUnpaidCount > 1
+                              ? selectedUnpaid
+                              : null;
                         const isSelected =
-                          person.currentOfferings[nextSubName]?.offeringSelection === promptKey ||
-                          person.currentOfferings[nextSubName]?.offeringIndex === idx;
+                          namesForSponsoringSeries != null &&
+                          isSponsoring &&
+                          namesForSponsoringSeries.length > 1
+                            ? namesForSponsoringSeries.every(
+                                (n) =>
+                                  person.currentOfferings[n]?.offeringSelection === promptKey ||
+                                  person.currentOfferings[n]?.offeringIndex === idx,
+                              )
+                            : person.currentOfferings[nextSubName]?.offeringSelection === promptKey ||
+                              person.currentOfferings[nextSubName]?.offeringIndex === idx;
                         const current = person.currentOfferings[nextSubName];
                         const owyaaSelectedAmountCents =
                           isOwyaa && isSelected && typeof current?.offeringAmount === 'number'
@@ -1617,15 +1773,25 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                               ? offeringOWYAAButtonText
                               : promptLookup(context, 'enable') || 'Enable';
                         const sponsoringSelectedAmountCents =
-                          isSponsoring && isSelected && typeof current?.offeringAmount === 'number'
-                            ? current.offeringAmount
-                            : undefined;
-                        const remainingCount = unpaid.length;
-                        const seriesChoice = seriesChoiceByPerson[person.id] || 'next';
-                        const isNextAndRemainingContext = remainingCount >= 2;
-                        const isSelectContext = isEligibleForSubeventSelection && remainingCount >= 2;
-                        const selectedUnpaid = isSelectContext ? selectedNames : [];
-                        const selectedUnpaidCount = selectedUnpaid.length;
+                          namesForSponsoringSeries != null &&
+                          isSponsoring &&
+                          namesForSponsoringSeries.length > 1 &&
+                          namesForSponsoringSeries.every(
+                            (n) =>
+                              person.currentOfferings[n]?.offeringSelection === promptKey ||
+                              person.currentOfferings[n]?.offeringIndex === idx,
+                          )
+                            ? namesForSponsoringSeries.reduce(
+                                (acc, n) =>
+                                  acc +
+                                  (typeof person.currentOfferings[n]?.offeringAmount === 'number'
+                                    ? person.currentOfferings[n]!.offeringAmount
+                                    : 0),
+                                0,
+                              )
+                            : isSponsoring && isSelected && typeof current?.offeringAmount === 'number'
+                              ? current.offeringAmount
+                              : undefined;
                         const displayAmountCents =
                           isSelectContext
                             ? getSelectedSumCentsForNames(selectedUnpaid, promptKey)
@@ -1751,12 +1917,21 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                                     isNextAndRemainingContext && seriesChoice === 'remaining' && remainingCount > 1
                                       ? getRemainingMinDollars(person)
                                       : undefined;
+                                  const fanOpts =
+                                    isSelectContext && selectedUnpaidCount > 1
+                                      ? { fanOutSubEventNames: [...selectedUnpaid] }
+                                      : isNextAndRemainingContext &&
+                                          seriesChoice === 'remaining' &&
+                                          remainingCount > 1
+                                        ? { fanOutSubEventNames: [...unpaid] }
+                                        : undefined;
                                   openSponsoringCard(
                                     pIdx,
                                     nextSubName,
                                     promptKey,
                                     defaultSponsoringDollars,
                                     minDollars,
+                                    fanOpts,
                                   );
                                 }}
                                 className={`min-w-[8rem] px-4 py-2 rounded text-sm font-medium transition-colors shadow-lg text-right ${
@@ -2174,9 +2349,52 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                       const isOwyaa = isOwyaaPrompt(promptKey);
                       const isHeartGift = isHeartGiftConfig(oc);
                       const isSponsoring = isSponsoringPrompt(promptKey, context);
+                      // nextAndRemaining presentation: per-person choice of covering only the next unpaid event
+                      // or all remaining unpaid events in the series, with button amounts scaled accordingly.
+                      let seriesChoice: 'next' | 'remaining' | null = null;
+                      let remainingCount = 0;
+                      let isNextAndRemainingContext = false;
+                      let unpaidForSeries: string[] | null = null;
+                      if (offeringPresentation === 'nextAndRemaining') {
+                        unpaidForSeries = getUnpaidSubEventsForPerson(person);
+                        remainingCount = unpaidForSeries.length;
+                        if (remainingCount >= 2) {
+                          const nextSubName = unpaidForSeries[0];
+                          if (subName === nextSubName) {
+                            isNextAndRemainingContext = true;
+                            seriesChoice = seriesChoiceByPerson[person.id] || 'next';
+                          } else {
+                            // This person has multiple unpaid events but this is not the "next" one:
+                            // do not render per-event buttons here.
+                            return null;
+                          }
+                        }
+                      }
+
+                      const isSelectContext =
+                        isEligibleForSubeventSelection && isNextAndRemainingContext && remainingCount >= 2;
+                      const selectedUnpaid = isSelectContext ? getSelectedUnpaidSubEventsForPerson(person) : [];
+                      const selectedUnpaidCount = selectedUnpaid.length;
+                      const isMultiSelected = isSelectContext && selectedUnpaidCount > 1;
+
+                      const namesForSponsoringSeries =
+                        isNextAndRemainingContext && seriesChoice === 'remaining' && remainingCount > 1 && unpaidForSeries
+                          ? unpaidForSeries
+                          : isSelectContext && selectedUnpaidCount > 1
+                            ? selectedUnpaid
+                            : null;
+
                       const isSelected =
-                        person.currentOfferings[subName]?.offeringSelection === promptKey ||
-                        person.currentOfferings[subName]?.offeringIndex === idx;
+                        namesForSponsoringSeries != null &&
+                        isSponsoring &&
+                        namesForSponsoringSeries.length > 1
+                          ? namesForSponsoringSeries.every(
+                              (n) =>
+                                person.currentOfferings[n]?.offeringSelection === promptKey ||
+                                person.currentOfferings[n]?.offeringIndex === idx,
+                            )
+                          : person.currentOfferings[subName]?.offeringSelection === promptKey ||
+                            person.currentOfferings[subName]?.offeringIndex === idx;
                       const current = person.currentOfferings[subName];
                       const owyaaSelectedAmountCents =
                         isOwyaa && isSelected && typeof current?.offeringAmount === 'number'
@@ -2193,34 +2411,25 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                             ? offeringOWYAAButtonText
                             : promptLookup(context, 'enable') || 'Enable';
                       const sponsoringSelectedAmountCents =
-                        isSponsoring && isSelected && typeof current?.offeringAmount === 'number'
-                          ? current.offeringAmount
-                          : undefined;
-                      // nextAndRemaining presentation: per-person choice of covering only the next unpaid event
-                      // or all remaining unpaid events in the series, with button amounts scaled accordingly.
-                      let seriesChoice: 'next' | 'remaining' | null = null;
-                      let remainingCount = 0;
-                      let isNextAndRemainingContext = false;
-                      if (offeringPresentation === 'nextAndRemaining') {
-                        const unpaid = getUnpaidSubEventsForPerson(person);
-                        remainingCount = unpaid.length;
-                        if (remainingCount >= 2) {
-                          const nextSubName = unpaid[0];
-                          if (subName === nextSubName) {
-                            isNextAndRemainingContext = true;
-                            seriesChoice = seriesChoiceByPerson[person.id] || 'next';
-                          } else {
-                            // This person has multiple unpaid events but this is not the "next" one:
-                            // do not render per-event buttons here.
-                            return null;
-                          }
-                        }
-                      }
-
-                      const isSelectContext = isEligibleForSubeventSelection && isNextAndRemainingContext && remainingCount >= 2;
-                      const selectedUnpaid = isSelectContext ? getSelectedUnpaidSubEventsForPerson(person) : [];
-                      const selectedUnpaidCount = selectedUnpaid.length;
-                      const isMultiSelected = isSelectContext && selectedUnpaidCount > 1;
+                        namesForSponsoringSeries != null &&
+                        isSponsoring &&
+                        namesForSponsoringSeries.length > 1 &&
+                        namesForSponsoringSeries.every(
+                          (n) =>
+                            person.currentOfferings[n]?.offeringSelection === promptKey ||
+                            person.currentOfferings[n]?.offeringIndex === idx,
+                        )
+                          ? namesForSponsoringSeries.reduce(
+                              (acc, n) =>
+                                acc +
+                                (typeof person.currentOfferings[n]?.offeringAmount === 'number'
+                                  ? person.currentOfferings[n]!.offeringAmount
+                                  : 0),
+                              0,
+                            )
+                          : isSponsoring && isSelected && typeof current?.offeringAmount === 'number'
+                            ? current.offeringAmount
+                            : undefined;
 
                       const displayAmountCents =
                         isSelectContext
@@ -2366,12 +2575,19 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                                     isNextAndRemainingContext && seriesChoice === 'remaining' && remainingCount > 1
                                       ? getRemainingMinDollars(person)
                                       : undefined;
+                                  const fanOpts =
+                                    isNextAndRemainingContext &&
+                                    seriesChoice === 'remaining' &&
+                                    remainingCount > 1
+                                      ? { fanOutSubEventNames: [...unpaid] }
+                                      : undefined;
                                   openSponsoringCard(
                                     pIdx,
                                     subName,
                                     promptKey,
                                     defaultSponsoringDollars,
                                     minDollars,
+                                    fanOpts,
                                   );
                                 }}
                                 className={`min-w-[8rem] px-4 py-2 rounded text-sm font-medium transition-colors shadow-lg text-right ${
