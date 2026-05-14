@@ -145,7 +145,8 @@ const Home = () => {
                 // Get prompts
                 const gpResponse = await fetchPrompts(event.aid);
                 prompts = gpResponse.data;
-                setPrompts(prompts);
+                // sharedFrontend setPrompts is typed as nested Record; this app keeps prompts as DB rows (any[]).
+                setPrompts(prompts as unknown as Parameters<typeof setPrompts>[0]);
 
                 // Set language preference
                 if (typeof language !== 'undefined') {

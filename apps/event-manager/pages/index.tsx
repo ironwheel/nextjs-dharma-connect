@@ -2053,6 +2053,12 @@ const Home = () => {
                 }
             }
         }
+        if (typeof cleanedData.zoomLink === 'string') {
+            cleanedData.zoomLink = cleanedData.zoomLink.trim();
+            if (!cleanedData.zoomLink) {
+                delete cleanedData.zoomLink;
+            }
+        }
         if (cleanedData.embeddedShowcaseList) {
             cleanedData.embeddedShowcaseList = cleanedData.embeddedShowcaseList.filter(id => id && id.trim() !== '');
             // Remove embeddedShowcaseList if it's empty
