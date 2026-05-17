@@ -727,6 +727,26 @@ class AWSClient:
             print(f"Error updating transaction receipt sent: {e}")
             return False
 
+    def clear_transaction_receipt_sent(self, payment_intent_id: str) -> bool:
+        """
+        Remove receipt-sent markers so this row is picked up again by get_offering_transactions().
+
+        Use after correcting cart/skuSummary/summaryString on the item (e.g. sponsoring fan-out
+        recovery). The receipt body is built from skuSummary in email_sender.send_email (#receipt),
+        so the resent email reflects the updated Dynamo item.
+        """
+        try:
+            table = self.dynamodb.Table(OFFERING_TRANSACTIONS_TABLE)
+            table.update_item(
+                Key={'paymentIntentId': payment_intent_id},
+                # Legacy v1 marker is emailReceipt; _offering_tx_needs_receipt treats either as "already sent".
+                UpdateExpression='REMOVE emailReceiptSent, emailReceipt',
+            )
+            return True
+        except ClientError as e:
+            print(f"Error clearing transaction receipt sent markers: {e}")
+            return False
+
     def _get_full_language_name(self, language_code: str) -> str:
         """Convert two-letter language code to full language name."""
         language_mapping = {

@@ -101,6 +101,7 @@ function AmountStepper({
   currency,
   onChange,
   placeholder,
+  showDecrease = true,
 }: {
   value: string;
   min: number;
@@ -109,6 +110,8 @@ function AmountStepper({
   currency: string;
   onChange: (val: string) => void;
   placeholder?: string;
+  /** When false, the minus control is not rendered (e.g. until amount exceeds balance due). */
+  showDecrease?: boolean;
 }) {
   const parsed = parseMoneyDollars(value);
   const current = Number.isFinite(parsed) ? parsed : min;
@@ -125,15 +128,17 @@ function AmountStepper({
   return (
     <div className="flex justify-end">
       <div className="flex items-stretch gap-2">
-      <button
-        type="button"
-        onClick={() => bump(-step)}
-        disabled={atOrBelowMin}
-        aria-label="Decrease amount"
-        className="w-12 rounded border border-reg-border bg-reg-card text-reg-text hover:bg-reg-card-muted transition-colors text-xl font-semibold disabled:bg-reg-button-disabled disabled:text-reg-text-disabled disabled:cursor-not-allowed"
-      >
-        −
-      </button>
+      {showDecrease && (
+        <button
+          type="button"
+          onClick={() => bump(-step)}
+          disabled={atOrBelowMin}
+          aria-label="Decrease amount"
+          className="w-12 rounded border border-reg-border bg-reg-card text-reg-text hover:bg-reg-card-muted transition-colors text-xl font-semibold disabled:bg-reg-button-disabled disabled:text-reg-text-disabled disabled:cursor-not-allowed"
+        >
+          −
+        </button>
+      )}
       <div className="flex items-stretch rounded border border-reg-border overflow-hidden bg-reg-input text-reg-text">
         <div className="px-3 flex items-center text-sm text-reg-muted border-r border-reg-border select-none">
           {currencySymbol(currency)}
@@ -225,6 +230,19 @@ type InstallmentsRetreatConfig = {
 };
 
 type InstallmentsStatus = 'incomplete' | 'complete' | 'overpaid';
+
+function isInstallmentsLikeOfferingPresentation(presentation: string | undefined): boolean {
+  return presentation === 'installments' || presentation === 'installmentsTotalOrMore';
+}
+
+function installmentsDefaultOfferCents(
+  summary: { minimumDueCents: number; balanceDueCents: number },
+  isTotalOrMore: boolean,
+): number {
+  if (summary.balanceDueCents <= 0) return 0;
+  if (isTotalOrMore) return Math.max(1, summary.balanceDueCents);
+  return Math.max(1, Math.min(summary.minimumDueCents, summary.balanceDueCents));
+}
 
 function useOfferingData(context: ScriptContext) {
   const [configs, setConfigs] = useState<Record<string, OfferingConfig>>({});
@@ -499,7 +517,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
   }
   const hasOwyaaInCart = cartHasOwyaaSelection(fafFull);
   const currency =
-    offeringPresentation === 'installments'
+    isInstallmentsLikeOfferingPresentation(offeringPresentation)
       ? ((event?.config?.offeringCurrency as string) || 'USD')
       : offeringCADPar && studentCountry === 'Canada'
         ? 'CAD'
@@ -511,7 +529,9 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
   const subEventNames = subEvents.map(([name]) => name);
   const subEventCount = subEvents.length;
   const offeringIntro = promptLookup(context, 'offeringIntroduction') || '';
-  const isInstallmentsPresentation = offeringPresentation === 'installments';
+  const isInstallmentsPresentation = isInstallmentsLikeOfferingPresentation(offeringPresentation);
+  const isInstallmentsTotalOrMorePresentation = offeringPresentation === 'installmentsTotalOrMore';
+  const installmentsNoLimitLabel = promptLookup(context, 'noLimit') || 'No limit';
   const installmentStepDollarsRaw = Number(event?.config?.installmentStep);
   const installmentStepDollars =
     Number.isFinite(installmentStepDollarsRaw) && installmentStepDollarsRaw > 0
@@ -648,6 +668,10 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
       const cashTotal = Number(installmentsRetreatConfig[retreatKey]?.offeringCashTotal ?? 0);
       return sum + Math.max(0, Math.round((total - cashTotal) * 100));
     }, 0);
+    const offeringTotalDisplayCents = retreatsForTotals.reduce((sum, retreatKey) => {
+      const total = Number(installmentsRetreatConfig[retreatKey]?.offeringTotal ?? 0);
+      return sum + Math.max(0, Math.round(total * 100));
+    }, 0);
 
     const historyEntry = person.offeringHistory?.[installmentsSubEventName] || {};
     const installmentHistory = historyEntry?.installments || {};
@@ -665,6 +689,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
       selectedRetreats,
       minimumDueCents,
       maximumDueCents,
+      offeringTotalDisplayCents,
       offeredSoFarCents,
       balanceDueCents,
       status,
@@ -682,7 +707,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
         if (!summary.ok || summary.status !== 'incomplete' || summary.balanceDueCents <= 0) return person;
         const existing = person.currentOfferings?.[installmentsSubEventName];
         if (existing && Number(existing.offeringAmount) > 0) return person;
-        const minCents = Math.max(1, Math.min(summary.minimumDueCents, summary.balanceDueCents));
+        const minCents = installmentsDefaultOfferCents(summary, isInstallmentsTotalOrMorePresentation);
         const minDollars = minCents / 100;
         setInstallmentsAmountInputByPerson((prevInputs) => ({
           ...prevInputs,
@@ -707,6 +732,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     getInstallmentsSummary,
     installmentsSubEventName,
     eventCode,
+    isInstallmentsTotalOrMorePresentation,
   ]);
 
   /** Sum of amounts for this offering type across all remaining (unpaid) subevents; each subevent may have different amounts. */
@@ -790,10 +816,16 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
       if (Number.isFinite(existing) && existing > 0) return sum + existing;
       const personSummary = getInstallmentsSummary(person);
       if (!personSummary.ok || personSummary.status !== 'incomplete' || personSummary.balanceDueCents <= 0) return sum;
-      const personMinCents = Math.max(1, Math.min(personSummary.minimumDueCents, personSummary.balanceDueCents));
-      return sum + personMinCents;
+      return sum + installmentsDefaultOfferCents(personSummary, isInstallmentsTotalOrMorePresentation);
     }, 0);
-  }, [isInstallmentsPresentation, totalCents, fafFull, installmentsSubEventName, getInstallmentsSummary]);
+  }, [
+    isInstallmentsPresentation,
+    isInstallmentsTotalOrMorePresentation,
+    totalCents,
+    fafFull,
+    installmentsSubEventName,
+    getInstallmentsSummary,
+  ]);
 
   const handlePay = useCallback(async () => {
     const amountForIntent = isInstallmentsPresentation ? checkoutTotalCents : totalCents;
@@ -810,7 +842,10 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
             if (!personSummary.ok || personSummary.status !== 'incomplete' || personSummary.balanceDueCents <= 0) {
               return person;
             }
-            const personMinCents = Math.max(1, Math.min(personSummary.minimumDueCents, personSummary.balanceDueCents));
+            const personMinCents = installmentsDefaultOfferCents(
+              personSummary,
+              isInstallmentsTotalOrMorePresentation,
+            );
             return {
               ...person,
               currentOfferings: {
@@ -900,6 +935,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     currency,
     publishableKey,
     isInstallmentsPresentation,
+    isInstallmentsTotalOrMorePresentation,
     isRegisterTestMode,
     checkoutTotalCents,
     installmentsSubEventName,
@@ -1991,7 +2027,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     );
   }
 
-  if (offeringPresentation === 'installments') {
+  if (isInstallmentsPresentation) {
     const canOfferInstallmentsPeople = fafFull.filter((p) => p.canOffer);
     let installmentsSummaryError: string | null = null;
     for (const p of canOfferInstallmentsPeople) {
@@ -2097,33 +2133,46 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                 if (!person.canOffer) return null;
                 const personSummary = getInstallmentsSummary(person);
                 if (!personSummary.ok) return null;
-                const personMinCents = Math.max(1, Math.min(personSummary.minimumDueCents, personSummary.balanceDueCents));
-                const personMinDollars = personMinCents / 100;
                 const personBalanceCents = personSummary.balanceDueCents;
                 const personBalanceDollars = personBalanceCents / 100;
+                const personMinCents = isInstallmentsTotalOrMorePresentation
+                  ? installmentsDefaultOfferCents(personSummary, true)
+                  : Math.max(1, Math.min(personSummary.minimumDueCents, personSummary.balanceDueCents));
+                const personMinDollars = personMinCents / 100;
+                const personRangeLowCents = isInstallmentsTotalOrMorePresentation
+                  ? personSummary.offeringTotalDisplayCents
+                  : personMinCents;
+                const rangeLabel = isInstallmentsTotalOrMorePresentation
+                  ? `${formatAmount(personRangeLowCents, currency)} - ${installmentsNoLimitLabel}`
+                  : `${formatAmount(personMinCents, currency)} - ${formatAmount(personBalanceCents, currency)}`;
                 const currentCents = Number(person.currentOfferings?.[installmentsSubEventName]?.offeringAmount);
                 const currentDollars = Number.isFinite(currentCents) ? currentCents / 100 : personMinDollars;
                 const entered = installmentsAmountInputByPerson[person.id];
                 const displayed = entered ?? currentDollars.toFixed(2);
+                const displayedDollars = parseMoneyDollars(displayed);
+                const showInstallmentsDecrease =
+                  !isInstallmentsTotalOrMorePresentation ||
+                  (Number.isFinite(displayedDollars) && displayedDollars > personBalanceDollars);
                 return (
                   <div key={person.id} className="pt-3 border-t border-reg-border space-y-2">
                     <span className="text-reg-text text-sm block">{person.name}</span>
-                    <p className="text-xs text-reg-muted text-right">
-                      {`${formatAmount(personMinCents, currency)} - ${formatAmount(personBalanceCents, currency)}`}
-                    </p>
+                    <p className="text-xs text-reg-muted text-right">{rangeLabel}</p>
                     <AmountStepper
                       value={displayed}
                       min={personMinDollars}
-                      max={personBalanceDollars}
+                      max={isInstallmentsTotalOrMorePresentation ? undefined : personBalanceDollars}
                       step={installmentStepDollars}
                       currency={currency}
+                      showDecrease={showInstallmentsDecrease}
                       onChange={(val) => {
                         setInstallmentsAmountInputByPerson((prev) => ({ ...prev, [person.id]: val }));
                         const parsed = parseMoneyDollars(val);
                         if (!Number.isFinite(parsed)) {
                           return;
                         }
-                        const clamped = Math.min(Math.max(parsed, personMinDollars), personBalanceDollars);
+                        const clamped = isInstallmentsTotalOrMorePresentation
+                          ? Math.max(parsed, personMinDollars)
+                          : Math.min(Math.max(parsed, personMinDollars), personBalanceDollars);
                         setInstallmentsOfferingForPerson(pIdx, clamped);
                       }}
                       placeholder={personMinDollars.toFixed(2)}

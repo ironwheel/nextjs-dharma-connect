@@ -354,7 +354,8 @@ export default function Home() {
             setFafAggregatedInstallments(null);
             return;
         }
-        if (data.event?.config?.offeringPresentation !== 'installments') {
+        const offeringPres = data.event?.config?.offeringPresentation as string | undefined;
+        if (offeringPres !== 'installments' && offeringPres !== 'installmentsTotalOrMore') {
             setFafAggregatedInstallments(null);
             return;
         }
@@ -471,7 +472,10 @@ export default function Home() {
                         setPhase('offer');
                     }
                 }
-            } else if (offeringPresentation === 'installments' && installmentsStatus !== 'complete') {
+            } else if (
+                (offeringPresentation === 'installments' || offeringPresentation === 'installmentsTotalOrMore') &&
+                installmentsStatus !== 'complete'
+            ) {
                 if (!(phase === 'offeringCompleteCold' && offeringCompleteVariant === 'warm')) {
                     if (phase !== 'offer') {
                         setPhase('offer');
@@ -803,7 +807,9 @@ export default function Home() {
             : null;
     const activeProgram = data.student?.programs?.[activeEventCode] || {};
     const activeOfferingHistory = activeProgram?.offeringHistory || {};
-    const isInstallmentsPresentation = data.event?.config?.offeringPresentation === 'installments';
+    const offeringPresentationForUi = data.event?.config?.offeringPresentation as string | undefined;
+    const isInstallmentsPresentation =
+        offeringPresentationForUi === 'installments' || offeringPresentationForUi === 'installmentsTotalOrMore';
     const whichRetreatsConfig = data.event?.config?.whichRetreatsConfig || {};
     const selectedRetreats = Object.entries(activeProgram?.whichRetreats || {})
         .filter(([, selected]) => selected === true)

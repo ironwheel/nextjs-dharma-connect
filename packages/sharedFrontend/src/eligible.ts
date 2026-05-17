@@ -49,7 +49,8 @@ function currentEventInstallmentsPaidLtThreshold(
     const program = studentData.programs?.[currentAid];
     if (!program || typeof program !== 'object' || (program as { withdrawn?: boolean }).withdrawn) return false;
     const cfg = (eventContext as { config?: Record<string, unknown> }).config || {};
-    if (String(cfg.offeringPresentation || '').toLowerCase() !== 'installments') return false;
+    const pres = String(cfg.offeringPresentation || '').toLowerCase();
+    if (pres !== 'installments' && pres !== 'installmentstotalormore') return false;
     const whichConfig = cfg.whichRetreatsConfig;
     if (!whichConfig || typeof whichConfig !== 'object') return false;
     const wr = (program as { whichRetreats?: Record<string, boolean> }).whichRetreats;

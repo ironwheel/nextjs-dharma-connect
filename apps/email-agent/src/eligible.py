@@ -90,7 +90,8 @@ def _currentevent_installments_paid_lt_threshold(
     if program.get('withdrawn'):
         return False
     cfg = event_context.get('config') or {}
-    if str(cfg.get('offeringPresentation') or '').lower() != 'installments':
+    pres = str(cfg.get('offeringPresentation') or '').lower()
+    if pres not in ('installments', 'installmentstotalormore'):
         return False
     which_config = cfg.get('whichRetreatsConfig')
     if not isinstance(which_config, dict):
