@@ -3034,6 +3034,7 @@ const Home = () => {
                                                         <option value="">Select presentation...</option>
                                                         <option value="nextAndRemaining">nextAndRemaining</option>
                                                         <option value="installments">installments</option>
+                                                        <option value="installmentsTotalOrMore">installmentsTotalOrMore</option>
                                                         <option value="each">each</option>
                                                     </Form.Select>
                                                 </Form.Group>
