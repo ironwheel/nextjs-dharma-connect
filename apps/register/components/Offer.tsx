@@ -2625,10 +2625,8 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                                       ? getRemainingMinDollars(person)
                                       : undefined;
                                   const fanOpts =
-                                    isNextAndRemainingContext &&
-                                    seriesChoice === 'remaining' &&
-                                    remainingCount > 1
-                                      ? { fanOutSubEventNames: [...unpaid] }
+                                    namesForSponsoringSeries != null && namesForSponsoringSeries.length > 1
+                                      ? { fanOutSubEventNames: [...namesForSponsoringSeries] }
                                       : undefined;
                                   openSponsoringCard(
                                     pIdx,
