@@ -100,6 +100,7 @@ function AmountStepper({
   step = 1,
   currency,
   onChange,
+  onBlur,
   placeholder,
   showDecrease = true,
 }: {
@@ -109,6 +110,7 @@ function AmountStepper({
   step?: number;
   currency: string;
   onChange: (val: string) => void;
+  onBlur?: (val: string) => void;
   placeholder?: string;
   /** When false, the minus control is not rendered (e.g. until amount exceeds balance due). */
   showDecrease?: boolean;
@@ -148,6 +150,7 @@ function AmountStepper({
           inputMode="decimal"
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          onBlur={(e) => onBlur?.(e.target.value)}
           className="w-[7.25rem] px-3 py-3 bg-transparent text-sm tabular-nums text-right outline-none"
           placeholder={placeholder}
         />
@@ -242,6 +245,47 @@ function installmentsDefaultOfferCents(
   if (summary.balanceDueCents <= 0) return 0;
   if (isTotalOrMore) return Math.max(1, summary.balanceDueCents);
   return Math.max(1, Math.min(summary.minimumDueCents, summary.balanceDueCents));
+}
+
+function clampInstallmentsOfferDollars(
+  dollars: number,
+  minDollars: number,
+  maxDollars: number | undefined,
+  isTotalOrMore: boolean,
+): number {
+  if (!Number.isFinite(dollars)) return minDollars;
+  if (isTotalOrMore) return Math.max(dollars, minDollars);
+  const max =
+    typeof maxDollars === 'number' && Number.isFinite(maxDollars) ? maxDollars : minDollars;
+  return Math.min(Math.max(dollars, minDollars), max);
+}
+
+function resolveInstallmentsOfferDollars(
+  rawInput: string | undefined,
+  storedCents: number | undefined,
+  bounds: { minDollars: number; maxDollars?: number; isTotalOrMore: boolean },
+): { dollars: number; formatted: string; needsCorrection: boolean } {
+  const trimmed = rawInput?.trim() ?? '';
+  const parsed = trimmed !== '' ? parseMoneyDollars(trimmed) : Number.NaN;
+  const fromStored =
+    typeof storedCents === 'number' && Number.isFinite(storedCents) && storedCents > 0
+      ? storedCents / 100
+      : Number.NaN;
+  const base = Number.isFinite(parsed) ? parsed : Number.isFinite(fromStored) ? fromStored : bounds.minDollars;
+  const dollars = clampInstallmentsOfferDollars(base, bounds.minDollars, bounds.maxDollars, bounds.isTotalOrMore);
+  const formatted = dollars.toFixed(2);
+  const minCents = Math.round(bounds.minDollars * 100);
+  const parsedCents = Number.isFinite(parsed) ? Math.round(parsed * 100) : -1;
+  const clampedCents = Math.round(dollars * 100);
+  const storedOk = typeof storedCents === 'number' && Number.isFinite(storedCents);
+  const needsCorrection =
+    trimmed === '' ||
+    !Number.isFinite(parsed) ||
+    parsedCents < minCents ||
+    (Number.isFinite(parsed) && Math.abs(parsed - dollars) > 0.0001) ||
+    (storedOk && storedCents < minCents) ||
+    (storedOk && storedCents !== clampedCents);
+  return { dollars, formatted, needsCorrection };
 }
 
 function useOfferingData(context: ScriptContext) {
@@ -808,15 +852,58 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     });
   }, [eventCode, installmentsSubEventName, setPersonOffering]);
 
+  const commitInstallmentsAmountForPerson = useCallback(
+    (person: Person, personIndex: number, rawInput: string | undefined): string => {
+      const summary = getInstallmentsSummary(person);
+      if (!summary.ok || summary.balanceDueCents <= 0) return rawInput?.trim() ?? '';
+      const minCents = isInstallmentsTotalOrMorePresentation
+        ? installmentsDefaultOfferCents(summary, true)
+        : Math.max(1, Math.min(summary.minimumDueCents, summary.balanceDueCents));
+      const minDollars = minCents / 100;
+      const maxDollars = isInstallmentsTotalOrMorePresentation
+        ? undefined
+        : summary.balanceDueCents / 100;
+      const storedCents = Number(person.currentOfferings?.[installmentsSubEventName]?.offeringAmount);
+      const { dollars, formatted } = resolveInstallmentsOfferDollars(rawInput, storedCents, {
+        minDollars,
+        maxDollars,
+        isTotalOrMore: isInstallmentsTotalOrMorePresentation,
+      });
+      setInstallmentsAmountInputByPerson((prev) => ({ ...prev, [person.id]: formatted }));
+      setInstallmentsOfferingForPerson(personIndex, dollars);
+      return formatted;
+    },
+    [
+      getInstallmentsSummary,
+      installmentsSubEventName,
+      isInstallmentsTotalOrMorePresentation,
+      setInstallmentsOfferingForPerson,
+    ],
+  );
+
   const checkoutTotalCents = React.useMemo(() => {
     if (!isInstallmentsPresentation) return totalCents;
     return fafFull.reduce((sum, person) => {
       if (!person.canOffer) return sum;
-      const existing = Number(person.currentOfferings?.[installmentsSubEventName]?.offeringAmount);
-      if (Number.isFinite(existing) && existing > 0) return sum + existing;
       const personSummary = getInstallmentsSummary(person);
-      if (!personSummary.ok || personSummary.status !== 'incomplete' || personSummary.balanceDueCents <= 0) return sum;
-      return sum + installmentsDefaultOfferCents(personSummary, isInstallmentsTotalOrMorePresentation);
+      if (!personSummary.ok || personSummary.status !== 'incomplete' || personSummary.balanceDueCents <= 0) {
+        return sum;
+      }
+      const minCents = isInstallmentsTotalOrMorePresentation
+        ? installmentsDefaultOfferCents(personSummary, true)
+        : Math.max(1, Math.min(personSummary.minimumDueCents, personSummary.balanceDueCents));
+      const minDollars = minCents / 100;
+      const maxDollars = isInstallmentsTotalOrMorePresentation
+        ? undefined
+        : personSummary.balanceDueCents / 100;
+      const storedCents = Number(person.currentOfferings?.[installmentsSubEventName]?.offeringAmount);
+      const rawInput = installmentsAmountInputByPerson[person.id];
+      const { dollars } = resolveInstallmentsOfferDollars(rawInput, storedCents, {
+        minDollars,
+        maxDollars,
+        isTotalOrMore: isInstallmentsTotalOrMorePresentation,
+      });
+      return sum + Math.round(dollars * 100);
     }, 0);
   }, [
     isInstallmentsPresentation,
@@ -824,10 +911,51 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     totalCents,
     fafFull,
     installmentsSubEventName,
+    installmentsAmountInputByPerson,
     getInstallmentsSummary,
   ]);
 
   const handlePay = useCallback(async () => {
+    if (isInstallmentsPresentation) {
+      let hadInstallmentsCorrection = false;
+      const inputUpdates: Record<string, string> = {};
+      const offeringUpdates: Array<{ personIndex: number; dollars: number }> = [];
+
+      fafFull.forEach((person, personIndex) => {
+        if (!person.canOffer) return;
+        const summary = getInstallmentsSummary(person);
+        if (!summary.ok || summary.balanceDueCents <= 0) return;
+
+        const minCents = isInstallmentsTotalOrMorePresentation
+          ? installmentsDefaultOfferCents(summary, true)
+          : Math.max(1, Math.min(summary.minimumDueCents, summary.balanceDueCents));
+        const minDollars = minCents / 100;
+        const maxDollars = isInstallmentsTotalOrMorePresentation
+          ? undefined
+          : summary.balanceDueCents / 100;
+        const storedCents = Number(person.currentOfferings?.[installmentsSubEventName]?.offeringAmount);
+        const rawInput = installmentsAmountInputByPerson[person.id];
+        const resolved = resolveInstallmentsOfferDollars(rawInput, storedCents, {
+          minDollars,
+          maxDollars,
+          isTotalOrMore: isInstallmentsTotalOrMorePresentation,
+        });
+        if (resolved.needsCorrection) {
+          hadInstallmentsCorrection = true;
+          inputUpdates[person.id] = resolved.formatted;
+          offeringUpdates.push({ personIndex, dollars: resolved.dollars });
+        }
+      });
+
+      if (hadInstallmentsCorrection) {
+        setInstallmentsAmountInputByPerson((prev) => ({ ...prev, ...inputUpdates }));
+        offeringUpdates.forEach(({ personIndex, dollars }) =>
+          setInstallmentsOfferingForPerson(personIndex, dollars),
+        );
+        return;
+      }
+    }
+
     const amountForIntent = isInstallmentsPresentation ? checkoutTotalCents : totalCents;
     if (amountForIntent <= 0) return;
     setProcessing(true);
@@ -836,16 +964,25 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
       const effectiveFafFull = isInstallmentsPresentation
         ? fafFull.map((person) => {
             if (!person.canOffer) return person;
-            const existing = Number(person.currentOfferings?.[installmentsSubEventName]?.offeringAmount);
-            if (Number.isFinite(existing) && existing > 0) return person;
             const personSummary = getInstallmentsSummary(person);
             if (!personSummary.ok || personSummary.status !== 'incomplete' || personSummary.balanceDueCents <= 0) {
               return person;
             }
-            const personMinCents = installmentsDefaultOfferCents(
-              personSummary,
-              isInstallmentsTotalOrMorePresentation,
-            );
+            const minCents = isInstallmentsTotalOrMorePresentation
+              ? installmentsDefaultOfferCents(personSummary, true)
+              : Math.max(1, Math.min(personSummary.minimumDueCents, personSummary.balanceDueCents));
+            const minDollars = minCents / 100;
+            const maxDollars = isInstallmentsTotalOrMorePresentation
+              ? undefined
+              : personSummary.balanceDueCents / 100;
+            const storedCents = Number(person.currentOfferings?.[installmentsSubEventName]?.offeringAmount);
+            const rawInput = installmentsAmountInputByPerson[person.id];
+            const { dollars } = resolveInstallmentsOfferDollars(rawInput, storedCents, {
+              minDollars,
+              maxDollars,
+              isTotalOrMore: isInstallmentsTotalOrMorePresentation,
+            });
+            const amountCents = Math.round(dollars * 100);
             return {
               ...person,
               currentOfferings: {
@@ -854,7 +991,7 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                   offeringSelection: 'installments',
                   offeringIndex: -1,
                   offeringSKU: `${eventCode}-${installmentsSubEventName}-installments`,
-                  offeringAmount: personMinCents,
+                  offeringAmount: amountCents,
                   offeringIntent: 'installments',
                   installments: true,
                 },
@@ -939,7 +1076,9 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     isRegisterTestMode,
     checkoutTotalCents,
     installmentsSubEventName,
+    installmentsAmountInputByPerson,
     getInstallmentsSummary,
+    setInstallmentsOfferingForPerson,
     kmFeeCents,
   ]);
 
@@ -2166,15 +2305,8 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                       showDecrease={showInstallmentsDecrease}
                       onChange={(val) => {
                         setInstallmentsAmountInputByPerson((prev) => ({ ...prev, [person.id]: val }));
-                        const parsed = parseMoneyDollars(val);
-                        if (!Number.isFinite(parsed)) {
-                          return;
-                        }
-                        const clamped = isInstallmentsTotalOrMorePresentation
-                          ? Math.max(parsed, personMinDollars)
-                          : Math.min(Math.max(parsed, personMinDollars), personBalanceDollars);
-                        setInstallmentsOfferingForPerson(pIdx, clamped);
                       }}
+                      onBlur={(val) => commitInstallmentsAmountForPerson(person, pIdx, val)}
                       placeholder={personMinDollars.toFixed(2)}
                     />
                   </div>
