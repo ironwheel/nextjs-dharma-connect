@@ -4,14 +4,9 @@ import {
     faGlobe,
     faPlus,
     faMinus,
-    faTimes,
-    faPlusCircle,
-    faMinusCircle,
     faUser,
     faCheck,
     faArrowLeft,
-    faArrowUp,
-    faArrowDown
 } from "@fortawesome/free-solid-svg-icons";
 import { toast } from 'react-toastify';
 import {
@@ -454,8 +449,14 @@ const MantraCount: React.FC<MantraCountProps> = ({ studentId, pid, hash, student
 
                             {/* Mantra Cards Grid for this group */}
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
-                                {groupConfigs.map((config) => (
-                                    <div key={config.id} className={`${config.bgColor || 'bg-gray-800'} rounded-lg border-2 ${config.borderColor || 'border-gray-600'} p-4 flex flex-col h-64`}>
+                                {groupConfigs.map((config) => {
+                                    const canDecrement =
+                                        isMantraWritable(config) &&
+                                        (personalCounts[config.id] || 0) > (originalCounts[config.id] || 0);
+                                    const canIncrement = isMantraWritable(config);
+
+                                    return (
+                                    <div key={config.id} className={`${config.bgColor || 'bg-gray-800'} rounded-lg border-2 ${config.borderColor || 'border-gray-600'} p-4 pb-3 flex flex-col min-h-[16rem] overflow-hidden`}>
                                         {/* Title - Fixed height to ensure alignment */}
                                         <h3 className="font-bold text-lg mb-4 text-center min-h-[4rem] flex items-center justify-center leading-tight">
                                             {promptLookup(config.displayNamePrompt)}
@@ -472,7 +473,7 @@ const MantraCount: React.FC<MantraCountProps> = ({ studentId, pid, hash, student
                                         </div>
 
                                         {/* Global Count */}
-                                        <div className="text-center mb-4">
+                                        <div className="text-center mb-4 flex-1">
                                             <div className="flex items-center justify-center">
                                                 <FontAwesomeIcon icon={faGlobe} className="mr-2 text-lg" />
                                                 <div className="text-2xl font-bold">
@@ -482,33 +483,37 @@ const MantraCount: React.FC<MantraCountProps> = ({ studentId, pid, hash, student
                                         </div>
 
                                         {/* Controls */}
-                                        <div className="flex justify-between items-center mt-auto">
-                                            <button
-                                                onClick={() => handleCountChange(config.id, -config.incrementAmount)}
-                                                disabled={!isMantraWritable(config) || (personalCounts[config.id] || 0) <= (originalCounts[config.id] || 0)}
-                                                className={`rounded-full w-10 h-10 flex items-center justify-center transition-colors border ${isMantraWritable(config) && (personalCounts[config.id] || 0) > (originalCounts[config.id] || 0)
-                                                    ? 'bg-white/20 hover:bg-white/30 text-white border-white/30'
-                                                    : 'bg-gray-600 text-gray-400 border-gray-500 cursor-not-allowed'
-                                                    }`}
-                                                title={isMantraWritable(config) && (personalCounts[config.id] || 0) > (originalCounts[config.id] || 0) ? `Subtract ${config.incrementAmount}` : 'Write access not available or cannot decrement below original value'}
-                                            >
-                                                <FontAwesomeIcon icon={faArrowDown} />
-                                            </button>
-
-                                            <button
-                                                onClick={() => handleCountChange(config.id, config.incrementAmount)}
-                                                disabled={!isMantraWritable(config)}
-                                                className={`rounded-full w-10 h-10 flex items-center justify-center transition-colors border ${isMantraWritable(config)
-                                                    ? 'bg-white/20 hover:bg-white/30 text-white border-white/30'
-                                                    : 'bg-gray-600 text-gray-400 border-gray-500 cursor-not-allowed'
-                                                    }`}
-                                                title={isMantraWritable(config) ? `Add ${config.incrementAmount}` : 'Write access not available'}
-                                            >
-                                                <FontAwesomeIcon icon={faArrowUp} />
-                                            </button>
+                                        <div className={`mt-auto grid gap-2 ${canDecrement ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                            {canDecrement && (
+                                                <div className="flex items-center justify-center rounded-lg border border-white/30 bg-white/10 py-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleCountChange(config.id, -config.incrementAmount)}
+                                                        className="rounded-full w-10 h-10 flex items-center justify-center transition-colors border bg-white/20 hover:bg-white/30 text-white border-white/30"
+                                                        title={`Subtract ${config.incrementAmount}`}
+                                                    >
+                                                        <FontAwesomeIcon icon={faMinus} />
+                                                    </button>
+                                                </div>
+                                            )}
+                                            <div className="flex items-center justify-center rounded-lg border border-white/30 bg-white/10 py-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleCountChange(config.id, config.incrementAmount)}
+                                                    disabled={!canIncrement}
+                                                    className={`rounded-full w-10 h-10 flex items-center justify-center transition-colors border ${canIncrement
+                                                        ? 'bg-white/20 hover:bg-white/30 text-white border-white/30'
+                                                        : 'bg-gray-600 text-gray-400 border-gray-500 cursor-not-allowed'
+                                                        }`}
+                                                    title={canIncrement ? `Add ${config.incrementAmount}` : 'Write access not available'}
+                                                >
+                                                    <FontAwesomeIcon icon={faPlus} />
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
                     ))}

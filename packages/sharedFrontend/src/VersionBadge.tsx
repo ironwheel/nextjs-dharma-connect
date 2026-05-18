@@ -164,13 +164,11 @@ const VersionBadge: React.FC<VersionBadgeProps> = ({ pid, hash, gitShaOverride, 
         style={{
           border: 'none',
           background: 'transparent',
-          padding: 0,
           margin: 0,
           color: 'inherit',
           font: 'inherit',
           cursor: 'pointer',
           whiteSpace: 'nowrap',
-          display: 'inline'
         }}
         title="Click to view version history"
       >

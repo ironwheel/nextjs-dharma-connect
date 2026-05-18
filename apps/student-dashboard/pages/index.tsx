@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from 'next/router';
+import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import ReactSrcDocIframe from 'react-srcdoc-iframe';
-import { Viewer, Worker } from '@react-pdf-viewer/core';
-import { defaultLayoutPlugin } from '@react-pdf-viewer/default-layout';
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faGlobe, faPlus, faMinus, faTimes, faPlusCircle, faMinusCircle, faUser, faCheck, faXmark } from "@fortawesome/free-solid-svg-icons";
 import Pusher from 'pusher-js';
@@ -47,6 +46,10 @@ import { api, getAllTableItems, getAllTableItemsFiltered, getTableItem, updateTa
 
 // Import MantraCount component
 import MantraCount from '../components/MantraCount';
+
+const EmbeddedPdfViewer = dynamic(() => import('../components/EmbeddedPdfViewer'), {
+    ssr: false,
+});
 
 // Global variables
 let events: any[] = [];
@@ -1739,82 +1742,11 @@ const HomeContent = () => {
                 }
 
                 if (embeddedLink) {
-                    const renderToolbar = (Toolbar: any) => (
-                        <Toolbar>
-                            {(slots: any) => {
-                                const {
-                                    CurrentPageInput,
-                                    Download,
-                                    EnterFullScreen,
-                                    GoToNextPage,
-                                    GoToPreviousPage,
-                                    NumberOfPages,
-                                    Print,
-                                    ShowSearchPopover,
-                                    Zoom,
-                                    ZoomIn,
-                                    ZoomOut,
-                                } = slots;
-                                return (
-                                    <div style={{ alignItems: 'center', display: 'flex', width: '100%' }}>
-                                        <div style={{ padding: '0px 2px' }}>
-                                            <ShowSearchPopover />
-                                        </div>
-                                        <div style={{ padding: '0px 2px' }}>
-                                            <ZoomOut />
-                                        </div>
-                                        <div style={{ padding: '0px 2px' }}>
-                                            <Zoom />
-                                        </div>
-                                        <div style={{ padding: '0px 2px' }}>
-                                            <ZoomIn />
-                                        </div>
-                                        <div style={{ padding: '0px 2px', marginLeft: 'auto' }}>
-                                            <GoToPreviousPage />
-                                        </div>
-                                        <div style={{ padding: '0px 2px', width: '4rem' }}>
-                                            <CurrentPageInput />
-                                        </div>
-                                        <div style={{ padding: '0px 2px' }}>
-                                            / <NumberOfPages />
-                                        </div>
-                                        <div style={{ padding: '0px 2px' }}>
-                                            <GoToNextPage />
-                                        </div>
-                                        <div style={{ padding: '0px 2px', marginLeft: 'auto' }}>
-                                            <EnterFullScreen />
-                                        </div>
-                                        <div style={{ padding: '0px 2px' }}>
-                                            <Download />
-                                        </div>
-                                        <div style={{ padding: '0px 2px' }}>
-                                            <Print />
-                                        </div>
-                                    </div>
-                                );
-                            }}
-                        </Toolbar>
-                    );
-
-                    const defaultLayoutPluginInstance = defaultLayoutPlugin({
-                        sidebarTabs: (defaultTabs) => [],
-                        renderToolbar
-                    });
-
                     return (
-                        <>
-                            <br></br>
-                            {englishOnlyNote ? <>{englishOnlyNote} <br></br></> : null}
-                            <Worker workerUrl={`https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.js`}>
-                                <div style={{ height: '750px' }}>
-                                    <Viewer
-                                        fileUrl={embeddedLink}
-                                        plugins={[defaultLayoutPluginInstance]}
-                                    />
-                                </div>
-                            </Worker>
-                            <br></br>
-                        </>
+                        <EmbeddedPdfViewer
+                            fileUrl={embeddedLink}
+                            englishOnlyNote={englishOnlyNote}
+                        />
                     );
                 }
             };
@@ -2101,7 +2033,9 @@ const HomeContent = () => {
     const displayVideoList = (list: any[]) => {
         return (
             <>
-                {list.map((el) => mediaElementWrapper(el))}
+                {list.map((el) => (
+                    <React.Fragment key={el.key}>{mediaElementWrapper(el)}</React.Fragment>
+                ))}
             </>
         );
     };
@@ -2131,7 +2065,11 @@ const HomeContent = () => {
                 {mediaElementWrapper(mainVideoControl)}
                 {displayControl['video'] && (
                     <>
-                        {showcaseMasterList.map((showcaseList) => displayVideoList(showcaseList))}
+                        {showcaseMasterList.map((showcaseList, index) => (
+                            <React.Fragment key={showcaseList[0]?.key ?? `showcase-${index}`}>
+                                {displayVideoList(showcaseList)}
+                            </React.Fragment>
+                        ))}
                         {yearControls.map((yearControl) => (
                             <div key={yearControl.key}>
                                 {mediaElementWrapper(yearControl)}
@@ -2152,8 +2090,14 @@ const HomeContent = () => {
 
         return (
             <>
-                {eventList.map((el) => mediaElementWrapper(el))}
-                {liturgyList.length > 1 ? liturgyList.map((el) => mediaElementWrapper(el)) : null}
+                {eventList.map((el) => (
+                    <React.Fragment key={el.key}>{mediaElementWrapper(el)}</React.Fragment>
+                ))}
+                {liturgyList.length > 1
+                    ? liturgyList.map((el) => (
+                        <React.Fragment key={el.key}>{mediaElementWrapper(el)}</React.Fragment>
+                    ))
+                    : null}
                 <VideoControlWithYears />
                 {mediaElementWrapper(scheduleList[0])}
                 {Schedule()}
