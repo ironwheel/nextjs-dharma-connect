@@ -178,12 +178,11 @@ export const TopNavBar = (props: { title?: string; pid?: string; hash?: string }
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
                     {props.pid && props.hash && (
-                        <button
-                            type="button"
+                        <VersionBadge
+                            pid={props.pid}
+                            hash={props.hash}
                             className="flex items-center gap-2 px-4 py-2 bg-white/15 border border-white/30 rounded-lg text-white text-sm font-semibold hover:bg-white/25 hover:border-white/40 transition-all duration-200 hover:-translate-y-0.5 shadow-lg"
-                        >
-                            <VersionBadge pid={props.pid} hash={props.hash} />
-                        </button>
+                        />
                     )}
                     <WrittenTranslationSelection icon={true} />
                 </div>
