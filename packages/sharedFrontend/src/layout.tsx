@@ -146,7 +146,7 @@ export const WrittenTranslationSelection = (props: {
             </button>
 
             {isOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-black border border-white/20 rounded-lg shadow-xl z-50 opacity-100 transform translate-y-0 transition-all duration-200">
+                <div className="absolute top-full right-0 z-[110] mt-1 min-w-full w-max bg-black border border-white/20 rounded-lg shadow-xl">
                     {languages.map((lang) => (
                         <button
                             key={lang.key}
@@ -171,12 +171,12 @@ export const WrittenTranslationSelection = (props: {
  */
 export const TopNavBar = (props: { title?: string; pid?: string; hash?: string }) => {
     return (
-        <div className="sticky top-0 z-50 w-full pt-3">
-            <div className="w-full bg-gray-900 border border-gray-700 text-white rounded-lg overflow-hidden p-4 mb-4 flex items-center justify-between shadow-lg">
+        <div className="sticky top-0 z-[100] w-full overflow-visible pt-3">
+            <div className="flex w-full items-center justify-between overflow-visible rounded-lg border border-gray-700 bg-gray-900 p-4 mb-4 text-white shadow-lg">
                 <div className="flex min-w-0 flex-1 items-center pr-3">
                     <h1 className="truncate text-xl font-bold">{props.title || 'Dashboard'}</h1>
                 </div>
-                <div className="flex shrink-0 items-center gap-3">
+                <div className="flex shrink-0 items-center gap-3 overflow-visible">
                     {props.pid && props.hash && (
                         <VersionBadge
                             pid={props.pid}
