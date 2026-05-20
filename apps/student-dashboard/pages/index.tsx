@@ -903,7 +903,8 @@ const HomeContent = () => {
             }
         });
         displayVideoControl[videoKey] = !displayVideoControl[videoKey];
-        forceRender();
+        // Re-render only; avoid updateMediaList() so EmbeddedVideo language state is preserved on open.
+        setValue((v) => v + 1);
     };
 
     const updateMediaList = () => {
