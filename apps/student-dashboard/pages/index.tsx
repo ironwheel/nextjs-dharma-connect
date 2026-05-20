@@ -46,6 +46,7 @@ import { api, getAllTableItems, getAllTableItemsFiltered, getTableItem, updateTa
 
 // Import MantraCount component
 import MantraCount from '../components/MantraCount';
+import EmbeddedVideo from '../components/EmbeddedVideo';
 
 const EmbeddedPdfViewer = dynamic(() => import('../components/EmbeddedPdfViewer'), {
     ssr: false,
@@ -893,6 +894,18 @@ const HomeContent = () => {
         setValue(value + 1);
     };
 
+    const isVideoOpen = (videoKey: string) => Boolean(displayVideoControl[videoKey]);
+
+    const onVideoToggle = (videoKey: string) => {
+        Object.keys(displayVideoControl).forEach((controlKey) => {
+            if (controlKey !== videoKey) {
+                displayVideoControl[controlKey] = false;
+            }
+        });
+        displayVideoControl[videoKey] = !displayVideoControl[videoKey];
+        forceRender();
+    };
+
     const updateMediaList = () => {
         // Reset all lists
         liturgyList = [];
@@ -1596,112 +1609,23 @@ const HomeContent = () => {
 
         // Show media content
         if (typeof el.subEvent.embeddedVideoList !== 'undefined') {
-            let language = 'English';
-            if (typeof student.writtenLangPref !== 'undefined') {
-                language = student.writtenLangPref;
-            }
-
-            const embeddedVideo = (v: any) => {
-                const ConditionalVideoTitle = () => {
-                    if (typeof v.title === 'undefined') {
-                        return null;
-                    }
-                    return (
-                        <>
-                            <br></br>
-                            <i>{promptLookupAIDSpecific(el.parentEvent.aid, el.parentEvent.aid, v.title)}</i> <br></br>
-                        </>
-                    );
-                };
-
-                const ConditionalVideoFrame = (videoId: string, videoFrame: string, password: string) => {
-                    const onControlClickVideo = () => {
-                        // Close all other video controls first
-                        Object.keys(displayVideoControl).forEach(controlKey => {
-                            if (controlKey !== videoId) {
-                                displayVideoControl[controlKey] = false;
-                            }
-                        });
-
-                        // Toggle the clicked video control
-                        displayVideoControl[videoId] = !displayVideoControl[videoId];
-                        forceRender();
-                    };
-
-                    const videoControlBubble = () => {
-                        return (
-                            <div
-                                className="cursor-pointer w-full max-w-2xl bg-gray-700 border border-gray-600 text-white rounded-lg p-4 mb-4 transition-all duration-200 hover:bg-gray-600 hover:shadow-lg"
-                                onClick={onControlClickVideo}
-                            >
-                                <div className="flex items-center space-x-2">
-                                    <FontAwesomeIcon icon={displayVideoControl[videoId] ? faMinus : faPlus} className="text-lg" />
-                                    <h3 className="text-lg font-semibold">
-                                        {displayVideoControl[videoId] ? promptLookup("videoClose") : promptLookup("videoOpen")}
-                                    </h3>
-                                </div>
-                            </div>
-                        );
-                    };
-
-                    if (!displayVideoControl[videoId]) {
-                        return videoControlBubble();
-                    } else {
-                        return (
-                            <>
-                                {videoControlBubble()}
-                                {<div dangerouslySetInnerHTML={{ __html: videoFrame }} />}
-                            </>
-                        );
-                    }
-                };
-
-                let embeddedLink: string | undefined;
-                let englishOnlyNote: string | null = null;
-
-                if (typeof v[language] !== 'undefined') {
-                    embeddedLink = v[language];
-                } else {
-                    if (language != 'English') {
-                        if (typeof v['English'] !== 'undefined') {
-                            embeddedLink = v['English'];
-                            const videoLangNote = promptLookup('videoLanguageNotAvailable');
-                            // Fallback to generic message if videoLanguageNotAvailable doesn't exist
-                            if (videoLangNote.includes('-unknown')) {
-                                // Use a generic message for videos instead of email-specific message
-                                const emailLangNote = promptLookup('emailLanguageNotAvailable');
-                                if (emailLangNote.includes('-unknown')) {
-                                    // If even emailLanguageNotAvailable doesn't exist, use a hardcoded generic message
-                                    englishOnlyNote = 'This video is unavailable in your language. Displaying English instead.';
-                                } else {
-                                    // Replace "email" with "video" in the message
-                                    englishOnlyNote = emailLangNote.replace(/email/gi, 'video');
-                                }
-                            } else {
-                                englishOnlyNote = videoLangNote;
-                            }
-                        }
-                    }
-                }
-
-                if (embeddedLink) {
-                    let password = v['password'] || el.subEvent.embeddedVideoListPassword;
-                    let videoFrame = "<iframe src=\"https://player.vimeo.com/video/videoid?h=431770e871&amp;badge=0&amp;autopause=0&amp;player_id=0&amp;app_id=181544\" width=\"640\" height=\"360\" frameborder=\"0\" allowfullscreen></iframe>";
-                    videoFrame = videoFrame.replace("videoid", embeddedLink);
-
-                    return (
-                        <>
-                            {englishOnlyNote ? <>{englishOnlyNote} <br></br></> : null}
-                            {ConditionalVideoTitle()}
-                            {ConditionalVideoFrame(embeddedLink, videoFrame, password)}
-                        </>
-                    );
-                }
-            };
+            const preferredVideoLanguage =
+                typeof student.writtenLangPref !== 'undefined' ? student.writtenLangPref : 'English';
 
             return (
                 <>
-                    {el.subEvent.embeddedVideoList.map((vid: any) => embeddedVideo(vid))}
+                    {el.subEvent.embeddedVideoList.map((vid: any, index: number) => (
+                        <EmbeddedVideo
+                            key={`${el.key}-video-${index}`}
+                            videoKey={`${el.key}-video-${index}`}
+                            videoEntry={vid}
+                            preferredLanguage={preferredVideoLanguage}
+                            parentEventAid={el.parentEvent.aid}
+                            parentEventAidAlias={el.parentEvent.config?.aidAlias}
+                            isVideoOpen={isVideoOpen}
+                            onVideoToggle={onVideoToggle}
+                        />
+                    ))}
                 </>
             );
         }
