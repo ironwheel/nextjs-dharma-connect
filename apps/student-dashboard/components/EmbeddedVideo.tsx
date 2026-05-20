@@ -128,12 +128,6 @@ export default function EmbeddedVideo({
 
     return (
         <>
-            {showFallbackNote ? (
-                <>
-                    {getVideoLanguageFallbackNote()} <br />
-                </>
-            ) : null}
-
             {typeof videoEntry.title === 'string' ? (
                 <>
                     <br />
@@ -148,34 +142,36 @@ export default function EmbeddedVideo({
                 </>
             ) : null}
 
-            <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-gray-200">
-                <span className="font-medium">{languageSelectLabel}:</span>
-                {availableLanguages.length > 1 ? (
-                    <select
-                        value={selectedLanguage}
-                        onChange={(e) => {
-                            setSelectedLanguage(e.target.value);
-                            setShowFallbackNote(false);
-                        }}
-                        className="rounded-md border border-gray-600 bg-gray-800 px-3 py-1.5 text-white focus:border-gray-500 focus:outline-none"
-                        aria-label={languageSelectLabel}
-                    >
-                        {availableLanguages.map((lang) => (
-                            <option key={lang} value={lang}>
-                                {languageLabel(lang)}
-                            </option>
-                        ))}
-                    </select>
-                ) : (
-                    <span>{languageLabel(selectedLanguage)}</span>
-                )}
-            </div>
-
             {!isVideoOpen(videoKey) ? (
                 videoControlBubble()
             ) : (
                 <>
                     {videoControlBubble()}
+                    {showFallbackNote ? (
+                        <p className="mb-3 text-sm text-gray-300">{getVideoLanguageFallbackNote()}</p>
+                    ) : null}
+                    <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-gray-200">
+                        <span className="font-medium">{languageSelectLabel}:</span>
+                        {availableLanguages.length > 1 ? (
+                            <select
+                                value={selectedLanguage}
+                                onChange={(e) => {
+                                    setSelectedLanguage(e.target.value);
+                                    setShowFallbackNote(false);
+                                }}
+                                className="rounded-md border border-gray-600 bg-gray-800 px-3 py-1.5 text-white focus:border-gray-500 focus:outline-none"
+                                aria-label={languageSelectLabel}
+                            >
+                                {availableLanguages.map((lang) => (
+                                    <option key={lang} value={lang}>
+                                        {languageLabel(lang)}
+                                    </option>
+                                ))}
+                            </select>
+                        ) : (
+                            <span>{languageLabel(selectedLanguage)}</span>
+                        )}
+                    </div>
                     <div key={selectedLanguage} dangerouslySetInnerHTML={{ __html: videoFrame }} />
                 </>
             )}
