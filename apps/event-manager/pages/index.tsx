@@ -40,6 +40,8 @@ interface SubEvent {
     eventOnDeck?: boolean;
     mediaNotify?: boolean;
     offeringMode?: string;
+    /** Offering-config oid for anonymous Zoom heart gift (config.mode === 'variable'). */
+    heartGiftOfferingMode?: string;
     rcpLevel?: number;
     regLinkAvailable?: boolean;
     tangra?: string;
@@ -1154,41 +1156,37 @@ const Home = () => {
         toast.info(`Creating duplicate of "${event.name}". Please review and modify the aid and other fields before saving.`);
     };
 
-    const getTangraSubEventLinks = (event: Event): Array<{ subEventKey: string; tangraAid: string }> => {
+    const isHeartGiftOfferingConfig = (oc: OfferingConfig | undefined): boolean =>
+        oc?.config?.mode === 'variable';
+
+    const getHeartGiftSubEventLinks = (event: Event): Array<{ subEventKey: string }> => {
         const subEvents = event.subEvents || {};
-        const links = Object.keys(subEvents)
+        return Object.keys(subEvents)
             .sort()
-            .map(key => ({
-                subEventKey: key,
-                tangraAid: typeof subEvents[key]?.tangra === 'string' ? subEvents[key].tangra.trim() : ''
-            }))
-            .filter(link => link.tangraAid !== '');
-
-        if (links.length > 0) {
-            return links;
-        }
-
-        // Legacy fallback while older records still have this at event.config.
-        const legacyTangra = typeof event.config?.tangra === 'string' ? event.config.tangra.trim() : '';
-        if (legacyTangra) {
-            return [{ subEventKey: 'legacy', tangraAid: legacyTangra }];
-        }
-
-        return [];
+            .filter((key) => {
+                const se = subEvents[key];
+                const hgOid = typeof se?.heartGiftOfferingMode === 'string' ? se.heartGiftOfferingMode.trim() : '';
+                if (hgOid) {
+                    const oc = allOfferings.find((o) => o.oid === hgOid);
+                    return isHeartGiftOfferingConfig(oc);
+                }
+                const oid = se?.offeringMode;
+                if (!oid) return false;
+                const oc = allOfferings.find((o) => o.oid === oid);
+                return isHeartGiftOfferingConfig(oc);
+            })
+            .map((subEventKey) => ({ subEventKey }));
     };
 
-    const handleCopyTangraLink = async (tangraAid: string, subEventKey?: string) => {
-        const tangra = tangraAid?.trim();
-        if (!tangra) {
-            toast.error('Event has no Tangra aid configured');
-            return;
-        }
-        const url = `https://reg.slsupport.link/?pid=0c918b0b-da97-4d7e-bcd7-a4088d30df15&aid=${tangra}`;
+    const handleCopyHeartGiftLink = async (eventAid: string, subEventKey: string) => {
+        const url =
+            `https://register.slsupport.link/?mode=heartGift&eventCode=${encodeURIComponent(eventAid)}` +
+            `&subEvent=${encodeURIComponent(subEventKey)}`;
         try {
             await navigator.clipboard.writeText(url);
-            toast.success(subEventKey ? `Heart Gift link copied for ${subEventKey}` : 'Heart Gift link copied to clipboard');
+            toast.success(`Heart Gift link copied for ${subEventKey}`);
         } catch (err) {
-            console.error('Failed to copy Tangra link:', err);
+            console.error('Failed to copy heart gift link:', err);
             toast.error('Failed to copy link to clipboard');
         }
     };
@@ -2699,14 +2697,14 @@ const Home = () => {
                                             </div>
                                         </div>
                                         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                            {getTangraSubEventLinks(event).map(link => (
+                                            {getHeartGiftSubEventLinks(event).map(link => (
                                                 <Button
                                                     key={`${event.aid}-heart-${link.subEventKey}`}
                                                     variant="outline-info"
                                                     size="sm"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        handleCopyTangraLink(link.tangraAid, link.subEventKey);
+                                                        handleCopyHeartGiftLink(event.aid, link.subEventKey);
                                                     }}
                                                 >
                                                     🔗 Heart Gift: {link.subEventKey}

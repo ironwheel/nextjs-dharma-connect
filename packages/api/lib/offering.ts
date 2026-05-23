@@ -27,6 +27,10 @@ export interface OfferingTransactionRecord {
   skuSummary: Array<{ personName: string; subEvent: string; offeringSKU?: string; amountCents?: number; currency?: string }>;
   refundedAmount?: number;
   payerEmail?: string;
+  /** True for anonymous heart-gift Zoom links (no student offeringHistory write). */
+  anonymousHeartGift?: boolean;
+  /** Denormalized subevent key for reporting (also in skuSummary). */
+  subEvent?: string;
 
   // Dashboard-ready augmentation (for offering-dashboard + caching).
   dashboardStripeFeeCents?: number;
@@ -73,6 +77,8 @@ export async function putOfferingTransaction(
   if (record.eventName != null) item.eventName = record.eventName;
   if (record.description != null) item.description = record.description;
   if (record.payerEmail != null) item.payerEmail = record.payerEmail;
+  if (record.anonymousHeartGift === true) item.anonymousHeartGift = true;
+  if (record.subEvent != null) item.subEvent = record.subEvent;
   await putOne(cfg.tableName, item, roleArn, oidcToken);
 }
 
@@ -267,13 +273,19 @@ async function writeOfferingHistoryForPerson(
  * subEventNames: keys of event.subEvents (for "remaining" fan-out).
  * Supports "remaining" fan-out: if subEventName === 'remaining', fan out to each subEventName that doesn't yet have an offering for that person.
  */
+const ANONYMOUS_HEART_GIFT_CART_ID = '__anonymous__';
+
+export function isAnonymousHeartGiftCartPerson(personId: string): boolean {
+  return personId === ANONYMOUS_HEART_GIFT_CART_ID;
+}
+
 export async function completeOffering(
   paymentIntentId: string,
   pid: string,
   eventCode: string,
   cart: Array<{ id: string; name: string; currentOfferings?: Record<string, any>; offeringHistory?: Record<string, any> }>,
   subEventNames: string[],
-  options: { mockPayment?: boolean } | undefined,
+  options: { mockPayment?: boolean; skipStudentHistory?: boolean } | undefined,
   roleArn: string,
   oidcToken?: string
 ): Promise<void> {
@@ -319,7 +331,17 @@ export async function completeOffering(
     oidcToken
   );
 
+  const skipStudentHistory =
+    options?.skipStudentHistory === true ||
+    (existing as any)?.anonymousHeartGift === true ||
+    cart.every((p) => isAnonymousHeartGiftCartPerson(p.id));
+
+  if (skipStudentHistory) {
+    return;
+  }
+
   for (const person of cart) {
+    if (isAnonymousHeartGiftCartPerson(person.id)) continue;
     const currentOfferings = person.currentOfferings || {};
     const offeringHistory = person.offeringHistory || {};
 

@@ -1115,6 +1115,8 @@ export async function createStripePaymentIntent(
         eventCode?: string;
         eventName?: string;
         payerEmail?: string;
+        anonymousHeartGift?: boolean;
+        subEvent?: string;
     }
 ): Promise<{ id: string; clientSecret: string; publishableKey?: string } | RedirectedResponse> {
     const response = await api.post(`${API_BASE_URL}/stripe/create`, pid, hash, body);
@@ -1173,6 +1175,7 @@ export async function completeOffering(
         cart: Array<{ id: string; name: string; currentOfferings?: Record<string, any>; offeringHistory?: Record<string, any> }>;
         subEventNames: string[];
         mockPayment?: boolean;
+        skipStudentHistory?: boolean;
     }
 ): Promise<{ success: boolean } | RedirectedResponse> {
     const response = await api.post(`${API_BASE_URL}/offering/complete`, pid, hash, body);
