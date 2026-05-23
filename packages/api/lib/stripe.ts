@@ -44,8 +44,17 @@ async function findParticipant(id: string, roleArn: string, oidcToken?: string):
 
 // --- Stripe Operations ---
 
-export async function stripeCreatePaymentIntent(aid: string, pid: string, amount: string, currency: string, description: string) {
+export async function stripeCreatePaymentIntent(
+  aid: string,
+  pid: string,
+  amount: string,
+  currency: string,
+  description: string,
+  extraMetadata?: Record<string, string>,
+) {
     if (!amount || !currency || !description) throw new Error("Missing required parameters for CreatePaymentIntent");
+
+    const metadata: Record<string, string> = { aid, pid, ...(extraMetadata ?? {}) };
 
     const paymentIntent = await stripe.paymentIntents.create({
         amount: parseInt(amount, 10),
@@ -54,7 +63,7 @@ export async function stripeCreatePaymentIntent(aid: string, pid: string, amount
         automatic_payment_methods: {
             enabled: true,
         },
-        metadata: { 'aid': aid, 'pid': pid }
+        metadata,
     });
 
     return {

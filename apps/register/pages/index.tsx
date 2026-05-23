@@ -18,7 +18,16 @@ import { promptLookup } from '../components/script/StepComponents';
 import { getScriptSteps, stepRegistry } from '../config/stepRegistry';
 import { ScriptDefinition, ScriptContext, ScriptStep } from '../components/script/types';
 import { Offer } from '../components/Offer';
+import { HeartGiftAnonymous } from '../components/HeartGiftAnonymous';
 import { useTheme, type ThemeId } from '../context/ThemeContext';
+import {
+    getHeartGiftServiceCredentials,
+    isHeartGiftMode,
+    resolveHeartGiftSubEvent,
+    collectHeartGiftOfferingOids,
+    getHeartGiftOfferingOid,
+    type OfferingConfigLike,
+} from '../lib/heartGiftConstants';
 
 /** True if paymentIntentId appears on a subevent entry or nested installments line (stateless installments). */
 function offeringHistoryRecordsPaymentIntent(history: Record<string, any> | undefined, paymentIntentId: string): boolean {
@@ -121,6 +130,20 @@ function formatAmount(amountCents: number, currency: string): string {
     return `${currencySymbol(currency)}${(amountCents / 100).toFixed(2)} ${currency}`;
 }
 
+function sanitizePromptHtml(raw: string): string {
+    if (!raw) return '';
+    return String(raw)
+        .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
+        .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '')
+        .replace(/\son\w+="[^"]*"/gi, '')
+        .replace(/\son\w+='[^']*'/gi, '')
+        .replace(/\s(href|src)=["']\s*javascript:[^"']*["']/gi, ' $1="#"');
+}
+
+function HtmlPrompt({ html, className }: { html: string; className?: string }) {
+    return <div className={className} dangerouslySetInnerHTML={{ __html: sanitizePromptHtml(html) }} />;
+}
+
 /** Same subevent key as Offer.tsx installments (retreat if present, else earliest dated subevent). */
 function getInstallmentsSubEventNameForEvent(event: any): string {
     if (event?.subEvents?.retreat) return 'retreat';
@@ -211,20 +234,117 @@ const THEMES: { id: ThemeId; label: string; subtitle: string }[] = [
 export default function Home() {
     const router = useRouter();
     const { theme, setTheme } = useTheme();
-    const { pid, hash, eventCode, aid, ...rest } = router.query;
+    const { pid, hash, eventCode, aid, mode, subEvent: subEventQuery } = router.query;
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [data, setData] = useState<{ student: any, event: any, prompts: any, pools: any[], signers?: Record<string, string[]> } | null>(null);
     const [scriptDef, setScriptDef] = useState<ScriptDefinition | null>(null);
+    const [anonymousHeartGift, setAnonymousHeartGift] = useState<{
+        subEventKey: string;
+        offeringConfig: OfferingConfigLike;
+        servicePid: string;
+        serviceHash: string;
+    } | null>(null);
+
+    const heartGiftMode = isHeartGiftMode(mode);
 
     // Normalize event code (prefer 'eventCode', fallback to legacy 'aid')
     const activeEventCode = (eventCode || aid) as string;
     const studentPid = pid as string;
     const studentHash = hash as string;
+    const subEventParam = Array.isArray(subEventQuery) ? subEventQuery[0] : subEventQuery;
 
     useEffect(() => {
         if (!router.isReady) return;
+
+        if (heartGiftMode) {
+            if (!activeEventCode) {
+                setError('Missing required URL parameter (eventCode).');
+                setLoading(false);
+                return;
+            }
+            const heartGiftCreds = getHeartGiftServiceCredentials();
+            if (!heartGiftCreds) {
+                setError(
+                    'Heart gift is not configured on this server (NEXT_PUBLIC_HEART_GIFT_PID / NEXT_PUBLIC_HEART_GIFT_HASH).',
+                );
+                setLoading(false);
+                return;
+            }
+            const svcPid = heartGiftCreds.pid;
+            const svcHash = heartGiftCreds.hash;
+
+            async function loadHeartGift() {
+                try {
+                    const [eventData, eventPrompts, defaultPrompts] = await Promise.all([
+                        getTableItem('events', activeEventCode, svcPid, svcHash),
+                        getAllTableItemsFiltered('prompts', 'aid', activeEventCode, svcPid, svcHash),
+                        getAllTableItemsFiltered('prompts', 'aid', 'default', svcPid, svcHash),
+                    ]);
+                    if (!eventData || (eventData as any).redirected) {
+                        throw new Error('Event not found or access denied.');
+                    }
+
+                    const subEvents = eventData.subEvents || {};
+                    const configMap: Record<string, OfferingConfigLike> = {};
+                    for (const oid of collectHeartGiftOfferingOids(subEvents)) {
+                        const row = await getTableItem('offering-config', oid, svcPid, svcHash);
+                        if (row && !(row as any).redirected) configMap[oid] = row;
+                    }
+
+                    const resolved = resolveHeartGiftSubEvent(subEvents, configMap, subEventParam);
+                    if ('error' in resolved) {
+                        setError(resolved.error);
+                        setLoading(false);
+                        return;
+                    }
+
+                    const oid = getHeartGiftOfferingOid(subEvents[resolved.subEventKey], configMap);
+                    const offeringConfig = oid ? configMap[oid] : null;
+                    if (!offeringConfig) {
+                        setError('Offering configuration not found for this heart gift.');
+                        setLoading(false);
+                        return;
+                    }
+
+                    const eventList = Array.isArray(eventPrompts) ? eventPrompts : [];
+                    const defaultList = Array.isArray(defaultPrompts) ? defaultPrompts : [];
+                    const promptsListArray = [...eventList, ...defaultList];
+
+                    setAnonymousHeartGift({
+                        subEventKey: resolved.subEventKey,
+                        offeringConfig,
+                        servicePid: svcPid,
+                        serviceHash: svcHash,
+                    });
+                    setData({
+                        student: { id: svcPid, programs: {} },
+                        event: eventData,
+                        prompts: promptsListArray,
+                        pools: [],
+                        signers: {},
+                    });
+                    setScriptDef({ steps: [] });
+                    setLoading(false);
+
+                    const rawPi = router.query.payment_intent;
+                    const paymentIntentId = Array.isArray(rawPi) ? rawPi[0] : rawPi;
+                    if (typeof paymentIntentId === 'string' && paymentIntentId) {
+                        setPhase('stripeCapture');
+                    } else {
+                        setPhase('anonymousHeartGift');
+                    }
+                } catch (err: any) {
+                    console.error('Heart gift load failed', err);
+                    setError(err.message || 'Failed to load heart gift.');
+                    setLoading(false);
+                }
+            }
+
+            loadHeartGift();
+            return;
+        }
 
         if (!activeEventCode || !studentPid || !studentHash) {
             setError("Missing required URL parameters (pid, hash, eventCode).");
@@ -295,15 +415,16 @@ export default function Home() {
         }
 
         loadData();
-    }, [router.isReady, activeEventCode, studentPid, studentHash]);
+    }, [router.isReady, activeEventCode, studentPid, studentHash, heartGiftMode, subEventParam, router.query.payment_intent]);
 
     // Initial theme from event config (default meadow). In test mode, skip so theme can be chosen on the test config page.
     useEffect(() => {
-        if (!data?.event?.config || data?.student?.debug?.registerTest === true) return;
+        if (!data?.event?.config) return;
+        if (!heartGiftMode && data?.student?.debug?.registerTest === true) return;
         const raw = data.event.config.registrationTheme;
         const themeId: ThemeId = raw === 'dark' || raw === 'light' || raw === 'meadow' ? raw : 'meadow';
         setTheme(themeId);
-    }, [data?.event?.config?.registrationTheme, data?.student?.debug?.registerTest, setTheme]);
+    }, [data?.event?.config?.registrationTheme, data?.student?.debug?.registerTest, heartGiftMode, setTheme]);
 
     /** Refetch student so phase effect sees up-to-date offeringHistory (e.g. after same-page payment completion). */
     const refetchStudent = useCallback(async () => {
@@ -329,6 +450,7 @@ export default function Home() {
         | 'acceptanceThankYouWarm'
         | 'acceptanceThankYouCold'
         | 'offeringCompleteCold'
+        | 'anonymousHeartGift'
     >('loading');
     const [stripeCaptureStatus, setStripeCaptureStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
     const [stripeCaptureError, setStripeCaptureError] = useState<string | null>(null);
@@ -381,6 +503,7 @@ export default function Home() {
 
     useEffect(() => {
         if (!data) return;
+        if (heartGiftMode) return;
 
         const { student, event } = data;
 
@@ -513,7 +636,7 @@ export default function Home() {
             return;
         }
         setPhase('join');
-    }, [data, router.query, activeEventCode, testModeConfigAccepted, phase, offeringCompleteVariant]);
+    }, [data, router.query, activeEventCode, testModeConfigAccepted, phase, offeringCompleteVariant, heartGiftMode]);
 
     // Stripe capture phase: after Stripe redirects back with payment_intent in the URL.
     useEffect(() => {
@@ -525,6 +648,9 @@ export default function Home() {
         if (!paymentIntentId || typeof paymentIntentId !== 'string') return;
         // Only run capture once per load; do not loop on error.
         if (stripeCaptureStatus !== 'idle') return;
+
+        const capturePid = heartGiftMode && anonymousHeartGift ? anonymousHeartGift.servicePid : studentPid;
+        const captureHash = heartGiftMode && anonymousHeartGift ? anonymousHeartGift.serviceHash : studentHash;
 
         const runCapture = async () => {
             try {
@@ -538,34 +664,45 @@ export default function Home() {
                 }
 
                 // Load transaction/cart from offering-transactions table.
-                const tx = await getTableItemOrNull('offering-transactions', paymentIntentId, studentPid, studentHash);
+                const tx = await getTableItemOrNull('offering-transactions', paymentIntentId, capturePid, captureHash);
                 if (!tx || (tx as any).redirected) {
                     throw new Error('We could not find your payment record. If you just paid, please wait a moment and refresh, or contact support with your Payment Intent ID.');
                 }
 
-                // If backend already marked this as succeeded (e.g. user reloaded callback URL), show cold thank-you.
+                // If backend already marked this as succeeded (e.g. user reloaded callback URL), show thank-you.
                 if ((tx as any).status === 'succeeded') {
                     setStripeCaptureStatus('success');
-                    setOfferingCompleteVariant('cold');
-                    setPhase('offeringCompleteCold');
+                    if (heartGiftMode) {
+                        setPhase('anonymousHeartGift');
+                    } else {
+                        setOfferingCompleteVariant('cold');
+                        setPhase('offeringCompleteCold');
+                    }
                     return;
                 }
 
                 const cart = (tx as any).cart || [];
                 const eventCodeForTx = (tx as any).eventCode || activeEventCode;
-                const subEventNames = Object.keys(data.event?.subEvents || {});
+                const subEventNames = heartGiftMode && anonymousHeartGift
+                    ? [anonymousHeartGift.subEventKey]
+                    : Object.keys(data.event?.subEvents || {});
 
-                await completeOffering(studentPid, studentHash, {
+                await completeOffering(capturePid, captureHash, {
                     paymentIntentId,
-                    pid: studentPid,
+                    pid: capturePid,
                     eventCode: eventCodeForTx,
                     cart,
                     subEventNames,
+                    skipStudentHistory: heartGiftMode || (tx as any).anonymousHeartGift === true,
                 });
 
                 setStripeCaptureStatus('success');
-                setOfferingCompleteVariant('warm');
-                setPhase('offeringCompleteCold');
+                if (heartGiftMode) {
+                    setPhase('anonymousHeartGift');
+                } else {
+                    setOfferingCompleteVariant('warm');
+                    setPhase('offeringCompleteCold');
+                }
             } catch (err: any) {
                 console.error('Stripe capture completion failed', err);
                 setStripeCaptureStatus('error');
@@ -574,7 +711,18 @@ export default function Home() {
         };
 
         runCapture();
-    }, [phase, data, router.query.payment_intent, activeEventCode, studentPid, studentHash, stripeCaptureStatus]);
+    }, [
+        phase,
+        data,
+        router.query.payment_intent,
+        router.query.redirect_status,
+        activeEventCode,
+        studentPid,
+        studentHash,
+        stripeCaptureStatus,
+        heartGiftMode,
+        anonymousHeartGift,
+    ]);
 
     const handleScriptChange = (path: string, value: any) => {
         if (!data) return;
@@ -759,12 +907,88 @@ export default function Home() {
     if (loading || phase === 'loading') {
         return (
             <div className="min-h-screen flex items-center justify-center bg-reg-page text-reg-text">
-                <div className="animate-pulse">Loading Registration...</div>
+                <div className="animate-pulse">
+                    {heartGiftMode ? 'Loading heart gift...' : 'Loading Registration...'}
+                </div>
             </div>
         );
     }
 
-    if (!data || !scriptDef) return null;
+    if (!data || (!scriptDef && !heartGiftMode)) return null;
+
+    if (heartGiftMode && anonymousHeartGift) {
+        const hgContext: ScriptContext = {
+            student: data.student,
+            event: data.event,
+            config: data.event.config,
+            prompts: data.prompts,
+            pools: data.pools,
+            signers: data.signers || {},
+            pid: anonymousHeartGift.servicePid,
+            hash: anonymousHeartGift.serviceHash,
+            onComplete: async () => {},
+        };
+        const titleText = promptLookup(hgContext, 'title') || data.event.name || 'Heart Gift';
+        const titleLines = titleText.split(/<br\s*\/?>/i);
+        const heartGiftTitleRaw = promptLookup(hgContext, 'heartGiftTitle');
+        const heartGiftTitleText =
+            heartGiftTitleRaw && !heartGiftTitleRaw.endsWith('-unknown') ? heartGiftTitleRaw : '';
+        const heartGiftCaptureDone = stripeCaptureStatus === 'success';
+
+        return (
+            <div className="min-h-screen bg-reg-page text-reg-text font-sans">
+                <Head>
+                    <title>{titleText.replace(/<br\s*\/?>/gi, ' ') || 'Heart Gift'}</title>
+                </Head>
+                <main className="container mx-auto py-8 px-4">
+                    <h1 className="text-3xl font-bold mb-8 text-center text-reg-accent">
+                        {titleLines.map((line: string, i: number) => (
+                            <React.Fragment key={i}>
+                                {i > 0 && <br />}
+                                {line}
+                            </React.Fragment>
+                        ))}
+                    </h1>
+
+                    {heartGiftTitleText && (
+                        <HtmlPrompt
+                            html={heartGiftTitleText}
+                            className="text-3xl font-bold mb-8 text-center text-reg-accent"
+                        />
+                    )}
+
+                    {phase === 'stripeCapture' && !heartGiftCaptureDone && (
+                        <div className="max-w-xl mx-auto p-6 text-reg-text">
+                            <p className="mb-2 font-semibold">
+                                {promptLookup(hgContext, 'stripeCaptureLoading') || 'Finalizing your offering…'}
+                            </p>
+                            <p className="text-sm text-reg-muted">
+                                {promptLookup(hgContext, 'stripeCaptureLoadingBody') ||
+                                    'Please wait while we finalize your offering.'}
+                            </p>
+                            {stripeCaptureStatus === 'error' && stripeCaptureError && (
+                                <p className="text-sm text-reg-error mt-3">{stripeCaptureError}</p>
+                            )}
+                        </div>
+                    )}
+
+                    {(phase === 'anonymousHeartGift' || heartGiftCaptureDone) && (
+                        <HeartGiftAnonymous
+                            context={hgContext}
+                            servicePid={anonymousHeartGift.servicePid}
+                            serviceHash={anonymousHeartGift.serviceHash}
+                            eventCode={activeEventCode}
+                            subEventKey={anonymousHeartGift.subEventKey}
+                            offeringConfig={anonymousHeartGift.offeringConfig}
+                            initialCaptureComplete={heartGiftCaptureDone}
+                        />
+                    )}
+                </main>
+            </div>
+        );
+    }
+
+    if (!scriptDef) return null;
 
     const oathEligibilityOverride =
         data.student?.debug?.registerTest === true && testModeOathEligibility !== 'actual'

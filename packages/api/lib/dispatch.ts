@@ -676,11 +676,28 @@ async function dispatchStripe(
           res.setHeader('Allow', 'POST');
           return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
         }
-        const { aid, pid: createPid, amount: createAmount, currency, description, cart, summaryString, skuSummary, eventCode, eventName, payerEmail } = req.body;
+        const { aid, pid: createPid, amount: createAmount, currency, description, cart, summaryString, skuSummary, eventCode, eventName, payerEmail, anonymousHeartGift, subEvent } = req.body;
         if (!aid || !createPid || !createAmount || !currency || !description) {
           return res.status(400).json({ error: "Missing required parameters (aid, pid, amount, currency, description)" });
         }
-        const createResult = await stripeCreatePaymentIntent(aid, createPid, String(createAmount), currency, description);
+        const stripeExtraMetadata: Record<string, string> = {};
+        if (anonymousHeartGift === true) {
+          stripeExtraMetadata.heartGift = 'true';
+          if (typeof payerEmail === 'string' && payerEmail.trim()) {
+            stripeExtraMetadata.payerEmail = payerEmail.trim();
+          }
+          if (typeof subEvent === 'string' && subEvent.trim()) {
+            stripeExtraMetadata.subEvent = subEvent.trim();
+          }
+        }
+        const createResult = await stripeCreatePaymentIntent(
+          aid,
+          createPid,
+          String(createAmount),
+          currency,
+          description,
+          Object.keys(stripeExtraMetadata).length > 0 ? stripeExtraMetadata : undefined,
+        );
         if (cart != null && summaryString != null && skuSummary != null && eventCode != null) {
           try {
             await putOfferingTransaction({
@@ -695,6 +712,8 @@ async function dispatchStripe(
               skuSummary,
               eventName: eventName || undefined,
               payerEmail: payerEmail || undefined,
+              anonymousHeartGift: anonymousHeartGift === true ? true : undefined,
+              subEvent: typeof subEvent === 'string' && subEvent.trim() ? subEvent.trim() : undefined,
             }, appRole, oidcToken);
           } catch (txErr: any) {
             console.error('[STRIPE] Failed to put offering-transactions record:', txErr);
@@ -1053,12 +1072,15 @@ async function dispatchOffering(
           res.setHeader('Allow', 'POST');
           return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
         }
-        const { paymentIntentId, pid, eventCode, cart, subEventNames, mockPayment } = req.body;
+        const { paymentIntentId, pid, eventCode, cart, subEventNames, mockPayment, skipStudentHistory } = req.body;
         if (!paymentIntentId || !pid || !eventCode || !Array.isArray(cart)) {
           return res.status(400).json({ error: 'Missing required parameters (paymentIntentId, pid, eventCode, cart)' });
         }
         const subEvents = Array.isArray(subEventNames) ? subEventNames : [];
-        await completeOffering(paymentIntentId, pid, eventCode, cart, subEvents, { mockPayment: mockPayment === true }, appRole, oidcToken);
+        await completeOffering(paymentIntentId, pid, eventCode, cart, subEvents, {
+          mockPayment: mockPayment === true,
+          skipStudentHistory: skipStudentHistory === true,
+        }, appRole, oidcToken);
         return res.status(200).json({ success: true });
       }
       case 'mock-create': {
