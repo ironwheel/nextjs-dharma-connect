@@ -230,7 +230,9 @@ export const HeartGiftAnonymous: React.FC<HeartGiftAnonymousProps> = ({
   );
   const [amountInput, setAmountInput] = useState(String(initialAmountDollars.toFixed(2)));
   const [payerEmail, setPayerEmail] = useState('');
+  const [receiptDeclined, setReceiptDeclined] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
+  const receiptDeclinedEmail = (process.env.EMAIL_RECEIPT_DECLINED_EMAIL ?? '').trim();
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [publishableKey, setPublishableKey] = useState<string | null>(null);
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
@@ -295,6 +297,10 @@ export const HeartGiftAnonymous: React.FC<HeartGiftAnonymousProps> = ({
   };
 
   const validateEmail = (email: string): boolean => {
+    if (receiptDeclined && receiptDeclinedEmail) {
+      setEmailError(null);
+      return true;
+    }
     const t = email.trim();
     if (!t) {
       setEmailError(receiptEmailRequiredMessage);
@@ -358,7 +364,7 @@ export const HeartGiftAnonymous: React.FC<HeartGiftAnonymousProps> = ({
         skuSummary,
         eventCode,
         eventName: event?.name,
-        payerEmail: payerEmail.trim(),
+        payerEmail: (receiptDeclined ? receiptDeclinedEmail : payerEmail).trim(),
         anonymousHeartGift: true,
         subEvent: subEventKey,
       });
@@ -384,7 +390,30 @@ export const HeartGiftAnonymous: React.FC<HeartGiftAnonymousProps> = ({
 
   const offeringIntro = resolvedPrompt(context, 'heartGiftOfferingIntroduction');
   const receiptEmailHtml = resolvedPrompt(context, 'receiptEmail');
+  const emailReceiptDeclinedHtml = resolvedPrompt(context, 'emailReceiptDeclined');
+  const emailReceiptDeclinedConfirmationHtml = resolvedPrompt(context, 'emailReceiptDeclinedConfirmation');
   const continueToPaymentLabel = resolvedPrompt(context, 'continueToPayment', 'Continue to payment');
+
+  const handleReceiptDeclinedChange = (checked: boolean) => {
+    setEmailError(null);
+    if (checked) {
+      if (!receiptDeclinedEmail) {
+        setEmailError(
+          resolvedPrompt(
+            context,
+            'emailReceiptDeclinedUnavailable',
+            'Receipt decline is not configured on this server.',
+          ),
+        );
+        return;
+      }
+      setReceiptDeclined(true);
+      setPayerEmail(receiptDeclinedEmail);
+      return;
+    }
+    setReceiptDeclined(false);
+    setPayerEmail('');
+  };
   const receiptEmailRequiredMessage = resolvedPrompt(
     context,
     'receiptEmailRequired',
@@ -461,22 +490,50 @@ export const HeartGiftAnonymous: React.FC<HeartGiftAnonymousProps> = ({
           />
         )}
         <div className="p-6 space-y-6">
-          {receiptEmailHtml ? (
-            <HtmlPrompt html={receiptEmailHtml} className="text-reg-text" />
-          ) : null}
-          <label className="block space-y-1">
-            <span className="text-sm text-reg-text">Email</span>
-            <input
-              type="email"
-              autoComplete="email"
-              value={payerEmail}
-              onChange={(e) => {
-                setPayerEmail(e.target.value);
-                setEmailError(null);
-              }}
-              className="w-full px-3 py-2 rounded border border-reg-border bg-reg-panel text-reg-text"
-            />
-          </label>
+          {receiptDeclined ? (
+            emailReceiptDeclinedConfirmationHtml ? (
+              <HtmlPrompt html={emailReceiptDeclinedConfirmationHtml} className="text-reg-text" />
+            ) : null
+          ) : (
+            <>
+              {receiptEmailHtml ? (
+                <HtmlPrompt html={receiptEmailHtml} className="text-reg-text" />
+              ) : null}
+              <label className="block space-y-1">
+                <span className="text-sm text-reg-text">Email</span>
+                <input
+                  type="email"
+                  autoComplete="email"
+                  value={payerEmail}
+                  onChange={(e) => {
+                    setPayerEmail(e.target.value);
+                    setEmailError(null);
+                  }}
+                  className="w-full px-3 py-2 rounded border border-reg-border bg-reg-panel text-reg-text"
+                />
+              </label>
+            </>
+          )}
+          {(emailReceiptDeclinedHtml || receiptDeclinedEmail) && (
+            <div className="space-y-2">
+              {emailReceiptDeclinedHtml ? (
+                <HtmlPrompt html={emailReceiptDeclinedHtml} className="text-sm text-reg-text" />
+              ) : null}
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={receiptDeclined}
+                  onChange={(e) => handleReceiptDeclinedChange(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-reg-accent"
+                  aria-label={
+                    emailReceiptDeclinedHtml
+                      ? undefined
+                      : resolvedPrompt(context, 'emailReceiptDeclined', 'Decline email receipt')
+                  }
+                />
+              </label>
+            </div>
+          )}
           {emailError && <p className="text-reg-error text-sm">{emailError}</p>}
           {payError && <p className="text-reg-error text-sm">{payError}</p>}
           <div className="flex justify-between gap-4 pt-2">
