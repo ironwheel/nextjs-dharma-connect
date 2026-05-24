@@ -24,6 +24,10 @@ import {
     deleteTableItem,
     Pool,
     applyInstallmentsLimitFeeToSelectedRetreats,
+    isInstallmentLineRefunded,
+    sumInstallmentPaymentsCents,
+    sumOfferingHistoryInstallmentPaymentsCents,
+    sumOfferingHistoryInstallmentRefundedCents,
 } from 'sharedFrontend';
 
 // Import custom DataTable component
@@ -2346,10 +2350,7 @@ const Home = () => {
                             }
                         }
                         const installments = eventRecordForStudent.offeringHistory[subEventKey]?.installments || {};
-                        for (const [instKey, installmentEntry] of Object.entries<any>(installments)) {
-                            if (instKey === 'refunded') continue;
-                            installmentReceived += installmentEntry?.offeringAmount || 0;
-                        }
+                        installmentReceived += sumInstallmentPaymentsCents(installments);
                         if (installmentReceived === 0) {
                             if (cond.boolValue) {
                                 return false;
@@ -2669,9 +2670,9 @@ const Home = () => {
                             }
                             let lastOfferingTime = '';
                             const installments = person.offeringHistory[selectedSubEvent]?.installments || {};
+                            installmentReceived += sumInstallmentPaymentsCents(installments);
                             for (const [installmentName, installmentEntry] of Object.entries<any>(installments)) {
-                                if (installmentName === 'refunded') continue;
-                                installmentReceived += installmentEntry?.offeringAmount || 0;
+                                if (isInstallmentLineRefunded(installmentName, installmentEntry)) continue;
                                 const t = installmentEntry?.offeringTime;
                                 if (t && (!lastOfferingTime || t > lastOfferingTime)) {
                                     lastOfferingTime = t;
@@ -2724,21 +2725,11 @@ const Home = () => {
                                 }
                             }
 
-                            // Received/refunded: sum all subevents (matches register + email-agent; fee limit applies only to installmentTotal above)
+                            // Received/refunded: sum all subevents (matches register + installmentsHelpers; fee limit applies only to installmentTotal above)
                             const oh = person.offeringHistory;
                             if (oh && typeof oh === 'object') {
-                                for (const subEntry of Object.values(oh)) {
-                                    if (!subEntry || typeof subEntry !== 'object') continue;
-                                    const installments = (subEntry as { installments?: Record<string, unknown> }).installments;
-                                    if (!installments || typeof installments !== 'object') continue;
-                                    for (const [installmentName, installmentEntry] of Object.entries<any>(installments)) {
-                                        if (installmentName === 'refunded') {
-                                            installmentRefunded += installmentEntry?.offeringAmount || 0;
-                                        } else {
-                                            installmentReceived += installmentEntry?.offeringAmount || 0;
-                                        }
-                                    }
-                                }
+                                installmentReceived += sumOfferingHistoryInstallmentPaymentsCents(oh);
+                                installmentRefunded += sumOfferingHistoryInstallmentRefundedCents(oh);
                             }
                         }
 

@@ -480,171 +480,259 @@ export async function processRefund(
 
     // 3. Handle APPROVE
     if (action === 'APPROVE') {
-        let refundResult;
-
-        // 0. Update Transaction Status (DynamoDB) - BEFORE Stripe Refund
-        // As per requirement: Check if transaction exists and status is COMPLETED.
-        // Then set status = REFUNDED and refundedAt = timestamp.
         const transactionsTableCfg = tableGetConfig('transactions');
-        try {
-            const txRecord = await getOne(transactionsTableCfg.tableName, transactionsTableCfg.pk, stripePaymentIntent, roleArn, oidcToken);
-            if (!txRecord) {
-                const msg = `Transaction record not found for intent ${stripePaymentIntent}`;
-                // If the user wants this to be a BLOCKER, we throw error.
-                throw new Error(msg);
-            }
-            if (txRecord.status !== 'COMPLETED') {
-                const msg = `Transaction status is '${txRecord.status}', expected 'COMPLETED' for intent ${stripePaymentIntent}`;
-                throw new Error(msg);
-            }
-
-            // Update Transaction
-            await updateItem(
-                transactionsTableCfg.tableName,
-                { [transactionsTableCfg.pk]: stripePaymentIntent },
-                'SET #status = :status, #refundedAt = :refundedAt',
-                {
-                    ':status': 'REFUNDED',
-                    ':refundedAt': timestamp
-                },
-                {
-                    '#status': 'status',
-                    '#refundedAt': 'refundedAt'
-                },
-                roleArn,
-                oidcToken
-            );
-
-        } catch (txErr: any) {
-            console.error('Failed to update transaction status:', txErr);
-            throw txErr; // Re-throw to block refund process as per implied requirement
-        }
-
-        try {
-            // A. Stripe Refund
-            // Pass refundAmount if it exists in the request
-            const amountToRefund = refundRequest.refundAmount; // Can be undefined
-            refundResult = await stripeCreateRefund(stripePaymentIntent, amountToRefund);
-        } catch (stripeErr: any) {
-            console.error('Stripe refund failed:', stripeErr);
-            // Update status to ERROR
-            await updateItem(
-                refundsTableCfg.tableName,
-                { [refundsTableCfg.pk]: stripePaymentIntent },
-                'SET #status = :status, #updated = :updated, #approver = :approver, #err = :err',
-                {
-                    ':status': 'ERROR',
-                    ':updated': timestamp,
-                    ':approver': approverPid,
-                    ':err': stripeErr.message || 'Stripe Refund Failed'
-                },
-                {
-                    '#status': 'approvalState',
-                    '#updated': 'approvalStateLastUpdated',
-                    '#approver': 'approverPid',
-                    '#err': 'errMsg'
-                },
-                roleArn,
-                oidcToken
-            );
-            throw new Error(`Stripe refund failed: ${stripeErr.message}`);
-        }
-
-        // B. Update Student Record (offeringRefund = true)
         const eventCode = refundRequest.eventCode;
         const subEvent = refundRequest.subEvent;
         const studentPid = refundRequest.pid;
 
-        try {
-            // First, fetch the student record to find ALL occurrences of this payment intent
-            const student = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, studentPid, roleArn, oidcToken);
-
-            if (student && student.programs) {
-                const updateActions: string[] = [];
-                const expressionAttributeNames: Record<string, string> = {};
-                let pathCounter = 0;
-
-                // Scoped update logic
-                if (student.programs[eventCode] && student.programs[eventCode].offeringHistory) {
-                    const pId = eventCode;
-                    const pData = student.programs[eventCode];
-
-                    for (const [subId, subData] of Object.entries(pData.offeringHistory) as [string, any][]) {
-                        // Check direct offeringIntent
-                        if (subData.offeringIntent === stripePaymentIntent && stripePaymentIntent !== 'installments') {
-                            const pKey = `#p${pathCounter}`;
-                            const subKey = `#s${pathCounter}`;
-                            expressionAttributeNames[pKey] = pId;
-                            expressionAttributeNames[subKey] = subId;
-                            updateActions.push(`programs.${pKey}.offeringHistory.${subKey}.offeringRefund = :trueVal`);
-                            pathCounter++;
-                        }
-
-                        // Check installments
-                        if (subData.installments) {
-                            for (const [instId, instData] of Object.entries(subData.installments) as [string, any][]) {
-                                if (instData.offeringIntent === stripePaymentIntent && stripePaymentIntent !== 'installments') {
-                                    const pKey = `#p${pathCounter}`;
-                                    const subKey = `#s${pathCounter}`;
-                                    const instKey = `#i${pathCounter}`;
-                                    expressionAttributeNames[pKey] = pId;
-                                    expressionAttributeNames[subKey] = subId;
-                                    expressionAttributeNames[instKey] = instId;
-                                    updateActions.push(`programs.${pKey}.offeringHistory.${subKey}.installments.${instKey}.offeringRefund = :trueVal`);
-                                    pathCounter++;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (updateActions.length > 0) {
-                    const updateExpr = `SET ${updateActions.join(', ')}`;
-                    await updateItem(
-                        studentsTableCfg.tableName,
-                        { [studentsTableCfg.pk]: studentPid },
-                        updateExpr,
-                        { ':trueVal': true },
-                        expressionAttributeNames,
-                        roleArn,
-                        oidcToken
-                    );
-                } else {
-                    console.warn(`Payment intent ${stripePaymentIntent} not found in student record during refund process.`);
-                }
-            }
-        } catch (dbErr) {
-            console.error('Failed to update student record offeringRefund:', dbErr);
-            // Non-fatal, but logged. 
+        if (refundRequest.approvalState === 'COMPLETE') {
+            return { success: true, status: 'COMPLETE' };
         }
 
-        // C. Send Email to Student
-        try {
-            await sendRefundEmail(studentPid, eventCode, subEvent, stripePaymentIntent, refundResult?.amount, roleArn, oidcToken);
-        } catch (emailErr) {
-            console.error('Failed to send student refund email:', emailErr);
-            // Non-fatal
+        const txRecord = await getOne(
+            transactionsTableCfg.tableName,
+            transactionsTableCfg.pk,
+            stripePaymentIntent,
+            roleArn,
+            oidcToken
+        );
+        if (!txRecord) {
+            throw new Error(`Transaction record not found for intent ${stripePaymentIntent}`);
         }
 
-        // D. Update Refund Status to COMPLETE
-        await updateItem(
-            refundsTableCfg.tableName,
-            { [refundsTableCfg.pk]: stripePaymentIntent },
-            'SET #status = :status, #updated = :updated, #approver = :approver',
-            {
-                ':status': 'COMPLETE',
-                ':updated': timestamp,
-                ':approver': approverPid
-            },
-            {
-                '#status': 'approvalState',
-                '#updated': 'approvalStateLastUpdated',
-                '#approver': 'approverPid'
-            }
+        const student = await getOne(
+            studentsTableCfg.tableName,
+            studentsTableCfg.pk,
+            studentPid,
+            roleArn,
+            oidcToken
+        );
+        const studentMarked = studentHasOfferingRefundForPaymentIntent(
+            student,
+            eventCode,
+            stripePaymentIntent
         );
 
+        // Prior partial approve: tx and student already reflect refund — finish the request only.
+        if (txRecord.status === 'REFUNDED' && studentMarked) {
+            await completeRefundRequest(stripePaymentIntent, approverPid, timestamp, roleArn, oidcToken);
+            return { success: true, status: 'COMPLETE' };
+        }
+
+        if (txRecord.status !== 'COMPLETED' && txRecord.status !== 'REFUNDED') {
+            throw new Error(
+                `Transaction status is '${txRecord.status}', expected 'COMPLETED' for intent ${stripePaymentIntent}`
+            );
+        }
+
+        let refundResult: { amount?: number } | undefined;
+        const stripeAlreadyProcessed = txRecord.status === 'REFUNDED';
+
+        if (!stripeAlreadyProcessed) {
+            try {
+                refundResult = await stripeCreateRefund(stripePaymentIntent, refundRequest.refundAmount);
+            } catch (stripeErr: any) {
+                console.error('Stripe refund failed:', stripeErr);
+                await updateItem(
+                    refundsTableCfg.tableName,
+                    { [refundsTableCfg.pk]: stripePaymentIntent },
+                    'SET #status = :status, #updated = :updated, #approver = :approver, #err = :err',
+                    {
+                        ':status': 'ERROR',
+                        ':updated': timestamp,
+                        ':approver': approverPid,
+                        ':err': stripeErr.message || 'Stripe Refund Failed'
+                    },
+                    {
+                        '#status': 'approvalState',
+                        '#updated': 'approvalStateLastUpdated',
+                        '#approver': 'approverPid',
+                        '#err': 'errMsg'
+                    },
+                    roleArn,
+                    oidcToken
+                );
+                throw new Error(`Stripe refund failed: ${stripeErr.message}`);
+            }
+
+            try {
+                await updateItem(
+                    transactionsTableCfg.tableName,
+                    { [transactionsTableCfg.pk]: stripePaymentIntent },
+                    'SET #status = :status, #refundedAt = :refundedAt',
+                    {
+                        ':status': 'REFUNDED',
+                        ':refundedAt': timestamp
+                    },
+                    {
+                        '#status': 'status',
+                        '#refundedAt': 'refundedAt'
+                    },
+                    roleArn,
+                    oidcToken
+                );
+            } catch (txErr: any) {
+                console.error('Failed to update transaction status after Stripe refund:', txErr);
+                throw txErr;
+            }
+        }
+
+        try {
+            await markStudentOfferingRefunded(studentPid, eventCode, stripePaymentIntent, roleArn, oidcToken);
+        } catch (dbErr) {
+            console.error('Failed to update student record offeringRefund:', dbErr);
+        }
+
+        if (!stripeAlreadyProcessed) {
+            try {
+                await sendRefundEmail(
+                    studentPid,
+                    eventCode,
+                    subEvent,
+                    stripePaymentIntent,
+                    refundResult?.amount,
+                    roleArn,
+                    oidcToken
+                );
+            } catch (emailErr) {
+                console.error('Failed to send student refund email:', emailErr);
+            }
+        }
+
+        await completeRefundRequest(stripePaymentIntent, approverPid, timestamp, roleArn, oidcToken);
         return { success: true, status: 'COMPLETE' };
     }
 
     throw new Error('Invalid action');
+}
+
+function studentHasOfferingRefundForPaymentIntent(
+    student: any,
+    eventCode: string,
+    stripePaymentIntent: string
+): boolean {
+    const offeringHistory = student?.programs?.[eventCode]?.offeringHistory;
+    if (!offeringHistory || typeof offeringHistory !== 'object') {
+        return false;
+    }
+
+    for (const subData of Object.values(offeringHistory) as any[]) {
+        if (
+            subData?.offeringIntent === stripePaymentIntent
+            && stripePaymentIntent !== 'installments'
+            && subData.offeringRefund === true
+        ) {
+            return true;
+        }
+
+        const installments = subData?.installments;
+        if (!installments || typeof installments !== 'object') {
+            continue;
+        }
+
+        for (const instData of Object.values(installments) as any[]) {
+            if (
+                instData?.offeringIntent === stripePaymentIntent
+                && stripePaymentIntent !== 'installments'
+                && instData.offeringRefund === true
+            ) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+async function markStudentOfferingRefunded(
+    studentPid: string,
+    eventCode: string,
+    stripePaymentIntent: string,
+    roleArn: string,
+    oidcToken?: string
+): Promise<void> {
+    const studentsTableCfg = tableGetConfig('students');
+    const student = await getOne(studentsTableCfg.tableName, studentsTableCfg.pk, studentPid, roleArn, oidcToken);
+
+    if (!student?.programs?.[eventCode]?.offeringHistory) {
+        console.warn(`Payment intent ${stripePaymentIntent} not found in student record during refund process.`);
+        return;
+    }
+
+    const updateActions: string[] = [];
+    const expressionAttributeNames: Record<string, string> = {};
+    let pathCounter = 0;
+    const pId = eventCode;
+    const pData = student.programs[eventCode];
+
+    for (const [subId, subData] of Object.entries(pData.offeringHistory) as [string, any][]) {
+        if (subData.offeringIntent === stripePaymentIntent && stripePaymentIntent !== 'installments') {
+            const pKey = `#p${pathCounter}`;
+            const subKey = `#s${pathCounter}`;
+            expressionAttributeNames[pKey] = pId;
+            expressionAttributeNames[subKey] = subId;
+            updateActions.push(`programs.${pKey}.offeringHistory.${subKey}.offeringRefund = :trueVal`);
+            pathCounter++;
+        }
+
+        if (subData.installments) {
+            for (const [instId, instData] of Object.entries(subData.installments) as [string, any][]) {
+                if (instData.offeringIntent === stripePaymentIntent && stripePaymentIntent !== 'installments') {
+                    const pKey = `#p${pathCounter}`;
+                    const subKey = `#s${pathCounter}`;
+                    const instKey = `#i${pathCounter}`;
+                    expressionAttributeNames[pKey] = pId;
+                    expressionAttributeNames[subKey] = subId;
+                    expressionAttributeNames[instKey] = instId;
+                    updateActions.push(
+                        `programs.${pKey}.offeringHistory.${subKey}.installments.${instKey}.offeringRefund = :trueVal`
+                    );
+                    pathCounter++;
+                }
+            }
+        }
+    }
+
+    if (updateActions.length === 0) {
+        console.warn(`Payment intent ${stripePaymentIntent} not found in student record during refund process.`);
+        return;
+    }
+
+    const updateExpr = `SET ${updateActions.join(', ')}`;
+    await updateItem(
+        studentsTableCfg.tableName,
+        { [studentsTableCfg.pk]: studentPid },
+        updateExpr,
+        { ':trueVal': true },
+        expressionAttributeNames,
+        roleArn,
+        oidcToken
+    );
+}
+
+async function completeRefundRequest(
+    stripePaymentIntent: string,
+    approverPid: string,
+    timestamp: string,
+    roleArn: string,
+    oidcToken?: string
+): Promise<void> {
+    const refundsTableCfg = tableGetConfig('refunds');
+    await updateItem(
+        refundsTableCfg.tableName,
+        { [refundsTableCfg.pk]: stripePaymentIntent },
+        'SET #status = :status, #updated = :updated, #approver = :approver',
+        {
+            ':status': 'COMPLETE',
+            ':updated': timestamp,
+            ':approver': approverPid
+        },
+        {
+            '#status': 'approvalState',
+            '#updated': 'approvalStateLastUpdated',
+            '#approver': 'approverPid'
+        },
+        roleArn,
+        oidcToken
+    );
 }
