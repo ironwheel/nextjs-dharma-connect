@@ -31,6 +31,13 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
     const [refundAmounts, setRefundAmounts] = useState<Record<string, number>>({});
     const [customAmounts, setCustomAmounts] = useState<Record<string, boolean>>({}); // Track if user unchecked "Full Refund"
 
+    // Keep in sync with `packages/api/lib/refunds.ts` guard rails.
+    const REFUND_24H_LIMIT_CENTS = 1000 * 100;
+
+    // Limit-exceeded explanation modal
+    const [showLimitExceededModal, setShowLimitExceededModal] = useState(false);
+    const [limitExceededMessage, setLimitExceededMessage] = useState<string>('');
+
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
         const pid = urlParams.get('pid');
@@ -362,6 +369,15 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
         setShowRefundModal(false);
     };
 
+    const extractApiErrorMessage = (err: any): string => {
+        if (!err) return '';
+        if (typeof err.message === 'string' && err.message.trim()) return err.message;
+        if (typeof err.details?.error === 'string' && err.details.error.trim()) return err.details.error;
+        if (typeof err.details?.message === 'string' && err.details.message.trim()) return err.details.message;
+        if (typeof err.error === 'string' && err.error.trim()) return err.error;
+        return '';
+    };
+
     const confirmRefund = async () => {
         if (!refundCandidate) return;
 
@@ -388,6 +404,7 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
 
         let successCount = 0;
         let failCount = 0;
+        let limitExceeded = false;
 
         for (const intentId of itemsToProcess) {
             const amount = refundAmounts[intentId];
@@ -411,6 +428,15 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
                     [intentId]: { approvalState: 'PENDING' }
                 }));
             } catch (err: any) {
+                const msg = extractApiErrorMessage(err);
+                if (msg.includes('Daily refund value limit reached')) {
+                    limitExceeded = true;
+                    setLimitExceededMessage(msg);
+                    setShowLimitExceededModal(true);
+                    // Stop submitting further items once we hit the guard rail.
+                    break;
+                }
+
                 console.error(`Failed to request refund for ${intentId}`, err);
                 failCount++;
                 // Continue with others?
@@ -420,12 +446,12 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
         if (successCount > 0) {
             toast.success(`Submitted ${successCount} refund request(s).`);
         }
-        if (failCount > 0) {
+        if (!limitExceeded && failCount > 0) {
             toast.error(`Failed to submit ${failCount} request(s).`);
         }
 
         setProcessing(null);
-        if (failCount === 0) {
+        if (!limitExceeded && failCount === 0) {
             setShowRefundModal(false);
             setRefundCandidate(null);
             setStripeDetailsMap({});
@@ -687,6 +713,41 @@ const OfferingList: React.FC<OfferingListProps> = ({ student }) => {
                     </Button>
                     <Button variant="warning" onClick={confirmRefund} disabled={loadingStripe || selectedRefundItems.size === 0 || reason.length < 10}>
                         Confirm Request
+                    </Button>
+                </Modal.Footer>
+            </Modal>
+
+            <Modal
+                show={showLimitExceededModal}
+                onHide={() => setShowLimitExceededModal(false)}
+                centered
+            >
+                <Modal.Header closeButton className="bg-dark text-white border-secondary">
+                    <Modal.Title>Daily Limit Exceeded</Modal.Title>
+                </Modal.Header>
+                <Modal.Body className="bg-dark text-white">
+                    <p className="mb-2">
+                        This refund request exceeds the <strong>24-hour refund value limit</strong>.
+                    </p>
+                    <div className="p-3 border border-secondary rounded bg-secondary bg-opacity-10">
+                        <div className="mb-1"><strong>Limit:</strong> ${(REFUND_24H_LIMIT_CENTS / 100).toFixed(2)} per rolling 24 hours</div>
+                        {limitExceededMessage && (
+                            <div className="text-warning small mt-2" style={{ whiteSpace: 'pre-wrap' }}>
+                                {limitExceededMessage}
+                            </div>
+                        )}
+                    </div>
+                    <div className="mt-3">
+                        <div className="mb-1"><strong>What you can do:</strong></div>
+                        <ul className="mb-0 ps-3">
+                            <li>Reduce the refund amount(s) and try again.</li>
+                            <li>Wait until older refund requests fall outside the last 24 hours.</li>
+                        </ul>
+                    </div>
+                </Modal.Body>
+                <Modal.Footer className="bg-dark border-secondary">
+                    <Button variant="secondary" onClick={() => setShowLimitExceededModal(false)}>
+                        Close
                     </Button>
                 </Modal.Footer>
             </Modal>
