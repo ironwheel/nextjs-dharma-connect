@@ -56,7 +56,78 @@ interface ViewsProfile {
     views: string[];
 }
 
+interface SubEvent {
+    date?: string;
+    [key: string]: any;
+}
 
+interface Event {
+    aid: string;
+    name: string;
+    hide?: boolean;
+    subEvents?: { [key: string]: SubEvent };
+    [key: string]: any;
+}
+
+const parseSubEventDate = (dateStr: string): Date | null => {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    if (!year || !month || !day) return null;
+    return new Date(year, month - 1, day);
+};
+
+const getEarliestEventDate = (event: Event): Date | null => {
+    if (!event.subEvents || Object.keys(event.subEvents).length === 0) {
+        return null;
+    }
+
+    const dates = Object.values(event.subEvents)
+        .map(subEvent => subEvent.date)
+        .filter((date): date is string => !!date)
+        .map(parseSubEventDate)
+        .filter((d): d is Date => d !== null);
+
+    if (dates.length === 0) return null;
+
+    return new Date(Math.min(...dates.map(d => d.getTime())));
+};
+
+const eventInCurrentOrPreviousYear = (event: Event): boolean => {
+    const currentYear = new Date().getFullYear();
+    const previousYear = currentYear - 1;
+
+    if (!event.subEvents) return false;
+
+    return Object.values(event.subEvents).some(subEvent => {
+        if (!subEvent.date) return false;
+        const parsed = parseSubEventDate(subEvent.date);
+        if (!parsed) return false;
+        const year = parsed.getFullYear();
+        return year === currentYear || year === previousYear;
+    });
+};
+
+const buildEventAccessOptions = (events: Event[]): { codes: string[]; names: Record<string, string> } => {
+    const filtered = events.filter(e => !e.hide && eventInCurrentOrPreviousYear(e));
+
+    filtered.sort((a, b) => {
+        const dateA = getEarliestEventDate(a);
+        const dateB = getEarliestEventDate(b);
+
+        if (!dateA && !dateB) return 0;
+        if (!dateA) return 1;
+        if (!dateB) return -1;
+
+        return dateB.getTime() - dateA.getTime();
+    });
+
+    const codes = ['all', ...filtered.map(e => e.aid)];
+    const names: Record<string, string> = { all: 'All Events (Wildcard)' };
+    filtered.forEach(e => {
+        names[e.aid] = e.name || e.aid;
+    });
+
+    return { codes, names };
+};
 
 // Module-level variables
 let allStudents: Student[] = [];
@@ -108,6 +179,7 @@ const Home = () => {
     // Event access state
     const [eventAccessList, setEventAccessList] = useState<string[]>([]);
     const [eventNames, setEventNames] = useState<Record<string, string>>({});
+    const [supplementalEventNames, setSupplementalEventNames] = useState<Record<string, string>>({});
     const [eventNamesLoading, setEventNamesLoading] = useState<boolean>(false);
 
     // Friends and Family state
@@ -345,57 +417,26 @@ const Home = () => {
             const schema = defaultAuthRecord.config;
             const hosts = Object.keys(schema);
 
-            // Fetch event access list and then look up individual event names
+            // Build event access list from events in current and previous year
             try {
                 setEventNamesLoading(true);
-                const eventListConfig = await fetchConfig('eventAccessList');
-                let eventCodes: string[] = [];
+                const events = await getAllTableItems('events', pid as string, hash as string);
 
-                if (eventListConfig && eventListConfig.value && Array.isArray(eventListConfig.value)) {
-                    eventCodes = eventListConfig.value;
+                if (events && 'redirected' in events) {
+                    console.log('Events fetch redirected - authentication required');
+                    setEventAccessList(['all']);
+                    setEventNames({ all: 'All Events (Wildcard)' });
                 } else {
-                    // Fallback to a default list if config not found
-                    eventCodes = ['all'];
+                    const { codes, names } = buildEventAccessOptions(Array.isArray(events) ? events as Event[] : []);
+                    setEventAccessList(codes);
+                    setEventNames(names);
                 }
 
-                setEventAccessList(eventCodes);
-
-                // Look up event names for each event code (excluding 'all')
-                const eventLookups = eventCodes
-                    .filter(code => code !== 'all')
-                    .map(async (eventCode) => {
-                        try {
-                            const eventRecord = await getTableItemOrNull('events', eventCode, pid as string, hash as string);
-                            if (eventRecord && !('redirected' in eventRecord) && eventRecord.name) {
-                                return { code: eventCode, name: eventRecord.name };
-                            } else {
-                                // Fallback to using the code as name if event not found
-                                console.warn(`Event ${eventCode} not found or missing name field, using code as display name`);
-                                return { code: eventCode, name: eventCode };
-                            }
-                        } catch (error) {
-                            console.error(`Error fetching event ${eventCode}:`, error);
-                            // Fallback to using the code as name on error
-                            return { code: eventCode, name: eventCode };
-                        }
-                    });
-
-                // Wait for all event lookups to complete
-                const eventResults = await Promise.all(eventLookups);
-
-                // Create a mapping of event codes to names
-                const eventNamesMap: Record<string, string> = { 'all': 'All Events (Wildcard)' };
-                eventResults.forEach(({ code, name }) => {
-                    eventNamesMap[code] = name;
-                });
-
-                setEventNames(eventNamesMap);
                 setEventNamesLoading(false);
-
             } catch (error) {
                 console.error('Error fetching event data:', error);
                 setEventAccessList(['all']);
-                setEventNames({ 'all': 'All Events (Wildcard)' });
+                setEventNames({ all: 'All Events (Wildcard)' });
                 setEventNamesLoading(false);
             }
 
@@ -1176,6 +1217,69 @@ const Home = () => {
         return student ? `${student.first} ${student.last}` : studentId;
     };
 
+    const getEventDisplayName = (eventCode: string): string => {
+        return eventNames[eventCode] || supplementalEventNames[eventCode] || eventCode;
+    };
+
+    const buildDisplayEventAccessList = (selectedEventAccess: string[]): string[] => {
+        const baseList = eventAccessList.filter(code => code !== 'all');
+        const selectedCodes = Array.isArray(selectedEventAccess)
+            ? selectedEventAccess.filter(code => code !== 'all')
+            : [];
+        const orphanCodes = selectedCodes.filter(code => !baseList.includes(code));
+        return ['all', ...baseList, ...orphanCodes];
+    };
+
+    // Fetch names for legacy eventAccess codes outside the current/previous year window
+    useEffect(() => {
+        if (!showEditModal || !pid || !hash) return;
+
+        const orphanCodes = new Set<string>();
+        availableHosts.forEach(host => {
+            const eventAccess = formData.config?.[host]?.eventAccess;
+            if (Array.isArray(eventAccess)) {
+                eventAccess
+                    .filter(code => code !== 'all' && !eventAccessList.includes(code))
+                    .forEach(code => orphanCodes.add(code));
+            }
+        });
+
+        const missingCodes = Array.from(orphanCodes).filter(
+            code => !eventNames[code] && !supplementalEventNames[code]
+        );
+        if (missingCodes.length === 0) return;
+
+        let cancelled = false;
+        (async () => {
+            const lookups = await Promise.all(missingCodes.map(async (code) => {
+                try {
+                    const record = await getTableItemOrNull('events', code, pid as string, hash as string);
+                    if (record && !('redirected' in record) && record.name) {
+                        return { code, name: record.name as string };
+                    }
+                    return { code, name: code };
+                } catch (error) {
+                    console.error(`Error fetching legacy event ${code}:`, error);
+                    return { code, name: code };
+                }
+            }));
+
+            if (cancelled) return;
+
+            setSupplementalEventNames(prev => {
+                const next = { ...prev };
+                lookups.forEach(({ code, name }) => {
+                    next[code] = name;
+                });
+                return next;
+            });
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [showEditModal, formData.config, eventAccessList, eventNames, supplementalEventNames, pid, hash, availableHosts]);
+
     // OWYAA functionality
     const handleOWYAA = async (studentId: string, studentName: string) => {
         if (!Array.isArray(allStudents)) {
@@ -1950,6 +2054,13 @@ const Home = () => {
                                                             </Row>
                                                         );
                                                     } else if (key === 'eventAccess' && Array.isArray(defaultValue)) {
+                                                        const displayEventAccessList = buildDisplayEventAccessList(
+                                                            Array.isArray(value) ? value : []
+                                                        );
+                                                        const displayNamesLoading = eventNamesLoading || displayEventAccessList.some(
+                                                            code => code !== 'all' && !(eventNames[code] || supplementalEventNames[code])
+                                                        );
+
                                                         return (
                                                             <Row key={key}>
                                                                 <Col md={12}>
@@ -1963,13 +2074,13 @@ const Home = () => {
                                                                             maxHeight: '300px',
                                                                             overflowY: 'auto'
                                                                         }}>
-                                                                            {eventNamesLoading || (eventAccessList.length > 0 && eventAccessList.filter(code => code !== 'all').some(code => !eventNames[code])) ? (
+                                                                            {displayNamesLoading ? (
                                                                                 <div style={{ color: 'white', textAlign: 'center', padding: '20px' }}>
                                                                                     loading...
                                                                                 </div>
                                                                             ) : (
-                                                                                eventAccessList.map(eventCode => {
-                                                                                    const eventName = eventNames[eventCode] || eventCode;
+                                                                                displayEventAccessList.map(eventCode => {
+                                                                                    const eventName = getEventDisplayName(eventCode);
                                                                                     const isChecked = Array.isArray(value) ? value.includes(eventCode) : false;
                                                                                     const isAllEvent = eventCode === 'all';
 
