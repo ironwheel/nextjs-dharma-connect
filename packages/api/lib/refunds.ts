@@ -7,6 +7,7 @@ import { tableGetConfig } from './tableConfig';
 import { putOneWithCondition, batchGetItems, getOne, updateItem } from './dynamoClient';
 import { getConfigValue } from './authUtils';
 import { stripeCreateRefund, sendRefundEmail } from './stripe';
+import { updateOfferingTransactionRefund } from './offering';
 
 const SMTP_USERNAME = process.env.SMTP_USERNAME;
 const SMTP_PASSWORD = process.env.SMTP_PASSWORD;
@@ -435,6 +436,100 @@ export async function listRefunds(limit: number = 20, offset: number = 0, roleAr
     return { items: enriched, total };
 }
 
+type RefundTransactionSource = 'legacy' | 'offering';
+
+interface RefundTransactionLookup {
+    record: any;
+    source: RefundTransactionSource;
+}
+
+async function findRefundTransactionRecord(
+    stripePaymentIntent: string,
+    roleArn: string,
+    oidcToken?: string
+): Promise<RefundTransactionLookup | null> {
+    const transactionsTableCfg = tableGetConfig('transactions');
+    const legacyRecord = await getOne(
+        transactionsTableCfg.tableName,
+        transactionsTableCfg.pk,
+        stripePaymentIntent,
+        roleArn,
+        oidcToken
+    );
+    if (legacyRecord) {
+        return { record: legacyRecord, source: 'legacy' };
+    }
+
+    const offeringTxTableCfg = tableGetConfig('offering-transactions');
+    const offeringRecord = await getOne(
+        offeringTxTableCfg.tableName,
+        offeringTxTableCfg.pk,
+        stripePaymentIntent,
+        roleArn,
+        oidcToken
+    );
+    if (offeringRecord) {
+        return { record: offeringRecord, source: 'offering' };
+    }
+
+    return null;
+}
+
+function isTransactionRefunded(lookup: RefundTransactionLookup): boolean {
+    const { record, source } = lookup;
+    if (source === 'legacy') {
+        return record.status === 'REFUNDED';
+    }
+    return record.status === 'refunded' || record.dashboardStatus === 'REFUNDED';
+}
+
+function isTransactionRefundable(lookup: RefundTransactionLookup): boolean {
+    const { record, source } = lookup;
+    if (source === 'legacy') {
+        return record.status === 'COMPLETED' || record.status === 'REFUNDED';
+    }
+    return record.status === 'succeeded' || record.status === 'refunded';
+}
+
+async function markTransactionRefunded(
+    stripePaymentIntent: string,
+    lookup: RefundTransactionLookup,
+    refundAmountCents: number | undefined,
+    roleArn: string,
+    oidcToken?: string
+): Promise<void> {
+    if (lookup.source === 'legacy') {
+        const transactionsTableCfg = tableGetConfig('transactions');
+        const timestamp = new Date().toISOString();
+        await updateItem(
+            transactionsTableCfg.tableName,
+            { [transactionsTableCfg.pk]: stripePaymentIntent },
+            'SET #status = :status, #refundedAt = :refundedAt',
+            {
+                ':status': 'REFUNDED',
+                ':refundedAt': timestamp
+            },
+            {
+                '#status': 'status',
+                '#refundedAt': 'refundedAt'
+            },
+            roleArn,
+            oidcToken
+        );
+        return;
+    }
+
+    const totalAmountCents = lookup.record.amount ?? 0;
+    const thisRefundCents = refundAmountCents ?? totalAmountCents;
+    await updateOfferingTransactionRefund(
+        stripePaymentIntent,
+        thisRefundCents,
+        totalAmountCents,
+        roleArn,
+        oidcToken
+    );
+}
+
 /**
  * @function processRefund
  * @description Processes a refund request (Approve or Deny).
@@ -480,7 +575,6 @@ export async function processRefund(
 
     // 3. Handle APPROVE
     if (action === 'APPROVE') {
-        const transactionsTableCfg = tableGetConfig('transactions');
         const eventCode = refundRequest.eventCode;
         const subEvent = refundRequest.subEvent;
         const studentPid = refundRequest.pid;
@@ -489,14 +583,8 @@ export async function processRefund(
             return { success: true, status: 'COMPLETE' };
         }
 
-        const txRecord = await getOne(
-            transactionsTableCfg.tableName,
-            transactionsTableCfg.pk,
-            stripePaymentIntent,
-            roleArn,
-            oidcToken
-        );
-        if (!txRecord) {
+        const txLookup = await findRefundTransactionRecord(stripePaymentIntent, roleArn, oidcToken);
+        if (!txLookup) {
             throw new Error(`Transaction record not found for intent ${stripePaymentIntent}`);
         }
 
@@ -514,19 +602,20 @@ export async function processRefund(
         );
 
         // Prior partial approve: tx and student already reflect refund — finish the request only.
-        if (txRecord.status === 'REFUNDED' && studentMarked) {
+        if (isTransactionRefunded(txLookup) && studentMarked) {
             await completeRefundRequest(stripePaymentIntent, approverPid, timestamp, roleArn, oidcToken);
             return { success: true, status: 'COMPLETE' };
         }
 
-        if (txRecord.status !== 'COMPLETED' && txRecord.status !== 'REFUNDED') {
+        if (!isTransactionRefundable(txLookup)) {
+            const expectedStatus = txLookup.source === 'legacy' ? 'COMPLETED' : 'succeeded';
             throw new Error(
-                `Transaction status is '${txRecord.status}', expected 'COMPLETED' for intent ${stripePaymentIntent}`
+                `Transaction status is '${txLookup.record.status}', expected '${expectedStatus}' for intent ${stripePaymentIntent}`
             );
         }
 
         let refundResult: { amount?: number } | undefined;
-        const stripeAlreadyProcessed = txRecord.status === 'REFUNDED';
+        const stripeAlreadyProcessed = isTransactionRefunded(txLookup);
 
         if (!stripeAlreadyProcessed) {
             try {
@@ -556,18 +645,10 @@ export async function processRefund(
             }
 
             try {
-                await updateItem(
-                    transactionsTableCfg.tableName,
-                    { [transactionsTableCfg.pk]: stripePaymentIntent },
-                    'SET #status = :status, #refundedAt = :refundedAt',
-                    {
-                        ':status': 'REFUNDED',
-                        ':refundedAt': timestamp
-                    },
-                    {
-                        '#status': 'status',
-                        '#refundedAt': 'refundedAt'
-                    },
+                await markTransactionRefunded(
+                    stripePaymentIntent,
+                    txLookup,
+                    refundResult?.amount ?? refundRequest.refundAmount,
                     roleArn,
                     oidcToken
                 );
