@@ -74,6 +74,7 @@ const tables = [
     { resource: 'refunds', envVar: 'DYNAMODB_TABLE_REFUNDS' },
     { resource: 'versions', envVar: 'DYNAMODB_TABLE_VERSIONS' },
     { resource: 'transactions', envVar: 'DYNAMODB_TABLE_TRANSACTIONS' },
+    { resource: 'offering-transactions', envVar: 'DYNAMODB_TABLE_OFFERING_TRANSACTIONS' },
     { resource: 'transactions-cache', envVar: 'DYNAMODB_TABLE_TRANSACTIONS_CACHE' },
     { resource: 'auditors', envVar: 'DYNAMODB_TABLE_AUDITORS' },
     { resource: 'signers', envVar: 'DYNAMODB_TABLE_SIGNERS' },
@@ -158,6 +159,7 @@ function mapAppActionsToPermissions(appActions) {
                 try {
                     const refundsArn = getTableArn('refunds');
                     const txArn = getTableArn('transactions');
+                    const offeringTxArn = getTableArn('offering-transactions');
                     const studentsArn = getTableArn('students');
 
                     writeTables.add(refundsArn);
@@ -165,6 +167,9 @@ function mapAppActionsToPermissions(appActions) {
 
                     writeTables.add(txArn);
                     readTables.add(txArn);
+
+                    writeTables.add(offeringTxArn);
+                    readTables.add(offeringTxArn);
 
                     writeTables.add(studentsArn);
                     readTables.add(studentsArn);
