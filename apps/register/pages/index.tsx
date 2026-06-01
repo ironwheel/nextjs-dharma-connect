@@ -443,6 +443,7 @@ export default function Home() {
     const [phase, setPhase] = useState<
         | 'loading'
         | 'testModeConfig'
+        | 'applicationPeriodClosed'
         | 'join'
         | 'offer'
         | 'stripeCapture'
@@ -548,6 +549,19 @@ export default function Home() {
             setPhase('testModeConfig');
             return;
         }
+
+        // Application period closed: block new registration unless student already joined this event.
+        const applicationPeriodClosed = event.config?.applicationPeriodClosed === true;
+        const hasProgramJoin = prog?.join === true;
+        if (applicationPeriodClosed && !hasProgramJoin) {
+            if (phase !== 'stripeCapture' && phase !== 'debugTable') {
+                if (phase !== 'applicationPeriodClosed') {
+                    setPhase('applicationPeriodClosed');
+                }
+                return;
+            }
+        }
+
         const hasAnyOffering =
             !!prog?.offeringHistory && Object.keys(prog.offeringHistory).length > 0;
 
@@ -1210,6 +1224,15 @@ export default function Home() {
                         >
                             Start Registration Test
                         </button>
+                    </div>
+                )}
+
+                {phase === 'applicationPeriodClosed' && (
+                    <div className="max-w-xl mx-auto p-6 rounded-lg border border-reg-border bg-reg-card-muted">
+                        <HtmlPrompt
+                            html={promptLookup(context, 'applicationPeriodClosed') || ''}
+                            className="text-reg-text"
+                        />
                     </div>
                 )}
 
