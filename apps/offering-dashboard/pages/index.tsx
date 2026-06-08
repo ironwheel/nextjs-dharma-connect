@@ -70,6 +70,53 @@ interface SubEventItem {
 }
 
 
+type TotalsSummary = { count: number; amount: number; stripeFee: number; kmFee: number; net: number };
+
+function getSubEventKeyFromEventKey(eventKey: string): string | null {
+    if (!eventKey.includes(':')) return null;
+    const sub = eventKey.split(':').slice(1).join(':');
+    return sub || null;
+}
+
+function transactionMatchesSubEvent(t: Transaction, subEventKey: string): boolean {
+    if (t.subEvent === subEventKey) return true;
+    const skuSummary = Array.isArray(t.skuSummary) ? t.skuSummary : [];
+    if (skuSummary.some((x: { subEvent?: string }) => x?.subEvent === subEventKey && x.subEvent !== 'kmFee')) {
+        return true;
+    }
+    const cart = Array.isArray(t.cart) ? t.cart : [];
+    for (const person of cart) {
+        if (person?.currentOfferings && subEventKey in person.currentOfferings) return true;
+    }
+    return false;
+}
+
+function isHeartGiftTransaction(t: Transaction): boolean {
+    return t.anonymousHeartGift === true;
+}
+
+function calculateTotalsForTransactions(txs: Transaction[]): TotalsSummary {
+    const total = { count: 0, amount: 0, stripeFee: 0, kmFee: 0, net: 0 };
+    txs.forEach(t => {
+        total.count += 1;
+        const amount = (t.payerData?.amount || 0);
+        const fee = (t.payerData?.fee || 0);
+
+        if (t.status === 'REFUNDED') {
+            total.amount += amount;
+            total.stripeFee += fee;
+            total.net += -(amount + fee);
+        } else {
+            const km = ((t.kmFee || 0) * 100);
+            total.amount += amount;
+            total.stripeFee += fee;
+            total.kmFee += km;
+            total.net += (amount - (fee + km));
+        }
+    });
+    return total;
+}
+
 interface View {
     name: string;
     columnDefs: Array<{
@@ -504,6 +551,9 @@ const Home = () => {
             timestamp,
             total: dashboardAmountCents / 100,
             isAggregate: false,
+            anonymousHeartGift: rec?.anonymousHeartGift === true,
+            subEvent: typeof rec?.subEvent === 'string' ? rec.subEvent : undefined,
+            skuSummary,
         } as Transaction;
     };
 
@@ -672,6 +722,10 @@ const Home = () => {
                 if (selectedEventAid && selectedEventAid !== 'all') {
                     filtered = filtered.filter((t: Transaction) => t.aid === selectedEventAid);
                 }
+                const subEventKey = getSubEventKeyFromEventKey(selectedEventKey);
+                if (subEventKey) {
+                    filtered = filtered.filter((t: Transaction) => transactionMatchesSubEvent(t, subEventKey));
+                }
             } else {
                 // Category Filter
                 if (selectedCategory !== 'All Categories') {
@@ -830,43 +884,51 @@ const Home = () => {
                 displayDate: (c.type === 'YEAR' || c.type === 'CATEGORY_YEAR') ? c.year.toString() : `${c.year}-${(c.month + 1).toString().padStart(2, '0')}`
             } as Transaction)));
         }
-    }, [selectedYear, selectedMonth, selectedEventAid, selectedViewName, cacheItems, allTransactions, rawLoaded, views, dataSource, viewMode, selectedCategory, loadedScope]);
+    }, [selectedYear, selectedMonth, selectedEventAid, selectedEventKey, selectedViewName, cacheItems, allTransactions, rawLoaded, views, dataSource, viewMode, selectedCategory, loadedScope]);
 
+    const isIndividualEventSelected = viewMode === 'events' && selectedEventAid !== 'all';
+    const hasHeartGiftsInView =
+        isIndividualEventSelected && transactions.some(isHeartGiftTransaction);
 
+    const selectedSubEventDate = (() => {
+        if (!isIndividualEventSelected) return '';
+        const event = events.find((e) => e.aid === selectedEventAid);
+        if (!event?.subEvents) return '';
+        const subEventKey = getSubEventKeyFromEventKey(selectedEventKey);
+        if (subEventKey) {
+            const d = event.subEvents[subEventKey]?.date;
+            return typeof d === 'string' ? d.trim() : '';
+        }
+        const keys = Object.keys(event.subEvents);
+        if (keys.length === 1) {
+            const d = event.subEvents[keys[0]]?.date;
+            return typeof d === 'string' ? d.trim() : '';
+        }
+        return '';
+    })();
 
-
-    // Helper: Calculate Totals
-    const calculateTotals = () => {
-        const total = { count: 0, amount: 0, stripeFee: 0, kmFee: 0, net: 0 };
-        transactions.forEach(t => {
-            total.count += 1;
-            const amount = (t.payerData?.amount || 0);
-            const fee = (t.payerData?.fee || 0);
-
-            if (t.status === 'REFUNDED') {
-                // For Refunded:
-                // Amount = Amount (Positive to show magnitude, or negative?)
-                // Net = -(Amount + Fee)
-                // KM Fee = 0
-
-                // User likely wants to see the Refund Amount as positive in the column, but Net as negative.
-                // Let's assume aggregation follows row logic.
-                total.amount += amount;
-                total.stripeFee += fee;
-                // KM Fee skipped
-                total.net += -(amount + fee);
-            } else {
-                const km = ((t.kmFee || 0) * 100);
-                total.amount += amount;
-                total.stripeFee += fee;
-                total.kmFee += km;
-                total.net += (amount - (fee + km));
-            }
-        });
-        return total;
+    type TotalsRow = {
+        label: string;
+        totals: TotalsSummary;
+        /** default = year/month filter range; subevent = event subevent date; empty = blank */
+        dateColumn?: 'default' | 'subevent' | 'empty';
     };
 
-    const totals = calculateTotals();
+    const totalsRows: TotalsRow[] = hasHeartGiftsInView
+        ? [
+            {
+                label: 'Registration Offerings',
+                totals: calculateTotalsForTransactions(transactions.filter(t => !isHeartGiftTransaction(t))),
+                dateColumn: 'subevent',
+            },
+            {
+                label: 'Heart Gifts',
+                totals: calculateTotalsForTransactions(transactions.filter(isHeartGiftTransaction)),
+                dateColumn: 'empty',
+            },
+            { label: 'Total', totals: calculateTotalsForTransactions(transactions), dateColumn: 'empty' },
+        ]
+        : [{ label: '', totals: calculateTotalsForTransactions(transactions), dateColumn: 'default' }];
 
     // Render Totals Section
     const renderTotalsSection = () => {
@@ -875,6 +937,75 @@ const Home = () => {
         };
 
         const currentColumns = getColumns().filter(c => !c.hide);
+
+        const renderTotalsCell = (
+            col: Column,
+            rowTotals: TotalsSummary,
+            nameLabel: string,
+            dateColumn: TotalsRow['dateColumn'] = 'default',
+        ): React.ReactNode => {
+            const style: React.CSSProperties = {
+                backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                color: 'white',
+                fontWeight: 'bold',
+                width: col.width,
+                textAlign:
+                    ['amount', 'fee', 'kmFee', 'net', 'Amount', 'Stripe Fee', 'KM Fee', 'Net'].includes(col.field) ||
+                    (col.headerName && ['Amount', 'Stripe Fee', 'KM Fee', 'Net'].includes(col.headerName))
+                        ? 'right'
+                        : 'left',
+            };
+
+            if (col.field === 'rowIndex' || col.field === '#') {
+                return <td key={col.field} style={style}>{rowTotals.count}</td>;
+            }
+            if (col.headerName === 'Date' || col.field === 'Date' || col.field === 'timestamp') {
+                if (dateColumn === 'empty') {
+                    return <td key={col.field} style={style} />;
+                }
+                if (dateColumn === 'subevent') {
+                    return <td key={col.field} style={style}>{selectedSubEventDate}</td>;
+                }
+                const currentYearVal = new Date().getFullYear();
+                const minYear = 2022;
+                const maxYear = currentYearVal;
+                let content = '';
+                if (selectedYear === 'all' && selectedMonth === 'all') {
+                    content = `${minYear} to ${maxYear}`;
+                } else if (selectedYear === 'all' && selectedMonth !== 'all') {
+                    const m = parseInt(selectedMonth) + 1;
+                    const mStr = m.toString().padStart(2, '0');
+                    content = `${minYear}-${mStr} to ${maxYear}-${mStr}`;
+                } else if (selectedYear !== 'all' && selectedMonth === 'all') {
+                    content = selectedYear;
+                } else if (selectedYear !== 'all' && selectedMonth !== 'all') {
+                    const m = parseInt(selectedMonth) + 1;
+                    const mStr = m.toString().padStart(2, '0');
+                    content = `${selectedYear}-${mStr}`;
+                }
+                return <td key={col.field} style={style}>{content}</td>;
+            }
+            if (['amount', 'Amount'].includes(col.field) || (typeof col.headerName === 'string' && col.headerName.includes('Amount'))) {
+                return <td key={col.field} style={style}>{formatCurrency(rowTotals.amount)}</td>;
+            }
+            if (['fee', 'Stripe Fee'].includes(col.field) || (typeof col.headerName === 'string' && col.headerName.includes('Stripe Fee'))) {
+                return <td key={col.field} style={style}>{formatCurrency(rowTotals.stripeFee)}</td>;
+            }
+            if (['kmFee', 'KM Fee'].includes(col.field) || (typeof col.headerName === 'string' && col.headerName.includes('KM Fee'))) {
+                return <td key={col.field} style={style}>{formatCurrency(rowTotals.kmFee)}</td>;
+            }
+            if (['net', 'Net'].includes(col.field) || (typeof col.headerName === 'string' && col.headerName.includes('Net'))) {
+                return <td key={col.field} style={style}>{formatCurrency(rowTotals.net)}</td>;
+            }
+            if (col.field === 'Name') {
+                return (
+                    <td key={col.field} style={style}>
+                        {nameLabel}
+                    </td>
+                );
+            }
+            return <td key={col.field} style={style} />;
+        };
 
         return (
             <div className="mb-3 px-3">
@@ -907,55 +1038,20 @@ const Home = () => {
                             </tr>
                         </thead>
                         <tbody>
-                            <tr>
-                                {currentColumns.map(col => {
-                                    let content: React.ReactNode = '';
-                                    const style: React.CSSProperties = {
-                                        backgroundColor: 'rgba(59, 130, 246, 0.15)',
-                                        color: 'white',
-                                        fontWeight: 'bold',
-                                        width: col.width,
-                                        textAlign: ['amount', 'fee', 'kmFee', 'net', 'Amount', 'Stripe Fee', 'KM Fee', 'Net'].includes(col.field) || (col.headerName && ['Amount', 'Stripe Fee', 'KM Fee', 'Net'].includes(col.headerName)) ? 'right' : 'left'
-                                    };
-
-                                    if (col.field === 'rowIndex' || col.field === '#') {
-                                        content = totals.count;
-                                    } else if (col.headerName === 'Date' || col.field === 'Date') {
-                                        // Totals Date Logic
-                                        const currentYearVal = new Date().getFullYear();
-                                        const minYear = 2022; // From years array logic (current - 2022 + 1, so ends at 2022)
-                                        const maxYear = currentYearVal; // Logic uses new Date().getFullYear()
-
-                                        if (selectedYear === 'all' && selectedMonth === 'all') {
-                                            content = `${minYear} to ${maxYear}`;
-                                        } else if (selectedYear === 'all' && selectedMonth !== 'all') {
-                                            const m = parseInt(selectedMonth) + 1; // 0-indexed to 1-indexed
-                                            const mStr = m.toString().padStart(2, '0');
-                                            content = `${minYear}-${mStr} to ${maxYear}-${mStr}`;
-                                        } else if (selectedYear !== 'all' && selectedMonth === 'all') {
-                                            content = selectedYear;
-                                        } else if (selectedYear !== 'all' && selectedMonth !== 'all') {
-                                            const m = parseInt(selectedMonth) + 1;
-                                            const mStr = m.toString().padStart(2, '0');
-                                            content = `${selectedYear}-${mStr}`;
-                                        }
-                                    } else if (['amount', 'Amount'].includes(col.field) || (typeof col.headerName === 'string' && col.headerName.includes('Amount'))) {
-                                        content = formatCurrency(totals.amount);
-                                    } else if (['fee', 'Stripe Fee'].includes(col.field) || (typeof col.headerName === 'string' && col.headerName.includes('Stripe Fee'))) {
-                                        content = formatCurrency(totals.stripeFee);
-                                    } else if (['kmFee', 'KM Fee'].includes(col.field) || (typeof col.headerName === 'string' && col.headerName.includes('KM Fee'))) {
-                                        content = formatCurrency(totals.kmFee);
-                                    } else if (['net', 'Net'].includes(col.field) || (typeof col.headerName === 'string' && col.headerName.includes('Net'))) {
-                                        content = formatCurrency(totals.net);
-                                    } else if (col.field === 'Name') {
-                                        // Empty for Totals
-                                        content = '';
-                                        style.backgroundColor = 'transparent'; // Optional: make it stand out as empty or keep consistent
+                            {totalsRows.map((row) => (
+                                <tr
+                                    key={row.label || 'totals'}
+                                    className={
+                                        hasHeartGiftsInView && row.label === 'Total'
+                                            ? 'totals-grand-total-row'
+                                            : undefined
                                     }
-
-                                    return <td key={col.field} style={style}>{content}</td>;
-                                })}
-                            </tr>
+                                >
+                                    {currentColumns.map((col) =>
+                                        renderTotalsCell(col, row.totals, row.label, row.dateColumn),
+                                    )}
+                                </tr>
+                            ))}
                         </tbody>
                     </table>
                 </div>

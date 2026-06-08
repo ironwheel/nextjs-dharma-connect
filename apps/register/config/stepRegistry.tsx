@@ -1,8 +1,10 @@
 import React from 'react';
 import { ScriptStep, StepConditionConfig, ScriptContext } from '../components/script/types';
 import { promptLookup, isInPool } from '../components/script/StepComponents';
+import { shouldShowVideoIntroduction } from '../lib/videoDashboard';
 import {
     RenderIntroduction,
+    RenderVideoIntroduction,
     RenderWrittenTranslation,
     RenderSpokenTranslation,
     RenderJoin,
@@ -48,7 +50,15 @@ export const stepRegistry: Record<string, ScriptStep> = {
         id: 'introduction',
         type: 'custom',
         component: RenderIntroduction as any,
-        field: null as any
+        field: null as any,
+        condition: (context: ScriptContext) => !shouldShowVideoIntroduction(context),
+    },
+    'videoIntroduction': {
+        id: 'videoIntroduction',
+        type: 'custom',
+        component: RenderVideoIntroduction as any,
+        field: null as any,
+        condition: (context: ScriptContext) => shouldShowVideoIntroduction(context),
     },
     'writtenTranslation': {
         id: 'writtenTranslation',

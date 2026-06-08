@@ -232,6 +232,11 @@ a {
   transition: background-color 0.2s ease;
 }
 
+/* Heart-gift totals: double rule above grand-total row */
+.frozen-table tbody tr.totals-grand-total-row td {
+  border-top: 3px double rgba(255, 255, 255, 0.45);
+}
+
 .frozen-table tbody tr:hover {
   background-color: #333333;
 }
