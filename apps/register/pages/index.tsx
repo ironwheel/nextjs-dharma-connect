@@ -28,6 +28,7 @@ import {
     getHeartGiftOfferingOid,
     type OfferingConfigLike,
 } from '../lib/heartGiftConstants';
+import { isAllSubeventsCompleteNoVideos, isVideoDashboardEvent } from '../lib/videoDashboard';
 
 /** True if paymentIntentId appears on a subevent entry or nested installments line (stateless installments). */
 function offeringHistoryRecordsPaymentIntent(history: Record<string, any> | undefined, paymentIntentId: string): boolean {
@@ -400,7 +401,10 @@ export default function Home() {
                 }
 
                 if (steps.length > 0) {
-                    setScriptDef({ steps: [stepRegistry['introduction'], ...steps] });
+                    const prefixSteps = isVideoDashboardEvent(eventData)
+                        ? [stepRegistry['videoIntroduction'], stepRegistry['introduction']]
+                        : [stepRegistry['introduction']];
+                    setScriptDef({ steps: [...prefixSteps, ...steps] });
                 } else {
                     console.warn("No scriptSteps found in event config or scripts table.");
                     setScriptDef({ steps: [] });
@@ -444,6 +448,7 @@ export default function Home() {
         | 'loading'
         | 'testModeConfig'
         | 'applicationPeriodClosed'
+        | 'noVideosAvailable'
         | 'join'
         | 'offer'
         | 'stripeCapture'
@@ -557,6 +562,16 @@ export default function Home() {
             if (phase !== 'stripeCapture' && phase !== 'debugTable') {
                 if (phase !== 'applicationPeriodClosed') {
                     setPhase('applicationPeriodClosed');
+                }
+                return;
+            }
+        }
+
+        // All subevents complete but no videos: block new registration unless student already joined.
+        if (isAllSubeventsCompleteNoVideos(event) && !hasProgramJoin) {
+            if (phase !== 'stripeCapture' && phase !== 'debugTable') {
+                if (phase !== 'noVideosAvailable') {
+                    setPhase('noVideosAvailable');
                 }
                 return;
             }
@@ -1068,6 +1083,7 @@ export default function Home() {
     }, 0);
     const installmentsBalanceDueCents = Math.max(0, installmentsDueCents - offeringsReceivedCents);
     const installmentsCurrency = (data.event?.config?.offeringCurrency as string) || 'USD';
+    const videoDashboardEvent = isVideoDashboardEvent(data.event);
 
     const fafInstallTotalsForComplete =
         phase === 'offeringCompleteCold' && isInstallmentsPresentation ? fafAggregatedInstallments : null;
@@ -1236,6 +1252,15 @@ export default function Home() {
                     </div>
                 )}
 
+                {phase === 'noVideosAvailable' && (
+                    <div className="max-w-xl mx-auto p-6 rounded-lg border border-reg-border bg-reg-card-muted">
+                        <HtmlPrompt
+                            html={promptLookup(context, 'noVideosAvailable') || ''}
+                            className="text-reg-text"
+                        />
+                    </div>
+                )}
+
                 {phase === 'join' && !isEligibleForEvent && (
                     <div className="max-w-xl mx-auto p-6 rounded-lg border border-reg-border bg-reg-card-muted">
                         <h2 className="text-xl font-semibold text-reg-accent">
@@ -1267,9 +1292,13 @@ export default function Home() {
                                     const key =
                                         phase === 'offeringCompleteCold'
                                             ? (
-                                                isInstallmentsPresentation && installmentsBalanceDueCentsDisplay > 0
-                                                    ? (offeringCompleteVariant === 'warm' ? 'offeringCompleteWarmPartial' : 'offeringCompleteCold')
-                                                    : (offeringCompleteVariant === 'warm' ? 'offeringCompleteWarm' : 'offeringCompleteCold')
+                                                videoDashboardEvent
+                                                    ? 'offeringCompleteVideoDashboard'
+                                                    : (
+                                                        isInstallmentsPresentation && installmentsBalanceDueCentsDisplay > 0
+                                                            ? (offeringCompleteVariant === 'warm' ? 'offeringCompleteWarmPartial' : 'offeringCompleteCold')
+                                                            : (offeringCompleteVariant === 'warm' ? 'offeringCompleteWarm' : 'offeringCompleteCold')
+                                                    )
                                             )
                                             : phase === 'acceptanceThankYouWarm'
                                                 ? 'applyThankYouWarm'

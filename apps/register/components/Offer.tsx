@@ -1735,13 +1735,17 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
   const firstCanOffer = fafFull.find((p) => p.canOffer);
   const unpaidForHeader = firstCanOffer ? getUnpaidSubEventsForPerson(firstCanOffer) : [];
   const choiceForHeader = firstCanOffer ? seriesChoiceByPerson[firstCanOffer.id] || 'next' : 'next';
+  const headerSubEventNames =
+    isEligibleForSubeventSelection && firstCanOffer
+      ? getSelectedUnpaidSubEventsForPerson(firstCanOffer)
+      : unpaidForHeader.length <= 1 || choiceForHeader === 'next'
+        ? unpaidForHeader.slice(0, 1)
+        : unpaidForHeader;
   const nextAndRemainingHeaderLabel =
-    offeringPresentation === 'nextAndRemaining' && unpaidForHeader.length > 0
-      ? unpaidForHeader.length === 1
-        ? promptLookup(context, unpaidForHeader[0]) || unpaidForHeader[0]
-        : choiceForHeader === 'next'
-          ? promptLookup(context, unpaidForHeader[0]) || unpaidForHeader[0]
-          : unpaidForHeader.map((n) => promptLookup(context, n) || n).join(', ')
+    offeringPresentation === 'nextAndRemaining' && headerSubEventNames.length > 0
+      ? headerSubEventNames.length === 1
+        ? promptLookup(context, headerSubEventNames[0]) || headerSubEventNames[0]
+        : headerSubEventNames.map((n) => promptLookup(context, n) || n).join(', ')
       : null;
 
   if (offeringPresentation === 'nextAndRemaining') {

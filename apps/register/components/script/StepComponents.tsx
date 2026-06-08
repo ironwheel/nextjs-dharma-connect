@@ -230,10 +230,8 @@ const ExclusiveCheckboxMap = ({
     );
 };
 
-// --- Introduction (first step; prompt 'introduction' with HTML; macros: ||title||, ||coord-email-href||, ||coord-email||) ---
-// Use ||coord-email-href|| in href (e.g. <a href="||coord-email-href||">) and ||coord-email|| for link text.
-export const RenderIntroduction: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context }) => {
-    let text = promptLookup(context, 'introduction') || '';
+function renderHtmlPromptWithCoordMacros(context: ScriptContext, promptKey: string): string {
+    let text = promptLookup(context, promptKey) || '';
     const title = promptLookup(context, 'title') || '';
     const coordEmail = context.event?.config?.coordEmailAmericas ?? '';
     const coordEmailHref = coordEmail ? `mailto:${coordEmail.replace(/"/g, '&quot;').replace(/&/g, '&amp;')}` : '';
@@ -241,6 +239,24 @@ export const RenderIntroduction: React.FC<{ context: ScriptContext; engineOnChan
     text = text.replace(/\|\|title\|\|/g, title);
     text = text.replace(/\|\|coord-email-href\|\|/g, coordEmailHref);
     text = text.replace(/\|\|coord-email\|\|/g, coordEmailText);
+    return text;
+}
+
+// --- Introduction (first step; prompt 'introduction' with HTML; macros: ||title||, ||coord-email-href||, ||coord-email||) ---
+// Use ||coord-email-href|| in href (e.g. <a href="||coord-email-href||">) and ||coord-email|| for link text.
+export const RenderIntroduction: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context }) => {
+    const text = renderHtmlPromptWithCoordMacros(context, 'introduction');
+    return (
+        <div
+            className="prose prose-invert max-w-none text-reg-text introduction-html"
+            dangerouslySetInnerHTML={{ __html: text }}
+        />
+    );
+};
+
+// --- Video introduction (video-dashboard registration; prompt 'videoIntroduction' with HTML) ---
+export const RenderVideoIntroduction: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context }) => {
+    const text = renderHtmlPromptWithCoordMacros(context, 'videoIntroduction');
     return (
         <div
             className="prose prose-invert max-w-none text-reg-text introduction-html"
