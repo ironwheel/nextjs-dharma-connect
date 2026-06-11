@@ -555,10 +555,11 @@ export default function Home() {
             return;
         }
 
-        // Application period closed: block new registration unless student already joined this event.
+        // Application period closed: block new registration unless student already joined or has allow override.
         const applicationPeriodClosed = event.config?.applicationPeriodClosed === true;
         const hasProgramJoin = prog?.join === true;
-        if (applicationPeriodClosed && !hasProgramJoin) {
+        const hasAllowOverride = prog?.allow === true;
+        if (applicationPeriodClosed && !hasProgramJoin && !hasAllowOverride) {
             if (phase !== 'stripeCapture' && phase !== 'debugTable') {
                 if (phase !== 'applicationPeriodClosed') {
                     setPhase('applicationPeriodClosed');
