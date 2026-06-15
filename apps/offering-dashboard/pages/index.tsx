@@ -78,13 +78,31 @@ function getSubEventKeyFromEventKey(eventKey: string): string | null {
     return sub || null;
 }
 
+function readSubEventField(rec: any): string {
+    for (const key of ['subEvent', 'subevent', 'SubEvent']) {
+        const value = rec?.[key];
+        if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return '';
+}
+
+function isLegacyHeartGiftRow(rec: any): boolean {
+    if (rec?.anonymousHeartGift === true) return true;
+    return typeof rec?.legacyHeartGiftAid === 'string' && rec.legacyHeartGiftAid.trim().length > 0;
+}
+
 function transactionMatchesSubEvent(t: Transaction, subEventKey: string): boolean {
-    if (t.subEvent === subEventKey) return true;
+    const backfilledSubEvent = readSubEventField(t);
+    if (backfilledSubEvent && backfilledSubEvent === subEventKey) return true;
+
+    // Legacy v1 heart gifts keep cart offerings under key "event"; routing uses backfilled subEvent.
+    if (t.anonymousHeartGift === true && backfilledSubEvent === subEventKey) return true;
+
     const skuSummary = Array.isArray(t.skuSummary) ? t.skuSummary : [];
     if (skuSummary.some((x: { subEvent?: string }) => x?.subEvent === subEventKey && x.subEvent !== 'kmFee')) {
         return true;
     }
-    const cart = Array.isArray(t.cart) ? t.cart : [];
+    const cart = Array.isArray(t.cart) ? t.cart : parseLegacyCart(t.cart);
     for (const person of cart) {
         if (person?.currentOfferings && subEventKey in person.currentOfferings) return true;
     }
@@ -93,6 +111,66 @@ function transactionMatchesSubEvent(t: Transaction, subEventKey: string): boolea
 
 function isHeartGiftTransaction(t: Transaction): boolean {
     return t.anonymousHeartGift === true;
+}
+
+function parseLegacyCart(raw: unknown): any[] {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === 'string') {
+        try {
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch {
+            return [];
+        }
+    }
+    return [];
+}
+
+function normalizeLegacyTransaction(rec: any): Transaction {
+    const cart = parseLegacyCart(rec?.cart);
+    const subEvent = readSubEventField(rec);
+    return {
+        ...rec,
+        cart,
+        anonymousHeartGift: rec?.anonymousHeartGift === true,
+        subEvent: subEvent || undefined,
+        eventCode: typeof rec?.eventCode === 'string' ? rec.eventCode : undefined,
+        legacyHeartGiftAid: typeof rec?.legacyHeartGiftAid === 'string' ? rec.legacyHeartGiftAid : undefined,
+    } as Transaction;
+}
+
+function mergeLegacyTransactionRows(rows: any[]): Transaction[] {
+    const byPi = new Map<string, Transaction>();
+    for (const rec of rows) {
+        const normalized = normalizeLegacyTransaction(rec);
+        const key = normalized.transaction;
+        if (!key || byPi.has(key)) continue;
+        byPi.set(key, normalized);
+    }
+    return Array.from(byPi.values());
+}
+
+function mergeTransactionRows(...groups: Transaction[][]): Transaction[] {
+    const byPi = new Map<string, Transaction>();
+    for (const group of groups) {
+        for (const txn of group) {
+            const key = txn.transaction;
+            if (!key || byPi.has(key)) continue;
+            byPi.set(key, txn);
+        }
+    }
+    return Array.from(byPi.values());
+}
+
+function transactionBelongsToEventAid(t: Transaction, eventAid: string): boolean {
+    if (!eventAid || eventAid === 'all') return true;
+    const parentCode = typeof t.eventCode === 'string' ? t.eventCode : '';
+    return t.aid === eventAid || parentCode === eventAid;
+}
+
+function effectiveTransactionEventAid(t: Transaction): string {
+    return (typeof t.eventCode === 'string' && t.eventCode) || t.aid || '';
 }
 
 function calculateTotalsForTransactions(txs: Transaction[]): TotalsSummary {
@@ -588,27 +666,75 @@ const Home = () => {
             // For "all events", fetch both tables and merge.
             if (selectedEventAid && selectedEventAid !== 'all') {
                 if (useV2) {
-                    console.log(`Fetching v2 offering-transactions for event ${selectedEventAid} (scan + filter)...`);
-                    const v2 = await getAllTableItems('offering-transactions', pid, hash, onProgress);
+                    console.log(
+                        `Fetching v2 offering-transactions + legacy heart gifts for event ${selectedEventAid}...`,
+                    );
+                    const [v2, legacyByEventCode] = await Promise.all([
+                        getAllTableItems('offering-transactions', pid, hash, onProgress),
+                        queryGetTableIndexItems(
+                            'transactions',
+                            'eventCode-index',
+                            'eventCode',
+                            selectedEventAid,
+                            pid,
+                            hash,
+                        ),
+                    ]);
+                    if (
+                        (v2 && !Array.isArray(v2) && (v2 as any).redirected) ||
+                        (legacyByEventCode &&
+                            !Array.isArray(legacyByEventCode) &&
+                            (legacyByEventCode as any).redirected)
+                    ) {
+                        router.push('/login');
+                        return;
+                    }
                     if (!Array.isArray(v2)) {
                         txs = v2 as any;
                     } else {
-                        const filtered = v2.filter((r: any) => r?.eventCode === selectedEventAid);
-                        setAllTransactions(filtered.map(normalizeV2OfferingTransaction));
+                        const filteredV2 = v2.filter((r: any) => r?.eventCode === selectedEventAid);
+                        const legacyHeartGifts = (Array.isArray(legacyByEventCode) ? legacyByEventCode : []).filter(
+                            (r: any) => isLegacyHeartGiftRow(r) && r?.status !== 'MIGRATED-TO-V2',
+                        );
+                        const merged = mergeTransactionRows(
+                            filteredV2.map(normalizeV2OfferingTransaction),
+                            mergeLegacyTransactionRows(legacyHeartGifts),
+                        );
+                        setAllTransactions(merged);
                         setLoadedScope(selectedEventAid);
                         setRawLoaded(true);
                         return;
                     }
                 } else {
-                    console.log(`OPTIMIZATION: Fetching legacy transactions for event ${selectedEventAid} via GSI...`);
-                    const legacy = await queryGetTableIndexItems('transactions', 'aid-index', 'aid', selectedEventAid, pid, hash);
-                    if (Array.isArray(legacy)) {
-                        setAllTransactions(legacy as Transaction[]);
-                        setLoadedScope(selectedEventAid);
-                        setRawLoaded(true);
+                    console.log(
+                        `Fetching legacy transactions for event ${selectedEventAid} via aid-index + eventCode-index...`,
+                    );
+                    const [byAid, byEventCode] = await Promise.all([
+                        queryGetTableIndexItems('transactions', 'aid-index', 'aid', selectedEventAid, pid, hash),
+                        queryGetTableIndexItems(
+                            'transactions',
+                            'eventCode-index',
+                            'eventCode',
+                            selectedEventAid,
+                            pid,
+                            hash,
+                        ),
+                    ]);
+                    if (
+                        (byAid && !Array.isArray(byAid) && (byAid as any).redirected) ||
+                        (byEventCode && !Array.isArray(byEventCode) && (byEventCode as any).redirected)
+                    ) {
+                        router.push('/login');
                         return;
                     }
-                    txs = legacy as any;
+                    const merged = mergeLegacyTransactionRows([
+                        ...(Array.isArray(byAid) ? byAid : []),
+                        ...(Array.isArray(byEventCode) ? byEventCode : []),
+                    ]);
+                    setAllTransactions(merged);
+                    setLoadedScope(selectedEventAid);
+                    setRawLoaded(true);
+                    return;
                 }
             } else {
                 console.log("Fetching ALL transactions (merged legacy+v2)...");
@@ -623,7 +749,7 @@ const Home = () => {
 
                 const legacy = await getAllTableItems('transactions', pid, hash, (loaded: number) => legacyOnProgress(loaded) as any);
                 if (Array.isArray(legacy)) {
-                    legacyItems = legacy;
+                    legacyItems = legacy.map(normalizeLegacyTransaction);
                 } else {
                     txs = legacy as any;
                 }
@@ -640,7 +766,7 @@ const Home = () => {
                 const v2 = await getAllTableItems('offering-transactions', pid, hash, (loaded: number) => v2OnProgress(loaded) as any);
                 if (Array.isArray(v2)) {
                     const normalizedV2 = v2.map(normalizeV2OfferingTransaction);
-                    setAllTransactions([...(legacyItems as Transaction[]), ...normalizedV2]);
+                    setAllTransactions([...legacyItems, ...normalizedV2]);
                     setLoadedScope('all');
                     setRawLoaded(true);
                     return;
@@ -720,7 +846,9 @@ const Home = () => {
             // Event Filter
             if (viewMode === 'events') {
                 if (selectedEventAid && selectedEventAid !== 'all') {
-                    filtered = filtered.filter((t: Transaction) => t.aid === selectedEventAid);
+                    filtered = filtered.filter((t: Transaction) =>
+                        transactionBelongsToEventAid(t, selectedEventAid),
+                    );
                 }
                 const subEventKey = getSubEventKeyFromEventKey(selectedEventKey);
                 if (subEventKey) {
@@ -730,7 +858,7 @@ const Home = () => {
                 // Category Filter
                 if (selectedCategory !== 'All Categories') {
                     filtered = filtered.filter((t: Transaction) => {
-                        const cat = aidToCategoryMap[t.aid] || 'Uncategorized';
+                        const cat = aidToCategoryMap[effectiveTransactionEventAid(t)] || 'Uncategorized';
                         return cat === selectedCategory;
                     });
                 }

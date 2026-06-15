@@ -41,6 +41,7 @@ export const tables: TableConfig[] = [
   { resource: 'sd-prompts-cache', envVar: 'DYNAMODB_TABLE_PROMPTS_CACHE', pk: 'eventCode', sk: 'promptKey', ops: ['get', 'list', 'query'] },
   { resource: 'refunds', envVar: 'DYNAMODB_TABLE_REFUNDS', pk: 'stripePaymentIntent', sk: '', ops: ['get', 'list', 'put'] },
   { resource: 'versions', envVar: 'DYNAMODB_TABLE_VERSIONS', pk: 'gitSHA', sk: '', ops: ['get', 'list', 'put'] },
+  /** transactions: GSIs aid-index (pk=aid), eventCode-index (pk=eventCode) for legacy heart-gift rollup. */
   { resource: 'transactions', envVar: 'DYNAMODB_TABLE_TRANSACTIONS', pk: 'transaction', sk: '', ops: ['get', 'update', 'list', 'query', 'count', 'query-index'] },
   { resource: 'transactions-cache', envVar: 'DYNAMODB_TABLE_TRANSACTIONS_CACHE', pk: 'id', sk: '', ops: ['get', 'list', 'put', 'delete'] },
   { resource: 'auditors', envVar: 'DYNAMODB_TABLE_AUDITORS', pk: 'id', sk: '', ops: ['get', 'put', 'list', 'count', 'update'] },
