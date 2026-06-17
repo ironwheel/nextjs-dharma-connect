@@ -79,6 +79,10 @@ function installmentAmountForDisplay(internalInHistoryUnits: number, historyUses
     return historyUsesCents ? Math.round(internalInHistoryUnits) / 100 : internalInHistoryUnits;
 }
 
+function isInstallmentsLikeOfferingPresentation(presentation: string | undefined): boolean {
+    return presentation === 'installments' || presentation === 'installmentsTotalOrMore';
+}
+
 
 interface View {
     name: string;
@@ -2247,7 +2251,7 @@ const Home = () => {
         if (!person?.offeringHistory?.[subEventKey]) return [];
         const hist = person.offeringHistory[subEventKey];
         const dates: string[] = [];
-        if (eventConfig?.offeringPresentation === 'installments') {
+        if (isInstallmentsLikeOfferingPresentation(eventConfig?.offeringPresentation)) {
             const installments = hist.installments || {};
             for (const entry of Object.values<any>(installments)) {
                 if (entry?.offeringTime) {
@@ -2331,7 +2335,7 @@ const Home = () => {
                 const subEventKey = currentEvent.selectedSubEvent as string | undefined;
 
                 if (eventRecordForStudent.offeringHistory && subEventKey && eventRecordForStudent.offeringHistory[subEventKey]) {
-                    if (currentEvent.config?.offeringPresentation !== 'installments') {
+                    if (!isInstallmentsLikeOfferingPresentation(currentEvent.config?.offeringPresentation)) {
                         if (!cond.boolValue) return false;
                     } else {
                         const historyUsesCents = installmentOfferingHistoryUsesCents(currentEvent.config);
@@ -2649,7 +2653,7 @@ const Home = () => {
                     let installmentTotal = 0;
                     let installmentReceived = 0;
                     if (person && person.offeringHistory && selectedSubEvent && person.offeringHistory[selectedSubEvent]) {
-                        if (currentEvent.config?.offeringPresentation !== 'installments') {
+                        if (!isInstallmentsLikeOfferingPresentation(currentEvent.config?.offeringPresentation)) {
                             offering = true;
                             offeringDate = person.offeringHistory[selectedSubEvent]?.offeringTime?.substring(0, 10) ?? '';
                         } else {
@@ -2697,8 +2701,8 @@ const Home = () => {
                     }
                     rowValues[field] = offeringDate;
                 } else if (field === 'installmentsTotal' || field === 'installmentsReceived' || field === 'installmentsDue' || field === 'installmentsRefunded') {
-                    // Return "N/A" if offering presentation is not installments
-                    if (currentEvent.config?.offeringPresentation !== 'installments') {
+                    // Return "N/A" if offering presentation is not installments-like
+                    if (!isInstallmentsLikeOfferingPresentation(currentEvent.config?.offeringPresentation)) {
                         rowValues[field] = 'N/A';
                     } else {
                         const aid = typeof currentEvent.aid === 'string' ? currentEvent.aid : undefined;

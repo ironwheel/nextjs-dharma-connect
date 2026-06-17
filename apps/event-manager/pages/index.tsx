@@ -4425,7 +4425,7 @@ const Home = () => {
                             {viewFormData.columnDefs && viewFormData.columnDefs.length > 0 ? (
                                 viewFormData.columnDefs.map((colDef, index) => {
                                     const colName = colDef.name || ''
-                                    const isPredefined = ['rowIndex', 'name', 'email', 'accepted', 'withdrawn', 'installmentsTotal', 'installmentsReceived', 'installmentsDue', 'installmentsLF', 'spokenLanguage'].includes(colName)
+                                    const isPredefined = ['rowIndex', 'name', 'email', 'accepted', 'withdrawn', 'joined', 'deposit', 'offering', 'installmentsTotal', 'installmentsReceived', 'installmentsDue', 'installmentsRefunded', 'installmentsLF', 'spokenLanguage', 'writtenLanguage'].includes(colName)
 
                                     return (
                                         <div key={index} className="subevent-item mb-3">
@@ -4446,11 +4446,16 @@ const Home = () => {
                                                             <option value="email" />
                                                             <option value="accepted" />
                                                             <option value="withdrawn" />
+                                                            <option value="joined" />
+                                                            <option value="deposit" />
+                                                            <option value="offering" />
                                                             <option value="installmentsTotal" />
                                                             <option value="installmentsReceived" />
                                                             <option value="installmentsDue" />
+                                                            <option value="installmentsRefunded" />
                                                             <option value="installmentsLF" />
                                                             <option value="spokenLanguage" />
+                                                            <option value="writtenLanguage" />
                                                             <option value="poolMember-xyz" />
                                                             <option value="currentAIDBool-xyz" />
                                                             <option value="specifiedAIDBool-xyz" />
