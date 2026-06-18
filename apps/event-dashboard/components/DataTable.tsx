@@ -315,7 +315,7 @@ export const DataTable: React.FC<DataTableProps> = ({
                             <tr>
                                 {visibleColumns.map((col, index) => (
                                     <th
-                                        key={col.field}
+                                        key={`${col.field}-${index}`}
                                         style={{
                                             width: col.width,
                                             cursor: col.sortable ? 'pointer' : 'default',
@@ -341,7 +341,7 @@ export const DataTable: React.FC<DataTableProps> = ({
                                 <tr key={rowIndex}>
                                     {visibleColumns.map((col, colIndex) => (
                                         <td
-                                            key={col.field}
+                                            key={`${col.field}-${colIndex}`}
                                             style={{
                                                 width: col.width,
                                                 cursor: col.editable ? 'pointer' : 'default'
