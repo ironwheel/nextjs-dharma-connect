@@ -83,6 +83,41 @@ function isInstallmentsLikeOfferingPresentation(presentation: string | undefined
     return presentation === 'installments' || presentation === 'installmentsTotalOrMore';
 }
 
+function cloneViewDefinition(view: View): View {
+    return JSON.parse(JSON.stringify(view)) as View;
+}
+
+function createPredefinedColumnDefinitions(): Record<string, Column> {
+    return {
+        'rowIndex': { field: 'rowIndex', headerName: '#', pinned: 'left', width: 75 },
+        'name': { field: 'name', pinned: 'left', sortable: true },
+        'first': { field: 'first', pinned: 'left', sortable: true },
+        'last': { field: 'last', pinned: 'left', sortable: true },
+        'spokenLanguage': { field: 'spokenLanguage', sortable: true },
+        'writtenLanguage': { field: 'writtenLanguage', sortable: true },
+        'accepted': { field: 'accepted', headerName: 'Accept', cellRenderer: 'checkboxRenderer', sortable: true, width: 85, writeEnabled: true },
+        'allow': { field: 'allow', headerName: 'Allow', cellRenderer: 'checkboxRenderer', sortable: true, width: 85 },
+        'joined': { field: 'joined', headerName: 'Joined', cellRenderer: 'checkboxRenderer', sortable: true, width: 85 },
+        'withdrawn': { field: 'withdrawn', headerName: 'Withdrawn', cellRenderer: 'checkboxRenderer', sortable: true, width: 85, writeEnabled: true },
+        'email': { field: 'email', headerName: 'Email', sortable: true, width: 200 },
+        'notes': { field: 'notes', editable: true },
+        'id': { field: 'id', hide: true },
+        'history': { field: 'history', hide: true },
+        'emailRegSent': { field: 'emailRegSent', headerName: 'Reg email', width: 120, sortable: true },
+        'emailAcceptSent': { field: 'emailAcceptSent', headerName: 'Accept email', width: 120, sortable: true },
+        'emailZoomSent': { field: 'emailZoomSent', headerName: 'Zoom email', width: 120, sortable: true },
+        'owyaa': { field: 'owyaa', writeEnabled: true },
+        'attended': { field: 'attended', cellRenderer: 'checkboxRenderer', sortable: true },
+        'deposit': { field: 'deposit', cellRenderer: 'checkboxRenderer', sortable: true, width: 100 },
+        'offering': { field: 'offering', sortable: true, width: 120 },
+        'installmentsTotal': { field: 'installmentsTotal', headerName: 'Total', sortable: true, width: 125 },
+        'installmentsReceived': { field: 'installmentsReceived', headerName: 'Received', sortable: true, width: 125 },
+        'installmentsDue': { field: 'installmentsDue', headerName: 'Balance', sortable: true, width: 125 },
+        'installmentsRefunded': { field: 'installmentsRefunded', headerName: 'Refunded', sortable: true, width: 125 },
+        'installmentsLF': { field: 'installmentsLF', headerName: 'LF', cellRenderer: 'checkboxRenderer', sortable: true, width: 100, writeEnabled: true }
+    };
+}
+
 
 interface View {
     name: string;
@@ -841,6 +876,13 @@ const Home = () => {
     const accumulatedEligibleStudentsRef = useRef<Student[]>([]);
     const currentLoadingAbortControllerRef = useRef<AbortController | null>(null);
     const fetchingStudentsPromiseRef = useRef<Promise<Student[]> | null>(null);
+    const viewRef = useRef<string | null>(null);
+    const tableDataContextRef = useRef<{ viewName: string; eventAid: string }>({ viewName: 'Joined', eventAid: '' });
+    const viewCacheRef = useRef(new Map<string, View | null>());
+
+    useEffect(() => {
+        viewRef.current = view;
+    }, [view]);
     let demoMode = false;
 
     // WebSocket connection
@@ -1231,23 +1273,30 @@ const Home = () => {
         }
     };
 
-    // Cache for view definitions to avoid repeated backend calls
-    const viewCache = new Map<string, View | null>();
-
     // Function to clear the view cache when needed
     const clearViewCache = () => {
-        viewCache.clear();
+        viewCacheRef.current.clear();
         console.log('View cache cleared');
     };
 
     // Function to clear cache for a specific view (useful for debugging or manual refresh)
     const clearViewCacheForView = (viewName: string) => {
-        viewCache.delete(viewName);
+        viewCacheRef.current.delete(viewName);
         console.log(`View cache cleared for: ${viewName}`);
+    };
+
+    const setTableDataContext = (viewName: string, eventAid: string) => {
+        tableDataContextRef.current = { viewName, eventAid };
+    };
+
+    const isCurrentTableDataContext = (viewName: string, eventAid: string) => {
+        const ctx = tableDataContextRef.current;
+        return ctx.viewName === viewName && ctx.eventAid === eventAid;
     };
 
     // Function to get cache statistics (useful for debugging)
     const getViewCacheStats = () => {
+        const viewCache = viewCacheRef.current;
         const stats = {
             size: viewCache.size,
             keys: Array.from(viewCache.keys()),
@@ -1258,10 +1307,12 @@ const Home = () => {
     };
 
     const fetchView = async (viewName: string) => {
+        const viewCache = viewCacheRef.current;
         // Check cache first
         if (viewCache.has(viewName)) {
             console.log(`View cache hit for: ${viewName} (cache size: ${viewCache.size})`);
-            return viewCache.get(viewName);
+            const cached = viewCache.get(viewName);
+            return cached ? cloneViewDefinition(cached) : null;
         }
 
         console.log(`View cache miss for: ${viewName} (cache size: ${viewCache.size})`);
@@ -1276,10 +1327,11 @@ const Home = () => {
                 return null;
             }
 
-            // Cache the successful result
-            viewCache.set(viewName, view as View);
+            // Cache an isolated copy so callers cannot mutate shared view definitions.
+            const clonedView = cloneViewDefinition(view as View);
+            viewCache.set(viewName, clonedView);
             console.log(`View cached for: ${viewName} (cache size: ${viewCache.size})`);
-            return view as View;
+            return cloneViewDefinition(clonedView);
         } catch (error) {
             console.error('Error fetching view:', error);
             // Cache the null result to avoid repeated failed requests
@@ -1813,6 +1865,9 @@ const Home = () => {
 
             localStorage.setItem('event', JSON.stringify(updatedEvent));
             setEvShadow(updatedEvent);
+            setTableDataContext(view || 'Joined', updatedEvent.aid);
+            setColumnLabels([]);
+            setRowData([]);
 
             // Set loaded=true BEFORE calling loadStudentsForEvent for lazy loading
             setLoaded(true);
@@ -1826,6 +1881,7 @@ const Home = () => {
             // For lists, automatically set view to "Eligible"
             if (updatedEvent.list === true) {
                 setView('Eligible');
+                setTableDataContext('Eligible', updatedEvent.aid);
             }
 
             // Load students for the new event/list using the caching system (now in background)
@@ -1834,8 +1890,10 @@ const Home = () => {
                 allEvents,
                 allPools,
                 (eligibleStudents) => {
-                    // For lists, use "Eligible" view; for events, use current view or undefined
-                    const viewToUse = updatedEvent.list === true ? 'Eligible' : undefined;
+                    // For lists, use "Eligible" view; for events, use current view selection
+                    const viewToUse = updatedEvent.list === true
+                        ? 'Eligible'
+                        : (viewRef.current || view || 'Joined');
                     return updateTableDataIncrementally(eligibleStudents, viewToUse, updatedEvent, allPools);
                 },
                 currentLoadingAbortControllerRef.current
@@ -2150,6 +2208,9 @@ const Home = () => {
                 return;
             }
             setView(viewName);
+            setTableDataContext(viewName, evShadow?.aid || '');
+            setColumnLabels([]);
+            setRowData([]);
 
             // Update user's eventDashboardLastUsedConfig with the new view selection
             try {
@@ -2418,6 +2479,18 @@ const Home = () => {
         };
         const columns: Column[] = [];
         const columnMetaData: ColumnMetaData = {};
+        const seenFields = new Set<string>();
+        const addColumn = (column: Column) => {
+            if (!column?.field || column.field.trim() === '') {
+                return;
+            }
+            if (seenFields.has(column.field)) {
+                console.warn('Skipping duplicate column field:', column.field);
+                return;
+            }
+            seenFields.add(column.field);
+            columns.push(column);
+        };
         for (const colDef of columnDefs) {
             const defName = colDef.name;
             let obj: Column;
@@ -2461,7 +2534,7 @@ const Home = () => {
             } else if (defName.includes('practiceBool')) {
                 obj = { ...specials['bool'], field: defName, headerName: colDef.headerName };
                 columnMetaData[defName] = { boolName: colDef.boolName };
-            } else if (defName.includes('offeringCount')) {
+            } else if (defName !== 'offering' && defName !== 'deposit' && defName.includes('offeringCount')) {
                 obj = { ...specials['number'], field: defName, headerName: colDef.headerName };
                 columnMetaData[defName] = { aid: colDef.aid };
             } else {
@@ -2470,25 +2543,27 @@ const Home = () => {
                     console.warn('UNKNOWN column definition:', defName);
                     obj = { field: defName, headerName: `unknown: ${defName}` };
                 } else {
-                    obj = predefined[defName];
+                    obj = { ...predefined[defName] };
                 }
             }
             // Inherit writeEnabled from colDef if present (for all custom columns)
             if (typeof colDef.writeEnabled !== 'undefined') {
                 obj.writeEnabled = colDef.writeEnabled;
             }
+            if (typeof colDef.headerName === 'string' && colDef.headerName.trim() !== '') {
+                obj.headerName = colDef.headerName;
+            }
             // Validate column object before adding
             if (obj && obj.field && obj.field.trim() !== '') {
-                columns.push(obj);
+                addColumn(obj);
             } else {
                 console.warn('Skipping invalid column definition:', colDef, 'obj:', obj);
             }
         }
 
         // Always add hidden id and history columns if not already present
-        const existingFields = new Set(columns.map(col => col.field));
-        if (predefined['id'] && !existingFields.has('id')) columns.push(predefined['id']);
-        if (predefined['history'] && !existingFields.has('history')) columns.push(predefined['history']);
+        if (predefined['id']) addColumn({ ...predefined['id'] });
+        if (predefined['history']) addColumn({ ...predefined['history'] });
 
         return { columns, columnMetaData };
     }
@@ -2787,6 +2862,7 @@ const Home = () => {
         }
 
         const currentView = viewName || view || 'Joined';
+        const resolvedEventAid = eventToUse.aid || '';
         console.log('Using currentView:', currentView);
 
         try {
@@ -3220,6 +3296,13 @@ const Home = () => {
                 poolsToUse,
                 allEligibleStudents
             );
+            if (!isCurrentTableDataContext(currentView, resolvedEventAid)) {
+                console.log('Ignoring stale table data update', {
+                    expected: tableDataContextRef.current,
+                    resolved: { viewName: currentView, eventAid: resolvedEventAid },
+                });
+                return;
+            }
             console.log('Table data assembled:', { columnsCount: cl?.length, rowsCount: rd?.length });
             setColumnLabels(cl);
             setRowData(rd);
@@ -3274,34 +3357,8 @@ const Home = () => {
             return [[], []];
         }
         // Define the predefined columns (mimic g_predefinedColumnDefinitions)
-        const predefinedColumnDefinitions: Record<string, Column> = {
-            'rowIndex': { field: 'rowIndex', headerName: '#', pinned: 'left', width: 75 },
-            'name': { field: 'name', pinned: 'left', sortable: true },
-            'first': { field: 'first', pinned: 'left', sortable: true },
-            'last': { field: 'last', pinned: 'left', sortable: true },
-            'spokenLanguage': { field: 'spokenLanguage', sortable: true },
-            'writtenLanguage': { field: 'writtenLanguage', sortable: true },
-            'accepted': { field: 'accepted', headerName: 'Accept', cellRenderer: 'checkboxRenderer', sortable: true, width: 85, writeEnabled: true },
-            'allow': { field: 'allow', headerName: 'Allow', cellRenderer: 'checkboxRenderer', sortable: true, width: 85 },
-            'joined': { field: 'joined', headerName: 'Joined', cellRenderer: 'checkboxRenderer', sortable: true, width: 85 },
-            'withdrawn': { field: 'withdrawn', headerName: 'Withdrawn', cellRenderer: 'checkboxRenderer', sortable: true, width: 85, writeEnabled: true },
-            'email': { field: 'email', headerName: 'Email', sortable: true, width: 200 },
-            'notes': { field: 'notes', editable: true },
-            'id': { field: 'id', hide: true },
-            'history': { field: 'history', hide: true },
-            'emailRegSent': { field: 'emailRegSent', headerName: 'Reg email', width: 120, sortable: true },
-            'emailAcceptSent': { field: 'emailAcceptSent', headerName: 'Accept email', width: 120, sortable: true },
-            'emailZoomSent': { field: 'emailZoomSent', headerName: 'Zoom email', width: 120, sortable: true },
-            'owyaa': { field: 'owyaa', writeEnabled: true },
-            'attended': { field: 'attended', cellRenderer: 'checkboxRenderer', sortable: true },
-            'deposit': { field: 'deposit', cellRenderer: 'checkboxRenderer', sortable: true, width: 100 },
-            'offering': { field: 'offering', sortable: true, width: 120 },
-            'installmentsTotal': { field: 'installmentsTotal', headerName: 'Total', sortable: true, width: 125 },
-            'installmentsReceived': { field: 'installmentsReceived', headerName: 'Received', sortable: true, width: 125 },
-            'installmentsDue': { field: 'installmentsDue', headerName: 'Balance', sortable: true, width: 125 },
-            'installmentsRefunded': { field: 'installmentsRefunded', headerName: 'Refunded', sortable: true, width: 125 },
-            'installmentsLF': { field: 'installmentsLF', headerName: 'LF', cellRenderer: 'checkboxRenderer', sortable: true, width: 100, writeEnabled: true }
-        };
+        const predefinedColumnDefinitions = createPredefinedColumnDefinitions();
+
         // Use the helper:
         const { columns: columnLabels, columnMetaData: newColumnMetaData } = buildColumnLabelsAndMetaData(viewConfig.columnDefs, predefinedColumnDefinitions);
         columnMetaData = newColumnMetaData;
@@ -3384,34 +3441,7 @@ const Home = () => {
         }
 
         // Define the predefined columns (mimic g_predefinedColumnDefinitions)
-        const predefinedColumnDefinitions: Record<string, Column> = {
-            'rowIndex': { field: 'rowIndex', headerName: '#', pinned: 'left', width: 75 },
-            'name': { field: 'name', pinned: 'left', sortable: true },
-            'first': { field: 'first', pinned: 'left', sortable: true },
-            'last': { field: 'last', pinned: 'left', sortable: true },
-            'spokenLanguage': { field: 'spokenLanguage', sortable: true },
-            'writtenLanguage': { field: 'writtenLanguage', sortable: true },
-            'accepted': { field: 'accepted', headerName: 'Accept', cellRenderer: 'checkboxRenderer', sortable: true, width: 85, writeEnabled: true },
-            'allow': { field: 'allow', headerName: 'Allow', cellRenderer: 'checkboxRenderer', sortable: true, width: 85 },
-            'joined': { field: 'joined', headerName: 'Joined', cellRenderer: 'checkboxRenderer', sortable: true, width: 85 },
-            'withdrawn': { field: 'withdrawn', headerName: 'Withdrawn', cellRenderer: 'checkboxRenderer', sortable: true, width: 85, writeEnabled: true },
-            'email': { field: 'email', headerName: 'Email', sortable: true, width: 200 },
-            'notes': { field: 'notes', editable: true },
-            'id': { field: 'id', hide: true },
-            'history': { field: 'history', hide: true },
-            'emailRegSent': { field: 'emailRegSent', headerName: 'Reg email', width: 120, sortable: true },
-            'emailAcceptSent': { field: 'emailAcceptSent', headerName: 'Accept email', width: 120, sortable: true },
-            'emailZoomSent': { field: 'emailZoomSent', headerName: 'Zoom email', width: 120, sortable: true },
-            'owyaa': { field: 'owyaa', writeEnabled: true },
-            'attended': { field: 'attended', cellRenderer: 'checkboxRenderer', sortable: true },
-            'deposit': { field: 'deposit', cellRenderer: 'checkboxRenderer', sortable: true, width: 100 },
-            'offering': { field: 'offering', sortable: true, width: 120 },
-            'installmentsTotal': { field: 'installmentsTotal', headerName: 'Total', sortable: true, width: 125 },
-            'installmentsReceived': { field: 'installmentsReceived', headerName: 'Received', sortable: true, width: 125 },
-            'installmentsDue': { field: 'installmentsDue', headerName: 'Balance', sortable: true, width: 125 },
-            'installmentsRefunded': { field: 'installmentsRefunded', headerName: 'Refunded', sortable: true, width: 125 },
-            'installmentsLF': { field: 'installmentsLF', headerName: 'LF', cellRenderer: 'checkboxRenderer', sortable: true, width: 100, writeEnabled: true }
-        };
+        const predefinedColumnDefinitions = createPredefinedColumnDefinitions();
 
         // Use the helper:
         const { columns: columnLabels, columnMetaData: newColumnMetaData } = buildColumnLabelsAndMetaData(viewConfig.columnDefs, predefinedColumnDefinitions);
@@ -3618,6 +3648,10 @@ const Home = () => {
                     console.log('Using default view - Joined');
                 }
                 setView(initialView);
+                viewRef.current = initialView;
+                if (currentEventToUse) {
+                    setTableDataContext(initialView, currentEventToUse.aid);
+                }
 
                 // Ensure we have the current event set before loading students
                 if (currentEventToUse) {
@@ -3658,7 +3692,10 @@ const Home = () => {
                         currentEventToUse.aid,
                         filteredEvents,
                         filteredPools,
-                        (eligibleStudents) => updateTableDataIncrementally(eligibleStudents, initialView, currentEventToUse, filteredPools),
+                        (eligibleStudents) => {
+                            const viewToUse = viewRef.current || initialView || 'Joined';
+                            return updateTableDataIncrementally(eligibleStudents, viewToUse, currentEventToUse, filteredPools);
+                        },
                         currentLoadingAbortControllerRef.current
                     ).then(eligibleStudents => {
                         setCurrentEligibleStudents(eligibleStudents);
@@ -3731,7 +3768,12 @@ const Home = () => {
                 evShadow.aid,
                 allEvents,
                 allPools,
-                (eligibleStudents) => updateTableDataIncrementally(eligibleStudents, undefined, evShadow, allPools),
+                (eligibleStudents) => updateTableDataIncrementally(
+                    eligibleStudents,
+                    viewRef.current || view || 'Joined',
+                    evShadow,
+                    allPools,
+                ),
                 currentLoadingAbortControllerRef.current
             ).then(eligibleStudents => {
                 setCurrentEligibleStudents(eligibleStudents);
