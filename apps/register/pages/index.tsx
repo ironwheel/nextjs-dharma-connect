@@ -662,7 +662,7 @@ export default function Home() {
                         setOfferingCompleteVariant('cold');
                         setPhase('offeringCompleteCold');
                     }
-                } else if (phase !== 'acceptanceThankYouWarm' && phase !== 'debugTable') {
+                } else {
                     setPhase('acceptanceThankYouCold');
                 }
             } else if (eventRequiresOffering(event)) {
