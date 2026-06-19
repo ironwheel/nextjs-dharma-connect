@@ -29,6 +29,7 @@ import {
     type OfferingConfigLike,
 } from '../lib/heartGiftConstants';
 import { isAllSubeventsCompleteNoVideos, isVideoDashboardEvent } from '../lib/videoDashboard';
+import { eventRequiresOffering, offeringSubEventNames } from '../lib/offeringModeConstants';
 
 /** True if paymentIntentId appears on a subevent entry or nested installments line (stateless installments). */
 function offeringHistoryRecordsPaymentIntent(history: Record<string, any> | undefined, paymentIntentId: string): boolean {
@@ -96,6 +97,7 @@ function getStepStorageRows(stepId: string, eventCode: string): Array<{ scriptSt
             { scriptStep: 'save', displayPath: `${ev}.submitTime`, storagePath: `programs.${eventCode}.submitTime` },
             { scriptStep: 'save', displayPath: `${ev}.saved`, storagePath: `programs.${eventCode}.saved` },
         ],
+        register: [{ scriptStep: 'register', displayPath: `${ev}.join`, storagePath: `programs.${eventCode}.join` }],
     };
     return rows[stepId] ?? [{ scriptStep: stepId, displayPath: '—', storagePath: null }];
 }
@@ -545,6 +547,7 @@ export default function Home() {
         const hasJoinYes = prog?.join === true || prog?.joinMY === true || prog?.joinVY === true;
         const hasVisibility = typeof prog?.visible === 'boolean';
         const isJoined = hasJoinYes && hasVisibility;
+        const isRegistrationComplete = prog?.saved === true || isJoined;
         const accepted = prog?.accepted;
         const offerOnly = event.config?.offerOnly;
         const needAcceptance = event.config?.needAcceptance === true;
@@ -557,7 +560,7 @@ export default function Home() {
 
         // Application period closed: block new registration unless student already joined or has allow override.
         const applicationPeriodClosed = event.config?.applicationPeriodClosed === true;
-        const hasProgramJoin = prog?.join === true;
+        const hasProgramJoin = prog?.join === true || prog?.joinMY === true || prog?.joinVY === true;
         const hasAllowOverride = prog?.allow === true;
         if (applicationPeriodClosed && !hasProgramJoin && !hasAllowOverride) {
             if (phase !== 'stripeCapture' && phase !== 'debugTable') {
@@ -583,9 +586,8 @@ export default function Home() {
 
         // For nextAndRemaining: only show terminal "offeringCompleteCold" when all subevents are paid.
         const offeringPresentation = event.config?.offeringPresentation as string | undefined;
-        const subEventsObj = event.subEvents || {};
         const offeringHistory = prog?.offeringHistory || {};
-        const unpaidSubEvents = Object.keys(subEventsObj).filter((name) => !offeringHistory[name]);
+        const unpaidSubEvents = offeringSubEventNames(event).filter((name) => !offeringHistory[name]);
         const hasUnpaidSubEvents = unpaidSubEvents.length > 0;
 
         const whichRetreatsConfig = event.config?.whichRetreatsConfig || {};
@@ -643,25 +645,46 @@ export default function Home() {
             return;
         }
 
-        if (offerOnly) {
-            setPhase('offer');
+        // Preserve post-script screens set by handleLastStepNext (before saved/isJoined is visible on next fetch).
+        if (
+            (phase === 'offeringCompleteCold' && offeringCompleteVariant === 'warm') ||
+            phase === 'acceptanceThankYouWarm'
+        ) {
             return;
         }
-        // Only transition to offer/acceptance from data when not already in join (so answering visibility + Next is required).
-        // Do not overwrite the warm completion screen (just-completed same-page payment) when data is still stale.
-        if (
-            isJoined &&
-            phase !== 'join' &&
-            !(phase === 'offeringCompleteCold' && offeringCompleteVariant === 'warm')
-        ) {
+
+        const routeAfterRegistration = () => {
             if (needAcceptance) {
                 if (accepted === true) {
-                    setPhase('offer');
+                    if (eventRequiresOffering(event)) {
+                        setPhase('offer');
+                    } else {
+                        setOfferingCompleteVariant('cold');
+                        setPhase('offeringCompleteCold');
+                    }
                 } else if (phase !== 'acceptanceThankYouWarm' && phase !== 'debugTable') {
                     setPhase('acceptanceThankYouCold');
                 }
-            } else {
+            } else if (eventRequiresOffering(event)) {
                 setPhase('offer');
+            } else {
+                setOfferingCompleteVariant('cold');
+                setPhase('offeringCompleteCold');
+            }
+        };
+
+        if (offerOnly) {
+            if (eventRequiresOffering(event)) {
+                setPhase('offer');
+            } else {
+                setOfferingCompleteVariant('cold');
+                setPhase('offeringCompleteCold');
+            }
+            return;
+        }
+        if (isRegistrationComplete) {
+            if (phase === 'loading' || phase === 'join') {
+                routeAfterRegistration();
             }
             return;
         }
@@ -840,7 +863,12 @@ export default function Home() {
         // In reality, the 'Join' script should have already saved this via API calls in its last step
         // But we ensure local state reflects it to switch phase
         setData({ ...data, student: newStudent });
-        setPhase('offer');
+        if (eventRequiresOffering(data.event)) {
+            setPhase('offer');
+        } else {
+            setOfferingCompleteVariant('warm');
+            setPhase('offeringCompleteCold');
+        }
     };
 
     const handleShowDebugTable = () => {
@@ -896,10 +924,17 @@ export default function Home() {
         const student = JSON.parse(JSON.stringify(data.student));
         student.programs = student.programs || {};
         if (!student.programs[activeEventCode]) student.programs[activeEventCode] = {};
-        student.programs[activeEventCode].join = true;
-        student.programs[activeEventCode].submitCount = (student.programs[activeEventCode].submitCount ?? 0) + 1;
-        student.programs[activeEventCode].submitTime = new Date().toISOString();
-        student.programs[activeEventCode].saved = true;
+        const eventProgram = student.programs[activeEventCode];
+        const hasExplicitJoin =
+            eventProgram.join === true || eventProgram.join === false ||
+            eventProgram.joinMY === true || eventProgram.joinMY === false ||
+            eventProgram.joinVY === true || eventProgram.joinVY === false;
+        if (!hasExplicitJoin) {
+            eventProgram.join = true;
+        }
+        eventProgram.submitCount = (eventProgram.submitCount ?? 0) + 1;
+        eventProgram.submitTime = new Date().toISOString();
+        eventProgram.saved = true;
 
         const needAcceptance = data.event?.config?.needAcceptance === true;
         const isTestMode = data.student?.debug?.registerTest === true;
@@ -917,7 +952,14 @@ export default function Home() {
         try {
             await putTableItem('students', studentPid, student, studentPid, studentHash);
             setData({ ...data, student });
-            setPhase(needAcceptance ? 'acceptanceThankYouWarm' : 'offer');
+            if (needAcceptance) {
+                setPhase('acceptanceThankYouWarm');
+            } else if (eventRequiresOffering(data.event)) {
+                setPhase('offer');
+            } else {
+                setOfferingCompleteVariant('warm');
+                setPhase('offeringCompleteCold');
+            }
         } catch (err: any) {
             console.error('Save failed on last step', err);
         }

@@ -191,7 +191,7 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
     const isLast = getNextValidStepIndex(effectiveStepIndex, 'forward') === -1;
 
     const stepTitle = step.promptKey ? promptLookup(context, step.promptKey) : step.id.replace(/([A-Z])/g, ' $1').trim();
-    const showStepTitle = step.id !== 'introduction' && step.id !== 'videoIntroduction';
+    const showStepTitle = step.id !== 'introduction' && step.id !== 'videoIntroduction' && step.id !== 'register';
     const stepTitleIsHtml =
         step.promptKey === 'lrAccChoice1' ||
         step.promptKey === 'lrAccChoice2' ||

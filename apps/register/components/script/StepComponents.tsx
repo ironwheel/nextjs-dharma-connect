@@ -910,6 +910,24 @@ export const RenderAccessibility: React.FC<{ context: ScriptContext; engineOnCha
     );
 };
 
+// --- Register (HTML prompt + Yes/No to join) ---
+export const RenderRegister: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
+    const eventCode = context.event?.aid;
+    const text = renderHtmlPromptWithCoordMacros(context, 'register');
+    const joinPath = eventCode ? `student.programs.${eventCode}.join` : '';
+    return (
+        <div className="space-y-4">
+            <div
+                className="prose prose-invert max-w-none text-reg-text introduction-html"
+                dangerouslySetInnerHTML={{ __html: text }}
+            />
+            {joinPath && (
+                <RadioYesNo context={context} path={joinPath} label="" engineOnChange={engineOnChange} />
+            )}
+        </div>
+    );
+};
+
 // --- Supplication: body text + all current signers appended at bottom; list updates when user adds/removes name via visible question ---
 export const RenderSupplication: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void; titleKey: string; bodyKey: string; retreat?: string; joinKey: string }> = ({ context, bodyKey, retreat, joinKey, engineOnChange }) => {
     const eventCode = context.event?.aid;
