@@ -1,3 +1,5 @@
+import { isNoOfferingMode } from './offeringModeConstants';
+
 /** Synthetic cart person id for anonymous heart gifts (no student offeringHistory write). */
 export const ANONYMOUS_HEART_GIFT_CART_ID = '__anonymous__';
 
@@ -56,7 +58,7 @@ export function collectHeartGiftOfferingOids(
   const oids = new Set<string>();
   if (!subEvents) return [];
   Object.values(subEvents).forEach((se) => {
-    if (se?.offeringMode) oids.add(se.offeringMode);
+    if (se?.offeringMode && !isNoOfferingMode(se.offeringMode)) oids.add(se.offeringMode);
     const hg = typeof se?.heartGiftOfferingMode === 'string' ? se.heartGiftOfferingMode.trim() : '';
     if (hg) oids.add(hg);
   });

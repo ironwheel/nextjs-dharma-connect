@@ -40,6 +40,7 @@ import {
     RenderSeriesCommitment,
     RenderAbhishekaCommitment,
     RenderSave,
+    RenderRegister,
 } from '../components/script/StepComponents';
 
 // Registry mapping step keys to their definition template.
@@ -593,6 +594,21 @@ export const stepRegistry: Record<string, ScriptStep> = {
         component: RenderSave as any,
         field: null as any,
         promptKey: 'mustSave'
+    },
+    'register': {
+        id: 'register',
+        type: 'custom',
+        component: RenderRegister as any,
+        field: 'student.programs',
+        promptKey: 'register',
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const joinVal = value?.[eventCode]?.join;
+            if (typeof joinVal !== 'boolean') return promptLookup(context, 'yesNoRequired');
+            if (joinVal !== true) return promptLookup(context, 'joinRequired');
+            return null;
+        }
     },
     'join': {
         id: 'join',

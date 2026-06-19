@@ -17,6 +17,11 @@ import {
 } from 'sharedFrontend';
 import { promptLookup } from './script/StepComponents';
 import type { ScriptContext } from './script/types';
+import {
+  eventRequiresOffering,
+  subEventHasOfferingsConfig,
+  subEventRequiresOffering,
+} from '../lib/offeringModeConstants';
 
 const eventCodeFromContext = (ctx: ScriptContext) => ctx.event?.aid ?? '';
 
@@ -303,7 +308,7 @@ function useOfferingData(context: ScriptContext) {
     const student = context.student;
     const oids = new Set<string>();
     Object.values(context.event.subEvents).forEach((se: any) => {
-      if (se?.offeringMode) oids.add(se.offeringMode);
+      if (subEventRequiresOffering(se) && se?.offeringMode) oids.add(se.offeringMode);
     });
     const load = async () => {
       try {
@@ -569,7 +574,9 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
   const baseTotalCents = cartTotalCents(fafFull);
   const kmFeeCents = offeringKMFee && !hasOwyaaInCart ? Math.round(baseTotalCents * 0.05) : 0;
   const totalCents = baseTotalCents + kmFeeCents;
-  const subEvents = event?.subEvents ? Object.entries(event.subEvents) : [];
+  const subEvents = event?.subEvents
+    ? Object.entries(event.subEvents).filter(([, se]: [string, any]) => subEventRequiresOffering(se))
+    : [];
   const subEventNames = subEvents.map(([name]) => name);
   const subEventCount = subEvents.length;
   const offeringIntro = promptLookup(context, 'offeringIntroduction') || '';
@@ -778,6 +785,16 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     eventCode,
     isInstallmentsTotalOrMorePresentation,
   ]);
+
+  const hasOfferings = subEvents.some(([, se]: [string, any]) => subEventHasOfferingsConfig(se, configs));
+
+  useEffect(() => {
+    if (loading || eventRequiresOffering(event)) return;
+    const result = onComplete();
+    if (result != null && typeof (result as Promise<unknown>).then === 'function') {
+      void (result as Promise<void>);
+    }
+  }, [loading, event, onComplete]);
 
   /** Sum of amounts for this offering type across all remaining (unpaid) subevents; each subevent may have different amounts. */
   const getRemainingSumCents = useCallback(
@@ -1127,7 +1144,14 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     );
   }
 
-  const hasOfferings = subEvents.some(([, se]: [string, any]) => se?.offeringMode && configs[se.offeringMode]);
+  if (!eventRequiresOffering(event)) {
+    return (
+      <div className="max-w-xl mx-auto p-6 text-reg-muted">
+        {promptLookup(context, 'offeringCompleteWarm') || 'Registration complete.'}
+      </div>
+    );
+  }
+
   if (!hasOfferings && paymentStep === 'selection') {
     return (
       <div className="max-w-xl mx-auto p-6 text-reg-muted">
