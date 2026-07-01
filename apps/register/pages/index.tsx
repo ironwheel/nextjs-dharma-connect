@@ -682,8 +682,11 @@ export default function Home() {
             }
             return;
         }
+        // Only leave the join script when registration was explicitly saved (last step),
+        // or when loading a returning session. isJoined alone can become true mid-script
+        // (e.g. supplication visible) before handleLastStepNext persists the record.
         if (isRegistrationComplete) {
-            if (phase === 'loading' || phase === 'join') {
+            if (phase === 'loading' || (phase === 'join' && prog?.saved === true)) {
                 routeAfterRegistration();
             }
             return;
