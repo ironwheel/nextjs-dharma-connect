@@ -928,13 +928,9 @@ export default function Home() {
         student.programs = student.programs || {};
         if (!student.programs[activeEventCode]) student.programs[activeEventCode] = {};
         const eventProgram = student.programs[activeEventCode];
-        const hasExplicitJoin =
-            eventProgram.join === true || eventProgram.join === false ||
-            eventProgram.joinMY === true || eventProgram.joinMY === false ||
-            eventProgram.joinVY === true || eventProgram.joinVY === false;
-        if (!hasExplicitJoin) {
-            eventProgram.join = true;
-        }
+        // Event-level join is required by auto-accept and eligibility rules. Retreat-specific
+        // flags (joinMY/joinVY) are set during the script; join must also be set on completion.
+        eventProgram.join = true;
         eventProgram.submitCount = (eventProgram.submitCount ?? 0) + 1;
         eventProgram.submitTime = new Date().toISOString();
         eventProgram.saved = true;
