@@ -530,9 +530,12 @@ const MantraCount: React.FC<MantraCountProps> = ({ studentId, pid, hash, student
                                                 </button>
                                             </div>
 
-                                            {/* Enter a larger amount directly rather than clicking repeatedly */}
+                                            {/* Enter a larger amount directly rather than clicking repeatedly.
+                                                Stacked rather than side by side so the placeholder gets the full
+                                                card width: translated placeholders (e.g. Italian "Inserisci il
+                                                conteggio") do not fit next to a translated Add button. */}
                                             {canIncrement && (
-                                                <div className="flex gap-2">
+                                                <div className="grid grid-cols-1 gap-2">
                                                     <input
                                                         type="number"
                                                         inputMode="numeric"
@@ -548,12 +551,12 @@ const MantraCount: React.FC<MantraCountProps> = ({ studentId, pid, hash, student
                                                         }}
                                                         placeholder={promptLookup('mantraCountAddAmountPlaceholder')}
                                                         aria-label={promptLookup('mantraCountAddAmountPlaceholder')}
-                                                        className="min-w-0 flex-1 rounded-lg border border-white/30 bg-black/30 text-white placeholder-white/50 px-2 py-2 text-sm focus:outline-none focus:border-white/60"
+                                                        className="w-full rounded-lg border border-white/30 bg-black/30 text-white placeholder-white/50 placeholder:text-xs px-2 py-2 text-sm text-center focus:outline-none focus:border-white/60"
                                                     />
                                                     <button
                                                         type="button"
                                                         onClick={() => handleAddAmount(config.id)}
-                                                        className="shrink-0 rounded-lg border border-white/30 bg-white/10 hover:bg-white/20 text-white px-3 py-2 text-sm font-semibold transition-colors"
+                                                        className="w-full rounded-lg border border-white/30 bg-white/10 hover:bg-white/20 text-white px-2 py-2 text-sm font-semibold transition-colors"
                                                     >
                                                         {promptLookup('mantraCountAddButton')}
                                                     </button>
