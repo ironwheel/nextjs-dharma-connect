@@ -42,7 +42,6 @@ interface MantraCounts {
 }
 
 interface GlobalMantraCounts {
-    counts: { [mantraId: string]: number };
     distinctCountries: string[];
     count: number;
 }
@@ -69,7 +68,6 @@ const MantraCount: React.FC<MantraCountProps> = ({ studentId, pid, hash, student
 
     // Global counts (read-only)
     const [globalCounts, setGlobalCounts] = useState<GlobalMantraCounts>({
-        counts: {},
         distinctCountries: [],
         count: 0
     });
@@ -82,6 +80,9 @@ const MantraCount: React.FC<MantraCountProps> = ({ studentId, pid, hash, student
 
     // Pools for eligibility checking
     const [pools, setPools] = useState<any[]>([]);
+
+    // Pending "add this many" entry per mantra card
+    const [addAmounts, setAddAmounts] = useState<{ [mantraId: string]: string }>({});
 
     // Loading states
     const [isLoading, setIsLoading] = useState(true);
@@ -224,7 +225,6 @@ const MantraCount: React.FC<MantraCountProps> = ({ studentId, pid, hash, student
                 const distinctCountries = Array.from(new Set(countries)).sort();
 
                 setGlobalCounts({
-                    counts: globalCounts,
                     distinctCountries,
                     count: result.length
                 });
@@ -242,25 +242,38 @@ const MantraCount: React.FC<MantraCountProps> = ({ studentId, pid, hash, student
     const updatePersonalMantraCount = useCallback(async () => {
         setIsSaving(true);
         try {
-            const item = {
-                id: studentId,
-                counts: personalCounts,
-                country: student.country || 'Unknown',
-                lastUpdatedAt: new Date().toISOString()
-            };
+            // Update each attribute individually. The update endpoint builds a
+            // `SET #fieldName = :fieldValue` expression, so `fieldName` must name a
+            // non-key attribute -- passing the partition key ('id') makes DynamoDB
+            // reject the whole write.
+            const updates: Array<[string, any]> = [
+                ['counts', personalCounts],
+                ['country', student.country || 'Unknown'],
+                ['lastUpdatedAt', new Date().toISOString()]
+            ];
 
-            const result = await updateTableItem('mantra-count', studentId, 'id', item, pid, hash);
+            for (const [fieldName, fieldValue] of updates) {
+                const result = await updateTableItem('mantra-count', studentId, fieldName, fieldValue, pid, hash);
 
-            if (result && typeof result === 'object' && 'redirected' in result) {
-                setError('Authentication required');
-                return;
+                if (result && typeof result === 'object' && 'redirected' in result) {
+                    setError('Authentication required');
+                    return;
+                }
             }
 
-            // Update shadow values after successful save
+            // The saved values become the new baseline: the unsaved-change shadow,
+            // the decrement floor, and the community totals all move up together so
+            // this session's additions are not counted a second time.
+            setOriginalGlobalCounts(prev => {
+                const next = { ...prev };
+                Object.keys(personalCounts).forEach(mantraId => {
+                    const delta = (personalCounts[mantraId] || 0) - (originalCounts[mantraId] || 0);
+                    next[mantraId] = (next[mantraId] || 0) + delta;
+                });
+                return next;
+            });
             setShadowCounts(personalCounts);
-
-            // Reset global counts to original values since changes are now saved
-            getGlobalMantraCounts();
+            setOriginalCounts(personalCounts);
 
             toast.success(promptLookup('mantraCountSaveSuccess'));
             onClose();
@@ -271,7 +284,7 @@ const MantraCount: React.FC<MantraCountProps> = ({ studentId, pid, hash, student
         } finally {
             setIsSaving(false);
         }
-    }, [personalCounts, studentId, pid, hash, onClose]);
+    }, [personalCounts, originalCounts, studentId, student.country, pid, hash, onClose]);
 
     // Handle count increment/decrement
     const handleCountChange = useCallback((mantraId: string, increment: number) => {
@@ -291,25 +304,30 @@ const MantraCount: React.FC<MantraCountProps> = ({ studentId, pid, hash, student
             };
         });
 
-        // Update global counts in real-time
-        setGlobalCounts(prev => {
-            const originalGlobalValue = originalGlobalCounts[mantraId] || 0;
-            const originalPersonalValue = originalCounts[mantraId] || 0;
-            const currentPersonalValue = personalCounts[mantraId] || 0;
-            const newPersonalValue = currentPersonalValue + increment;
+    }, [originalCounts]);
 
-            // Calculate the difference between new personal and original personal value
-            const personalDiff = newPersonalValue - originalPersonalValue;
+    // Community total as shown to this practitioner: the saved community total
+    // plus whatever they have added in this session but not yet saved. Derived
+    // rather than stored so it cannot drift out of step with personalCounts.
+    const displayedGlobalCount = useCallback((mantraId: string): number => {
+        const savedGlobal = originalGlobalCounts[mantraId] || 0;
+        const unsaved = (personalCounts[mantraId] || 0) - (originalCounts[mantraId] || 0);
+        return savedGlobal + unsaved;
+    }, [originalGlobalCounts, personalCounts, originalCounts]);
 
-            return {
-                ...prev,
-                counts: {
-                    ...prev.counts,
-                    [mantraId]: originalGlobalValue + personalDiff
-                }
-            };
-        });
-    }, [originalCounts, personalCounts, originalGlobalCounts]);
+    // Add an explicit amount typed into a card's entry field
+    const handleAddAmount = useCallback((mantraId: string) => {
+        const raw = (addAmounts[mantraId] || '').trim();
+        const amount = Number(raw);
+
+        if (raw === '' || !Number.isInteger(amount) || amount <= 0) {
+            toast.error(promptLookup('mantraCountAddInvalid'));
+            return;
+        }
+
+        handleCountChange(mantraId, amount);
+        setAddAmounts(prev => ({ ...prev, [mantraId]: '' }));
+    }, [addAmounts, handleCountChange]);
 
     // Load data on component mount
     useEffect(() => {
@@ -477,39 +495,70 @@ const MantraCount: React.FC<MantraCountProps> = ({ studentId, pid, hash, student
                                             <div className="flex items-center justify-center">
                                                 <FontAwesomeIcon icon={faGlobe} className="mr-2 text-lg" />
                                                 <div className="text-2xl font-bold">
-                                                    {formatNumber(globalCounts.counts[config.id] || 0)}
+                                                    {formatNumber(displayedGlobalCount(config.id))}
                                                 </div>
                                             </div>
                                         </div>
 
                                         {/* Controls */}
-                                        <div className={`mt-auto grid gap-2 ${canDecrement ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                                            {canDecrement && (
-                                                <div className="flex items-center justify-center rounded-lg border border-white/30 bg-white/10 py-2">
+                                        <div className="mt-auto space-y-2">
+                                            {/* Step buttons, labelled with the amount each click adds */}
+                                            <div className={`grid gap-2 ${canDecrement ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                                {canDecrement && (
                                                     <button
                                                         type="button"
                                                         onClick={() => handleCountChange(config.id, -config.incrementAmount)}
-                                                        className="rounded-full w-10 h-10 flex items-center justify-center transition-colors border bg-white/20 hover:bg-white/30 text-white border-white/30"
+                                                        className="flex items-center justify-center gap-1 rounded-lg border border-white/30 bg-white/10 hover:bg-white/20 text-white py-2 px-2 font-semibold transition-colors"
                                                         title={`Subtract ${config.incrementAmount}`}
                                                     >
-                                                        <FontAwesomeIcon icon={faMinus} />
+                                                        <FontAwesomeIcon icon={faMinus} className="text-xs" />
+                                                        {formatNumber(config.incrementAmount)}
                                                     </button>
-                                                </div>
-                                            )}
-                                            <div className="flex items-center justify-center rounded-lg border border-white/30 bg-white/10 py-2">
+                                                )}
                                                 <button
                                                     type="button"
                                                     onClick={() => handleCountChange(config.id, config.incrementAmount)}
                                                     disabled={!canIncrement}
-                                                    className={`rounded-full w-10 h-10 flex items-center justify-center transition-colors border ${canIncrement
-                                                        ? 'bg-white/20 hover:bg-white/30 text-white border-white/30'
+                                                    className={`flex items-center justify-center gap-1 rounded-lg border py-2 px-2 font-semibold transition-colors ${canIncrement
+                                                        ? 'bg-white/10 hover:bg-white/20 text-white border-white/30'
                                                         : 'bg-gray-600 text-gray-400 border-gray-500 cursor-not-allowed'
                                                         }`}
                                                     title={canIncrement ? `Add ${config.incrementAmount}` : 'Write access not available'}
                                                 >
-                                                    <FontAwesomeIcon icon={faPlus} />
+                                                    <FontAwesomeIcon icon={faPlus} className="text-xs" />
+                                                    {formatNumber(config.incrementAmount)}
                                                 </button>
                                             </div>
+
+                                            {/* Enter a larger amount directly rather than clicking repeatedly */}
+                                            {canIncrement && (
+                                                <div className="flex gap-2">
+                                                    <input
+                                                        type="number"
+                                                        inputMode="numeric"
+                                                        min="1"
+                                                        step="1"
+                                                        value={addAmounts[config.id] || ''}
+                                                        onChange={(e) => setAddAmounts(prev => ({ ...prev, [config.id]: e.target.value }))}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') {
+                                                                e.preventDefault();
+                                                                handleAddAmount(config.id);
+                                                            }
+                                                        }}
+                                                        placeholder={promptLookup('mantraCountAddAmountPlaceholder')}
+                                                        aria-label={promptLookup('mantraCountAddAmountPlaceholder')}
+                                                        className="min-w-0 flex-1 rounded-lg border border-white/30 bg-black/30 text-white placeholder-white/50 px-2 py-2 text-sm focus:outline-none focus:border-white/60"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleAddAmount(config.id)}
+                                                        className="shrink-0 rounded-lg border border-white/30 bg-white/10 hover:bg-white/20 text-white px-3 py-2 text-sm font-semibold transition-colors"
+                                                    >
+                                                        {promptLookup('mantraCountAddButton')}
+                                                    </button>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                     );
