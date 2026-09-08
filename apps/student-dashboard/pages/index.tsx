@@ -47,6 +47,7 @@ import { api, getAllTableItems, getAllTableItemsFiltered, getTableItem, updateTa
 // Import MantraCount component
 import MantraCount from '../components/MantraCount';
 import EmbeddedVideo from '../components/EmbeddedVideo';
+import EmbeddedAudio from '../components/EmbeddedAudio';
 
 const EmbeddedPdfViewer = dynamic(() => import('../components/EmbeddedPdfViewer'), {
     ssr: false,
@@ -59,6 +60,8 @@ let eventList: any[] = [];
 let liturgyList: any[] = [];
 let videoList: any[] = [];
 let videoListByYear: { [key: string]: any[] } = {};
+let audioList: any[] = [];
+let audioListByYear: { [key: string]: any[] } = {};
 let showcaseMasterList: any[] = [];
 let mantraList: any[] = [];
 let scheduleList: any[] = [];
@@ -67,10 +70,19 @@ let displayControl: { [key: string]: boolean } = {
     'event': false,
     'liturgy': false,
     'video': false,
+    'audio': false,
     'mantra': false,
     'schedule': false
 };
+/**
+ * Control rows are section headers and the year/showcase sub-headers beneath them. They
+ * carry no parentEvent/subEvent, so they must never fall through to the offering and
+ * media logic that dereferences those. SUB_CONTROL_TAGS are the indented year headers.
+ */
+const CONTROL_TAGS = new Set(['control', 'control-video', 'control-audio']);
+const SUB_CONTROL_TAGS = new Set(['control-video', 'control-audio']);
 let displayVideoControl: { [key: string]: boolean } = {};
+let displayAudioControl: { [key: string]: boolean } = {};
 let pusherChannels: any = false;
 let pusherChannel: any = false;
 
@@ -894,6 +906,20 @@ const HomeContent = () => {
         setValue(value + 1);
     };
 
+    const isAudioOpen = (audioKey: string) => Boolean(displayAudioControl[audioKey]);
+
+    const onAudioToggle = (audioKey: string) => {
+        Object.keys(displayAudioControl).forEach((controlKey) => {
+            if (controlKey !== audioKey) {
+                displayAudioControl[controlKey] = false;
+            }
+        });
+        displayAudioControl[audioKey] = !displayAudioControl[audioKey];
+        // Re-render only; avoid updateMediaList() so EmbeddedAudio language and playback
+        // state is preserved on open.
+        setValue((v) => v + 1);
+    };
+
     const isVideoOpen = (videoKey: string) => Boolean(displayVideoControl[videoKey]);
 
     const onVideoToggle = (videoKey: string) => {
@@ -912,6 +938,8 @@ const HomeContent = () => {
         liturgyList = [];
         videoList = [];
         videoListByYear = {};
+        audioList = [];
+        audioListByYear = {};
         showcaseMasterList = [];
         eventList = [];
 
@@ -945,6 +973,18 @@ const HomeContent = () => {
             eventname: 'controlTitleVideos',
             tag: 'control',
             control: 'video',
+            subEventDisplayName: null,
+            date: '2222-22-22',
+            complete: true,
+            bg: 'gray',
+            indent: 0
+        });
+
+        audioList.push({
+            key: 'audios',
+            eventname: 'controlTitleAudio',
+            tag: 'control',
+            control: 'audio',
             subEventDisplayName: null,
             date: '2222-22-22',
             complete: true,
@@ -1115,6 +1155,27 @@ const HomeContent = () => {
                             parentEvent: parentEvent,
                             subEvent: subEventObj
                         });
+
+                        // Audio mirrors the video list, but is only listed where audio
+                        // actually exists. The dashboard's own eligibility filtering
+                        // decides what is listed; the API re-checks it before minting a
+                        // playback URL, so this list is presentation, not authorization.
+                        if (Array.isArray(subEventObj.embeddedAudioList) && subEventObj.embeddedAudioList.length > 0) {
+                            if (!audioListByYear[year]) {
+                                audioListByYear[year] = [];
+                            }
+                            audioListByYear[year].push({
+                                key: parentEvent.name + subEventName + '-audio',
+                                tag: 'audio',
+                                eventname: eventName,
+                                subEventDisplayName: subEventDisplayName,
+                                subEventName: subEventName,
+                                date: subEventObj.date,
+                                complete: subEventObj.eventComplete,
+                                parentEvent: parentEvent,
+                                subEvent: subEventObj
+                            });
+                        }
                     }
                 } else {
                     eventList.push({
@@ -1138,10 +1199,17 @@ const HomeContent = () => {
         liturgyList.sort(compareDates);
         videoList.sort(compareDates);
         Object.values(videoListByYear).forEach(list => list.sort(compareDates));
+        Object.values(audioListByYear).forEach(list => list.sort(compareDates));
 
         // Initialize year-specific controls dynamically
         Object.keys(videoListByYear).forEach(year => {
             const controlKey = `video-year-${year}`;
+            if (!(controlKey in displayControl)) {
+                displayControl[controlKey] = false;
+            }
+        });
+        Object.keys(audioListByYear).forEach(year => {
+            const controlKey = `audio-year-${year}`;
             if (!(controlKey in displayControl)) {
                 displayControl[controlKey] = false;
             }
@@ -1523,7 +1591,7 @@ const HomeContent = () => {
         }
 
         // Event is completed - show media
-        if (!el.subEvent.embeddedVideoList && !el.subEvent.embeddedPDFList) {
+        if (!el.subEvent.embeddedVideoList && !el.subEvent.embeddedPDFList && !el.subEvent.embeddedAudioList) {
             return (
                 <>
                     {promptLookup('mediaNotAvailable')}
@@ -1608,7 +1676,35 @@ const HomeContent = () => {
             );
         }
 
-        // Show media content
+        // Show media content.
+        // An audio row renders audio even when the same sub-event also has video: the two
+        // are listed in separate sections, and el.tag says which one this row is.
+        if (el.tag === 'audio' && Array.isArray(el.subEvent.embeddedAudioList)) {
+            const preferredAudioLanguage =
+                typeof student.writtenLangPref !== 'undefined' ? student.writtenLangPref : 'English';
+
+            return (
+                <>
+                    {el.subEvent.embeddedAudioList.map((aud: any, index: number) => (
+                        <EmbeddedAudio
+                            key={`${el.key}-audio-${index}`}
+                            audioKey={`${el.key}-audio-${index}`}
+                            audioEntry={aud}
+                            preferredLanguage={preferredAudioLanguage}
+                            parentEventAid={el.parentEvent.aid}
+                            parentEventAidAlias={el.parentEvent.config?.aidAlias}
+                            subEventName={el.subEventName}
+                            index={index}
+                            pid={pid as string}
+                            hash={hash as string}
+                            isAudioOpen={isAudioOpen}
+                            onAudioToggle={onAudioToggle}
+                        />
+                    ))}
+                </>
+            );
+        }
+
         if (typeof el.subEvent.embeddedVideoList !== 'undefined') {
             const preferredVideoLanguage =
                 typeof student.writtenLangPref !== 'undefined' ? student.writtenLangPref : 'English';
@@ -1699,7 +1795,9 @@ const HomeContent = () => {
     };
 
     const mediaElementWrapper = (el: any) => {
-        if (el.tag !== 'control' && el.tag !== 'control-video') {
+        // Control rows render unconditionally; content rows render only while their
+        // section is open (displayControl is keyed by the content row's tag).
+        if (!CONTROL_TAGS.has(el.tag)) {
             if (!displayControl[el.tag]) {
                 return null;
             }
@@ -1774,23 +1872,25 @@ const HomeContent = () => {
                 return;
             }
 
-            // Check if this is a year-specific video control (sub-control)
-            const isYearVideoControl = el.control.startsWith('video-year-');
-            // Check if this is a showcase control (sub-control)
-            const isShowcaseControl = el.control.endsWith('-showcase');
+            // Year controls (video and audio) and showcase controls are sub-controls:
+            // clicking one must not collapse the section it lives in.
+            const isSubControl = (controlKey: string) =>
+                controlKey.startsWith('video-year-')
+                || controlKey.startsWith('audio-year-')
+                || controlKey.endsWith('-showcase');
 
-            if (isYearVideoControl || isShowcaseControl) {
+            if (isSubControl(el.control)) {
                 // For sub-controls, only close other sub-controls
-                // but keep the main video control open
+                // but keep the main video/audio control open
                 Object.keys(displayControl).forEach(controlKey => {
-                    if ((controlKey.startsWith('video-year-') || controlKey.endsWith('-showcase')) && controlKey !== el.control) {
+                    if (isSubControl(controlKey) && controlKey !== el.control) {
                         displayControl[controlKey] = false;
                     }
                 });
             } else {
                 // For main controls, close all other main controls
                 Object.keys(displayControl).forEach(controlKey => {
-                    if (!controlKey.startsWith('video-year-') && !controlKey.endsWith('-showcase') && controlKey !== el.control) {
+                    if (!isSubControl(controlKey) && controlKey !== el.control) {
                         displayControl[controlKey] = false;
                     }
                 });
@@ -1801,7 +1901,7 @@ const HomeContent = () => {
             forceRender();
         };
 
-        if (el.tag === 'control' || el.tag === 'control-video') {
+        if (CONTROL_TAGS.has(el.tag)) {
             const LiturgiesIntro = () => {
                 if (!displayControl['liturgy'] || el.control !== 'liturgy' || liturgyList.length === 1) {
                     return null;
@@ -1824,7 +1924,7 @@ const HomeContent = () => {
                 );
             };
 
-            if (el.tag === 'control-video') {
+            if (SUB_CONTROL_TAGS.has(el.tag)) {
                 const bgColorClass = el.bg === 'primary' ? 'bg-blue-600' : el.bg === 'gray' ? 'bg-gray-700' : 'bg-gray-700';
                 const borderColorClass = el.bg === 'primary' ? 'border-blue-500' : el.bg === 'gray' ? 'border-gray-600' : 'border-gray-600';
                 const hoverBgClass = el.bg === 'primary' ? 'hover:bg-blue-700' : el.bg === 'gray' ? 'hover:bg-gray-600' : 'hover:bg-gray-600';
@@ -2011,6 +2111,48 @@ const HomeContent = () => {
         );
     };
 
+    const AudioControlWithYears = () => {
+        const mainAudioControl = audioList.find(el => el.control === 'audio');
+        if (!mainAudioControl) return null;
+        // No audio anywhere this student can reach: do not show an empty section.
+        if (Object.keys(audioListByYear).length === 0) return null;
+
+        const yearControls = Object.keys(audioListByYear)
+            .sort((a, b) => parseInt(b) - parseInt(a)) // newest year first
+            .map(year => ({
+                key: `audio-year-${year}`,
+                eventname: `controlTitleAudio${year}`,
+                tag: 'control-audio',
+                control: `audio-year-${year}`,
+                subEventDisplayName: null,
+                date: '2222-22-22',
+                complete: true,
+                bg: 'gray',
+                indent: 16,
+                year: year
+            }));
+
+        return (
+            <>
+                {mediaElementWrapper(mainAudioControl)}
+                {displayControl['audio'] && (
+                    <>
+                        {yearControls.map((yearControl) => (
+                            <div key={yearControl.key}>
+                                {mediaElementWrapper(yearControl)}
+                                {displayControl[yearControl.control] && (
+                                    <div className="ml-8">
+                                        {displayVideoList(audioListByYear[yearControl.year])}
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </>
+                )}
+            </>
+        );
+    };
+
     const MediaList = () => {
 
         return (
@@ -2024,6 +2166,7 @@ const HomeContent = () => {
                     ))
                     : null}
                 <VideoControlWithYears />
+                <AudioControlWithYears />
                 {mediaElementWrapper(scheduleList[0])}
                 {Schedule()}
                 {showMantraControl && mantraList[0] && mediaElementWrapper(mantraList[0])}
