@@ -16,6 +16,31 @@ import {
 // control row below, so it can be restored without rebuilding it.
 // const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
 
+/**
+ * Tell WebKit this page's audio is primary playback, not incidental page sound.
+ *
+ * Safari infers a session type when the page does not declare one, and an <audio> element
+ * with no visible controls is readily inferred as "ambient" — a category iOS silences
+ * when the screen locks. That matches the recorded failure exactly: a pause with no media
+ * error, a fraction of a second before the page is marked hidden, with the page still
+ * running afterwards. "playback" is the category for media the listener expects to
+ * continue with the screen off.
+ *
+ * navigator.audioSession is Safari 16.4+ and absent elsewhere, which is harmless: other
+ * browsers already keep this audio playing.
+ */
+function declarePlaybackAudioSession(): string {
+    if (typeof navigator === 'undefined') return 'no-navigator';
+    const session = (navigator as unknown as { audioSession?: { type?: string } }).audioSession;
+    if (!session) return 'unsupported';
+    try {
+        session.type = 'playback';
+        return session.type || 'set';
+    } catch {
+        return 'failed';
+    }
+}
+
 /** Give up re-minting after this many consecutive media errors on one track. */
 const MAX_ERROR_RETRIES = 2;
 
@@ -332,7 +357,12 @@ export default function EmbeddedAudio({
         const element = audioRef.current;
         if (!element) return;
 
-        diagRecord('track-loaded', { lang: selectedLanguage, ...diagMediaState(element) });
+        diagRecord('track-loaded', {
+            lang: selectedLanguage,
+            audioSession: (navigator as unknown as { audioSession?: { type?: string } }).audioSession?.type ?? 'unsupported',
+            mediaSession: 'mediaSession' in navigator,
+            ...diagMediaState(element),
+        });
 
         const listeners: Array<[string, EventListener]> = DIAG_MEDIA_EVENTS.map((name) => [
             name,
@@ -389,8 +419,13 @@ export default function EmbeddedAudio({
         const element = audioRef.current;
         if (!element) return;
         if (element.paused) {
+            // Declared inside the user gesture that starts playback, which is when Safari
+            // is willing to honour it.
+            const sessionType = declarePlaybackAudioSession();
+            diagRecord('ui-play', { audioSession: sessionType, ...diagMediaState(element) });
             void element.play();
         } else {
+            diagRecord('ui-pause', diagMediaState(element));
             element.pause();
         }
     }, []);
@@ -398,6 +433,7 @@ export default function EmbeddedAudio({
     const seekTo = useCallback((seconds: number) => {
         const element = audioRef.current;
         const next = Math.max(0, seconds);
+        diagRecord('seek', { from: element ? Number(element.currentTime.toFixed(1)) : null, to: Number(next.toFixed(1)) });
         setCurrentTime(next);
         if (element) element.currentTime = next;
     }, []);
@@ -440,17 +476,29 @@ export default function EmbeddedAudio({
         }
 
         const handlers: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
-            ['play', () => { void audioRef.current?.play(); }],
-            ['pause', () => { audioRef.current?.pause(); }],
+            ['play', () => {
+                diagRecord('mediasession-play', diagMediaState(audioRef.current));
+                void audioRef.current?.play();
+            }],
+            ['pause', () => {
+                // If this appears immediately before a `pause` in the log, iOS asked us to
+                // stop rather than stopping the element itself — a different fault with a
+                // different fix.
+                diagRecord('mediasession-pause', diagMediaState(audioRef.current));
+                audioRef.current?.pause();
+            }],
             ['seekbackward', (details) => {
+                diagRecord('mediasession-seekbackward', { offset: details.seekOffset });
                 const element = audioRef.current;
                 if (element) seekTo(element.currentTime - (details.seekOffset || 15));
             }],
             ['seekforward', (details) => {
+                diagRecord('mediasession-seekforward', { offset: details.seekOffset });
                 const element = audioRef.current;
                 if (element) seekTo(element.currentTime + (details.seekOffset || 30));
             }],
             ['seekto', (details) => {
+                diagRecord('mediasession-seekto', { seekTime: details.seekTime });
                 if (typeof details.seekTime === 'number') seekTo(details.seekTime);
             }],
         ];
