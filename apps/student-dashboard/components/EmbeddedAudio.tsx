@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faMinus, faPlus } from '@fortawesome/free-solid-svg-icons';
+import { faMinus, faPause, faPlay, faPlus } from '@fortawesome/free-solid-svg-icons';
 import { getAudioPlaybackUrl, promptLookup, promptLookupAIDSpecific } from 'sharedFrontend';
 import { getAvailableLanguages, languageLabel, resolveInitialMediaLanguage } from './mediaLanguage';
 
-const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
+// Playback speed was removed from the interface. Kept here, with the state and the
+// control row below, so it can be restored without rebuilding it.
+// const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
 
 /** Re-mint this far before the URL expires, so a scrub never lands on a dead signature. */
 const REFRESH_AT_FRACTION = 0.8;
@@ -34,7 +36,10 @@ function getAudioLanguageFallbackNote(): string {
 }
 
 function formatTime(totalSeconds: number): string {
-    if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return '';
+    // Zero is a real position now that this also formats elapsed time, so it renders
+    // 0:00 rather than blank. Callers formatting a *duration* guard on > 0 themselves,
+    // where zero still means "not known yet".
+    if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return '';
     const seconds = Math.round(totalSeconds);
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
@@ -86,7 +91,10 @@ export default function EmbeddedAudio({
     const [durationSec, setDurationSec] = useState<number>(0);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [rate, setRate] = useState(1);
+    // const [rate, setRate] = useState(1);   // playback speed (removed from the UI)
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [currentTime, setCurrentTime] = useState(0);
+    const [metadataDuration, setMetadataDuration] = useState(0);
 
     const audioRef = useRef<HTMLAudioElement | null>(null);
     // Survives the src swap on re-mint, so playback resumes where the student was.
@@ -99,6 +107,13 @@ export default function EmbeddedAudio({
         setSelectedLanguage(next.language);
         setShowFallbackNote(next.usedFallback);
     }, [availableLanguages, preferredLanguage, audioKey]);
+
+    // Switching language starts a different recording; do not carry the old position.
+    useEffect(() => {
+        setCurrentTime(0);
+        setMetadataDuration(0);
+        setIsPlaying(false);
+    }, [selectedLanguage, audioKey]);
 
     /**
      * Ask the API for a playback URL. The server re-checks eligibility for this exact
@@ -163,12 +178,13 @@ export default function EmbeddedAudio({
         resumeRef.current = null;
         try {
             element.currentTime = resume.time;
-            element.playbackRate = rate;
+            setCurrentTime(resume.time);
+            // element.playbackRate = rate;   // restore speed if the control returns
             if (resume.playing) void element.play();
         } catch {
             // A failed resume is not worth interrupting playback over.
         }
-    }, [rate]);
+    }, []);
 
     // A signature that expired early (clock skew, a long pause) surfaces as a media error;
     // re-mint once and pick up where the student was rather than showing a dead player.
@@ -183,14 +199,44 @@ export default function EmbeddedAudio({
         void mintUrl(selectedLanguage, true);
     }, [isOpen, expiresAt, selectedLanguage, mintUrl]);
 
-    const changeRate = useCallback((nextRate: number) => {
-        setRate(nextRate);
-        if (audioRef.current) audioRef.current.playbackRate = nextRate;
+    const togglePlay = useCallback(() => {
+        const element = audioRef.current;
+        if (!element) return;
+        if (element.paused) {
+            void element.play();
+        } else {
+            element.pause();
+        }
     }, []);
+
+    const handleSeek = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        const element = audioRef.current;
+        const next = Number(event.target.value);
+        setCurrentTime(next);
+        if (element) element.currentTime = next;
+    }, []);
+
+    // const changeRate = useCallback((nextRate: number) => {
+    //     setRate(nextRate);
+    //     if (audioRef.current) audioRef.current.playbackRate = nextRate;
+    // }, []);
 
     if (availableLanguages.length === 0) {
         return null;
     }
+
+    // The API reports duration up front, so the scrubber is usable before the browser
+    // has finished reading metadata over the network.
+    const totalSec = durationSec > 0 ? durationSec : metadataDuration;
+    const playedPercent = totalSec > 0 ? Math.min((currentTime / totalSec) * 100, 100) : 0;
+
+    const labelOr = (key: string, fallback: string) => {
+        const label = promptLookup(key);
+        return label.includes('-unknown') ? fallback : label;
+    };
+    const playLabel = labelOr('audioPlay', 'Play');
+    const pauseLabel = labelOr('audioPause', 'Pause');
+    const scrubberLabel = labelOr('audioSeek', 'Seek within this recording');
 
     const languageSelectLabel = (() => {
         const label = promptLookup('audioLanguageSelect');
@@ -275,54 +321,174 @@ export default function EmbeddedAudio({
                     {playbackUrl ? (
                         <div className="mb-4 w-full max-w-2xl">
                             {/*
-                              * controlsList drops Chrome/Edge's Download item from the
-                              * media overflow menu, and noplaybackrate drops their speed
-                              * control in favour of the buttons below — the native one
-                              * changes playbackRate behind this component's back, which
-                              * would then be reset on the next re-mint. onContextMenu
-                              * suppresses Firefox's "Save Audio As".
+                              * The native <audio controls> UI is drawn by the browser and
+                              * cannot be resized part by part: Firefox ignores the
+                              * ::-webkit-media-controls-* pseudo-elements entirely and
+                              * Chrome has been narrowing them. On a phone its play button
+                              * and scrubber are too small to use for a six-hour teaching.
+                              * So the element stays as the engine with its own UI off, and
+                              * the transport below is ours — which also means there is no
+                              * browser overflow menu, and so no Download item.
                               *
-                              * All of this is a convenience barrier, not access control:
-                              * the signed URL is in the DOM and anyone willing to open
-                              * devtools can fetch it until it expires. Entitlement is
-                              * enforced where it can be — at mint time, server-side.
+                              * The signed URL is still in the DOM. That is unchanged and
+                              * unfixable here; entitlement is enforced at mint time.
                               */}
                             <audio
                                 ref={audioRef}
                                 key={selectedLanguage}
-                                className="w-full"
-                                controls
-                                controlsList="nodownload noplaybackrate"
                                 preload="metadata"
                                 src={playbackUrl}
-                                onContextMenu={(e) => e.preventDefault()}
-                                onLoadedMetadata={handleLoadedMetadata}
+                                onLoadedMetadata={(e) => {
+                                    const element = e.currentTarget;
+                                    if (Number.isFinite(element.duration)) {
+                                        setMetadataDuration(element.duration);
+                                    }
+                                    handleLoadedMetadata();
+                                }}
+                                onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+                                onPlay={() => setIsPlaying(true)}
+                                onPause={() => setIsPlaying(false)}
+                                onEnded={() => setIsPlaying(false)}
                                 onError={handleError}
                             />
-                            <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-gray-200">
-                                <span className="font-medium">
-                                    {(() => {
-                                        const label = promptLookup('audioSpeed');
-                                        return label.includes('-unknown') ? 'Speed' : label;
-                                    })()}:
-                                </span>
-                                {PLAYBACK_RATES.map((value) => (
-                                    <button
-                                        key={value}
-                                        type="button"
-                                        onClick={() => changeRate(value)}
-                                        className={`rounded-md border px-2 py-1 transition-colors ${value === rate
-                                            ? 'border-gray-400 bg-gray-600 text-white'
-                                            : 'border-gray-600 bg-gray-800 text-gray-300 hover:bg-gray-700'
-                                            }`}
-                                    >
-                                        {value}&times;
-                                    </button>
-                                ))}
-                                {durationSec > 0 ? (
-                                    <span className="ml-auto text-gray-400">{formatTime(durationSec)}</span>
-                                ) : null}
+
+                            <div className="flex items-center gap-4 sm:gap-3">
+                                <button
+                                    type="button"
+                                    onClick={togglePlay}
+                                    aria-label={isPlaying ? pauseLabel : playLabel}
+                                    className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full border border-gray-500 bg-gray-700 text-white transition-colors hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 sm:h-11 sm:w-11"
+                                >
+                                    <FontAwesomeIcon
+                                        icon={isPlaying ? faPause : faPlay}
+                                        className={`text-2xl sm:text-base ${isPlaying ? '' : 'ml-1'}`}
+                                    />
+                                </button>
+
+                                <div className="min-w-0 flex-1">
+                                    <input
+                                        type="range"
+                                        className="audio-scrubber w-full"
+                                        min={0}
+                                        max={totalSec || 0}
+                                        step={1}
+                                        value={Math.min(currentTime, totalSec || 0)}
+                                        onChange={handleSeek}
+                                        aria-label={scrubberLabel}
+                                        aria-valuetext={formatTime(currentTime)}
+                                        style={{ ['--played' as string]: `${playedPercent}%` }}
+                                    />
+                                    <div className="mt-1 flex justify-between font-medium tabular-nums text-gray-200 text-lg sm:text-sm">
+                                        <span>{formatTime(currentTime)}</span>
+                                        <span>
+                                            {totalSec > 0 ? `-${formatTime(Math.max(totalSec - currentTime, 0))}` : ''}
+                                        </span>
+                                    </div>
+                                </div>
                             </div>
+
+                            {/*
+                             * Range thumb and track need vendor pseudo-elements, which
+                             * Tailwind cannot express. Touch targets are deliberately
+                             * larger below the sm breakpoint.
+                             */}
+                            <style jsx>{`
+                                .audio-scrubber {
+                                    -webkit-appearance: none;
+                                    appearance: none;
+                                    width: 100%;
+                                    height: 14px;
+                                    background: transparent;
+                                    cursor: pointer;
+                                }
+                                .audio-scrubber::-webkit-slider-runnable-track {
+                                    height: 14px;
+                                    border-radius: 9999px;
+                                    background: linear-gradient(
+                                        to right,
+                                        #d1d5db 0%,
+                                        #d1d5db var(--played),
+                                        #4b5563 var(--played),
+                                        #4b5563 100%
+                                    );
+                                }
+                                .audio-scrubber::-webkit-slider-thumb {
+                                    -webkit-appearance: none;
+                                    appearance: none;
+                                    height: 28px;
+                                    width: 28px;
+                                    margin-top: -7px;
+                                    border-radius: 9999px;
+                                    background: #ffffff;
+                                    border: 1px solid #9ca3af;
+                                }
+                                .audio-scrubber::-moz-range-track {
+                                    height: 14px;
+                                    border-radius: 9999px;
+                                    background: #4b5563;
+                                }
+                                .audio-scrubber::-moz-range-progress {
+                                    height: 14px;
+                                    border-radius: 9999px;
+                                    background: #d1d5db;
+                                }
+                                .audio-scrubber::-moz-range-thumb {
+                                    height: 28px;
+                                    width: 28px;
+                                    border-radius: 9999px;
+                                    background: #ffffff;
+                                    border: 1px solid #9ca3af;
+                                }
+                                .audio-scrubber:focus-visible::-webkit-slider-thumb {
+                                    box-shadow: 0 0 0 3px rgba(156, 163, 175, 0.6);
+                                }
+                                /*
+                                 * One selector per rule on purpose. A comma-separated
+                                 * group containing a vendor pseudo-element the browser
+                                 * does not recognise is dropped in its entirety, so
+                                 * grouping the -webkit- and -moz- track selectors here
+                                 * silently discarded the desktop sizing in every browser.
+                                 */
+                                @media (min-width: 640px) {
+                                    .audio-scrubber {
+                                        height: 8px;
+                                    }
+                                    .audio-scrubber::-webkit-slider-runnable-track {
+                                        height: 8px;
+                                    }
+                                    .audio-scrubber::-moz-range-track {
+                                        height: 8px;
+                                    }
+                                    .audio-scrubber::-moz-range-progress {
+                                        height: 8px;
+                                    }
+                                    .audio-scrubber::-webkit-slider-thumb {
+                                        height: 18px;
+                                        width: 18px;
+                                        margin-top: -5px;
+                                    }
+                                    .audio-scrubber::-moz-range-thumb {
+                                        height: 18px;
+                                        width: 18px;
+                                    }
+                                }
+                            `}</style>
+
+                            {/*
+                             * Playback speed control, removed at request. Restore by
+                             * un-commenting this together with PLAYBACK_RATES, the rate
+                             * state and changeRate above.
+                             *
+                             * <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-gray-200">
+                             *     <span className="font-medium">
+                             *         {promptLookup('audioSpeed').includes('-unknown') ? 'Speed' : promptLookup('audioSpeed')}:
+                             *     </span>
+                             *     {PLAYBACK_RATES.map((value) => (
+                             *         <button key={value} type="button" onClick={() => changeRate(value)}
+                             *             className={...}>{value}&times;</button>
+                             *     ))}
+                             * </div>
+                             */}
                         </div>
                     ) : null}
                 </>
