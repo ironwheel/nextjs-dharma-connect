@@ -1,0 +1,170 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Audio lock test</title>
+<style>
+  body { font: 15px/1.45 -apple-system, system-ui, sans-serif; background:#111827; color:#e5e7eb;
+         margin:0; padding:16px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  h2 { font-size:15px; margin:0 0 8px; color:#fbbf24; }
+  p  { color:#9ca3af; margin:4px 0 16px; }
+  section { border:1px solid #374151; border-radius:8px; padding:12px; margin-bottom:14px; }
+  input { width:100%; box-sizing:border-box; padding:10px; font-size:13px; border-radius:6px;
+          border:1px solid #4b5563; background:#1f2937; color:#e5e7eb; }
+  button { padding:10px 14px; margin:6px 6px 0 0; font-size:15px; border-radius:6px;
+           border:1px solid #4b5563; background:#374151; color:#fff; }
+  audio { width:100%; margin-top:8px; }
+  pre { background:#0b1220; border:1px solid #374151; border-radius:6px; padding:8px;
+        font-size:10px; line-height:1.35; max-height:45vh; overflow:auto; white-space:pre; }
+  .state { color:#9ca3af; font-size:13px; }
+</style>
+
+<h1>Audio background-playback test</h1>
+<p>
+  Two players, one audio file. The only difference is whether the element is the browser's
+  own visible control or a hidden element driven by a button — which is what the dashboard
+  does. Play one, lock the phone, wait for it to stop or keep going, unlock, read the log.
+</p>
+
+<section>
+  <h2>Signed audio URL</h2>
+  <input id="url" placeholder="paste the signed https://audio.slsupport.link/... URL">
+  <button id="load">Load into both players</button>
+  <div class="state" id="loadState"></div>
+  <div style="margin-top:10px">
+    <!-- Player B has no scrubber, and these recordings open with silence, so both
+         players need a way to reach continuous speech before the lock test. -->
+    Jump both to <input id="mins" type="number" value="82" style="width:5em;display:inline-block"> min
+    <button id="jump">Go</button>
+  </div>
+</section>
+
+<section>
+  <h2>A — native visible &lt;audio controls&gt;</h2>
+  <div class="state">What ordinary web audio players use.</div>
+  <audio id="a" controls preload="metadata"></audio>
+</section>
+
+<section>
+  <h2>B — hidden element + custom button</h2>
+  <div class="state">What the dashboard does today.</div>
+  <audio id="b" preload="metadata"></audio>
+  <button id="bplay">Play B</button>
+  <span class="state" id="bstate">idle</span>
+</section>
+
+<section>
+  <h2>Log</h2>
+  <button id="copy">Copy</button>
+  <button id="clear">Clear</button>
+  <pre id="log"></pre>
+</section>
+
+<script>
+(function () {
+  var KEY = 'audioLockTest.log', URLKEY = 'audioLockTest.url';
+  var entries = [];
+  try { entries = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { entries = []; }
+  var origin = entries.length ? entries[0]._abs : 0;
+
+  function state(el) {
+    if (!el) return {};
+    var buf = null;
+    try { buf = el.buffered.length ? +el.buffered.end(el.buffered.length - 1).toFixed(1) : null; } catch (e) {}
+    return { at: +el.currentTime.toFixed(1), paused: el.paused, ready: el.readyState,
+             net: el.networkState, err: el.error ? el.error.code : null, buffered: buf };
+  }
+
+  function record(who, event, data) {
+    var now = Date.now();
+    if (!entries.length) origin = now;
+    var e = { _abs: now, t: now - origin, wall: new Date(now).toISOString().slice(11, 23),
+              who: who, event: event, vis: document.visibilityState };
+    for (var k in (data || {})) e[k] = data[k];
+    entries.push(e);
+    if (entries.length > 400) entries.splice(0, entries.length - 400);
+    // Written through immediately: whatever iOS does next, the record survives.
+    try { localStorage.setItem(KEY, JSON.stringify(entries)); } catch (err) {}
+    render();
+  }
+
+  function asText() {
+    return entries.map(function (e) {
+      var parts = [];
+      for (var k in e) {
+        if (k === '_abs' || k === 't' || k === 'wall' || k === 'who' || k === 'event') continue;
+        parts.push(k + '=' + e[k]);
+      }
+      return String(e.t).padStart(7) + 'ms ' + e.wall + ' ' + e.who + ' ' +
+             e.event.padEnd(16) + ' ' + parts.join(' ');
+    }).join('\n');
+  }
+  function render() { document.getElementById('log').textContent = asText(); }
+
+  var EVENTS = ['loadstart','loadedmetadata','canplay','play','playing','pause','ended',
+                'waiting','stalled','suspend','abort','emptied','error'];
+  ['a','b'].forEach(function (id) {
+    var el = document.getElementById(id);
+    EVENTS.forEach(function (name) {
+      el.addEventListener(name, function () {
+        record(id.toUpperCase(), name, state(el));
+        if (id === 'b') document.getElementById('bstate').textContent = el.paused ? 'paused' : 'playing';
+      });
+    });
+  });
+
+  document.addEventListener('visibilitychange', function () {
+    record('--', 'visibilitychange', { a: state(document.getElementById('a')).at,
+                                       b: state(document.getElementById('b')).at });
+  });
+  window.addEventListener('pagehide', function () { record('--', 'pagehide', {}); });
+  window.addEventListener('pageshow', function () { record('--', 'pageshow', {}); });
+
+  setInterval(function () {
+    var a = document.getElementById('a'), b = document.getElementById('b');
+    if (a.paused && b.paused) return;          // only log while something is playing
+    record(a.paused ? 'B' : 'A', 'heartbeat', state(a.paused ? b : a));
+  }, 5000);
+
+  var urlInput = document.getElementById('url');
+  try { urlInput.value = localStorage.getItem(URLKEY) || ''; } catch (e) {}
+
+  document.getElementById('load').addEventListener('click', function () {
+    var u = urlInput.value.trim();
+    if (!u) return;
+    try { localStorage.setItem(URLKEY, u); } catch (e) {}
+    document.getElementById('a').src = u;
+    document.getElementById('b').src = u;
+    document.getElementById('loadState').textContent = 'loaded into both players';
+    record('--', 'loaded', { audioSession: (navigator.audioSession && navigator.audioSession.type) || 'unsupported',
+                             mediaSession: 'mediaSession' in navigator });
+  });
+
+  document.getElementById('jump').addEventListener('click', function () {
+    var secs = (parseFloat(document.getElementById('mins').value) || 0) * 60;
+    ['a', 'b'].forEach(function (id) {
+      var el = document.getElementById(id);
+      try { el.currentTime = secs; } catch (e) {}
+    });
+    record('--', 'jump', { to: secs });
+  });
+
+  document.getElementById('bplay').addEventListener('click', function () {
+    var b = document.getElementById('b');
+    // Same declaration the dashboard makes, inside the same kind of user gesture.
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+    if (b.paused) { b.play(); } else { b.pause(); }
+  });
+
+  document.getElementById('copy').addEventListener('click', function () {
+    if (navigator.clipboard) navigator.clipboard.writeText(asText());
+  });
+  document.getElementById('clear').addEventListener('click', function () {
+    entries = []; origin = 0;
+    try { localStorage.removeItem(KEY); } catch (e) {}
+    render();
+  });
+
+  render();
+})();
+</script>
