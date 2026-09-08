@@ -3,6 +3,14 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faMinus, faPause, faPlay, faPlus } from '@fortawesome/free-solid-svg-icons';
 import { getAudioPlaybackUrl, promptLookup, promptLookupAIDSpecific } from 'sharedFrontend';
 import { getAvailableLanguages, languageLabel, resolveInitialMediaLanguage } from './mediaLanguage';
+import {
+    DIAG_MEDIA_EVENTS,
+    diagAsText,
+    diagClear,
+    diagEnabled,
+    diagMediaState,
+    diagRecord,
+} from './audioDiagnostics';
 
 // Playback speed was removed from the interface. Kept here, with the state and the
 // control row below, so it can be restored without rebuilding it.
@@ -111,6 +119,7 @@ export default function EmbeddedAudio({
     const [error, setError] = useState<string | null>(null);
     // const [rate, setRate] = useState(1);   // playback speed (removed from the UI)
     const [isPlaying, setIsPlaying] = useState(false);
+    const [diagText, setDiagText] = useState('');
     const [currentTime, setCurrentTime] = useState(0);
     const [metadataDuration, setMetadataDuration] = useState(0);
 
@@ -156,6 +165,7 @@ export default function EmbeddedAudio({
             resumeRef.current = null;
         }
 
+        diagRecord('mint-start', { lang: language, preserveposition, ...diagMediaState(element) });
         setLoading(true);
         setError(null);
         try {
@@ -164,6 +174,7 @@ export default function EmbeddedAudio({
             if (!result || 'redirected' in result) {
                 return;
             }
+            diagRecord('mint-ok', { expiresAt: result.expiresAt });
             setPlaybackUrl(result.url);
             setExpiresAt(result.expiresAt);
             setDurationSec(result.durationSec || 0);
@@ -172,6 +183,7 @@ export default function EmbeddedAudio({
             // Clearing playbackUrl unmounts the <audio> element, which stops playback and
             // ends the Now Playing session. Only do that when there is nothing playing to
             // preserve; a failed refresh must leave a working player alone.
+            diagRecord('mint-failed', { kept: !!playbackUrlRef.current, message: String(e?.message || e) });
             if (playbackUrlRef.current) {
                 console.warn('[EmbeddedAudio] keeping the existing URL after a failed refresh');
                 return;
@@ -277,12 +289,16 @@ export default function EmbeddedAudio({
                 : promptLookup('audioNotAvailable'));
             return;
         }
+        diagRecord('recovery-remint', { retries: errorRetriesRef.current + 1 });
         errorRetriesRef.current += 1;
         void mintUrl(selectedLanguage, true);
     }, [selectedLanguage, mintUrl]);
 
     const scheduleRecovery = useCallback(() => {
-        if (typeof document !== 'undefined' && document.hidden) return;
+        if (typeof document !== 'undefined' && document.hidden) {
+            diagRecord('recovery-deferred-hidden');
+            return;
+        }
         if (recoveryTimerRef.current) clearTimeout(recoveryTimerRef.current);
         recoveryTimerRef.current = setTimeout(attemptRecovery, ERROR_RECOVERY_DELAY_MS);
     }, [attemptRecovery]);
@@ -306,6 +322,51 @@ export default function EmbeddedAudio({
         recoveryPendingRef.current = true;
         scheduleRecovery();
     }, [isOpen, scheduleRecovery]);
+
+    /*
+     * Diagnostic recording. Attaches to the element directly rather than going through
+     * React props, so it sees events React does not surface and cannot perturb playback.
+     */
+    useEffect(() => {
+        if (!diagEnabled() || !isOpen || !playbackUrl) return;
+        const element = audioRef.current;
+        if (!element) return;
+
+        diagRecord('track-loaded', { lang: selectedLanguage, ...diagMediaState(element) });
+
+        const listeners: Array<[string, EventListener]> = DIAG_MEDIA_EVENTS.map((name) => [
+            name,
+            () => diagRecord(name, diagMediaState(audioRef.current)),
+        ]);
+        for (const [name, handler] of listeners) element.addEventListener(name, handler);
+
+        // Sampled rather than per-timeupdate: a steady heartbeat makes the exact moment
+        // playback stalls obvious, without flooding the log.
+        const heartbeat = setInterval(() => {
+            diagRecord('heartbeat', diagMediaState(audioRef.current));
+        }, 5000);
+
+        const onVisibility = () => diagRecord('visibilitychange', diagMediaState(audioRef.current));
+        const onPageHide = () => diagRecord('pagehide', diagMediaState(audioRef.current));
+        const onPageShow = () => diagRecord('pageshow', diagMediaState(audioRef.current));
+        const onFreeze = () => diagRecord('freeze', diagMediaState(audioRef.current));
+        const onResume = () => diagRecord('resume', diagMediaState(audioRef.current));
+        document.addEventListener('visibilitychange', onVisibility);
+        window.addEventListener('pagehide', onPageHide);
+        window.addEventListener('pageshow', onPageShow);
+        document.addEventListener('freeze', onFreeze);
+        document.addEventListener('resume', onResume);
+
+        return () => {
+            for (const [name, handler] of listeners) element.removeEventListener(name, handler);
+            clearInterval(heartbeat);
+            document.removeEventListener('visibilitychange', onVisibility);
+            window.removeEventListener('pagehide', onPageHide);
+            window.removeEventListener('pageshow', onPageShow);
+            document.removeEventListener('freeze', onFreeze);
+            document.removeEventListener('resume', onResume);
+        };
+    }, [isOpen, playbackUrl, selectedLanguage]);
 
     // An error raised while the screen was locked waits here until the student is back.
     useEffect(() => {
@@ -686,6 +747,52 @@ export default function EmbeddedAudio({
                                     }
                                 }
                             `}</style>
+
+                            {diagEnabled() ? (
+                                <div className="mt-4 rounded-md border border-amber-700 bg-gray-900 p-3 text-xs text-gray-200">
+                                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                                        <span className="font-semibold text-amber-400">Audio diagnostics</span>
+                                        <button
+                                            type="button"
+                                            className="rounded border border-gray-600 px-2 py-1 hover:bg-gray-700"
+                                            onClick={() => setDiagText(diagAsText() || '(no events recorded)')}
+                                        >
+                                            Show log
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="rounded border border-gray-600 px-2 py-1 hover:bg-gray-700"
+                                            onClick={() => {
+                                                const text = diagAsText();
+                                                void navigator.clipboard?.writeText(text);
+                                                setDiagText(text || '(no events recorded)');
+                                            }}
+                                        >
+                                            Copy
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="rounded border border-gray-600 px-2 py-1 hover:bg-gray-700"
+                                            onClick={() => {
+                                                diagClear();
+                                                setDiagText('');
+                                            }}
+                                        >
+                                            Clear
+                                        </button>
+                                    </div>
+                                    {diagText ? (
+                                        <pre className="max-h-72 overflow-auto whitespace-pre text-[10px] leading-tight">
+                                            {diagText}
+                                        </pre>
+                                    ) : (
+                                        <p className="text-gray-400">
+                                            Recording. Lock the phone, wait for the audio to stop, unlock,
+                                            then tap Show log.
+                                        </p>
+                                    )}
+                                </div>
+                            ) : null}
 
                             {/*
                              * Playback speed control, removed at request. Restore by
