@@ -17,6 +17,7 @@ import { extractShowcaseToVideoList, enableVideoPlayback } from './vimeoClient';
 import { stripeCreatePaymentIntent, stripeUpdatePaymentIntent } from './stripe';
 import { putOfferingTransaction, completeOffering, updateOfferingTransactionRefund } from './offering';
 import { translatePromptFromEnglish } from './translate';
+import { resolveAudioEntitlement, signAudioUrl } from './audio';
 
 /**
  * @async
@@ -1044,6 +1045,11 @@ export async function dispatch(
       const [offeringAction] = rest;
       console.log("DISPATCH: subsystem:", subsystem, "action:", offeringAction);
       return await dispatchOffering(offeringAction, req, res);
+    case 'audio':
+      // Audio URLs: /api/audio/[action] e.g. /api/audio/playback-url
+      const [audioAction] = rest;
+      console.log("DISPATCH: subsystem:", subsystem, "action:", audioAction);
+      return await dispatchAudio(audioAction, req, res);
     default:
       return res.status(404).json({ error: `Unknown subsystem: ${subsystem}` });
   }
@@ -1116,5 +1122,75 @@ async function dispatchOffering(
   } catch (error: any) {
     console.error(`Offering action ${action} failed:`, error);
     return res.status(500).json({ error: error.message || 'Offering complete failed' });
+  }
+}
+/**
+ * @async
+ * @function dispatchAudio
+ * @description Dispatches teaching-audio API requests.
+ *
+ * The middleware has already run checkAccess, so the caller's identity (host/pid/hash) is
+ * established. What happens here is the authorization the video path never had: eligibility
+ * is re-evaluated server-side for the exact object requested.
+ */
+async function dispatchAudio(
+  action: string | undefined,
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  const pid = req.headers['x-user-id'] as string;
+  const hash = req.headers['x-verification-hash'] as string;
+  const host = req.headers['x-host'] as string;
+  const deviceFingerprint = req.headers['x-device-fingerprint'] as string;
+  if (!pid || !hash || !host || !deviceFingerprint) {
+    return res.status(400).json({ error: 'Missing required authentication parameters' });
+  }
+
+  let oidcToken = req.headers['x-vercel-oidc-token'] as string;
+  if (!oidcToken && process.env.NODE_ENV === 'development') {
+    oidcToken = process.env.VERCEL_OIDC_TOKEN!;
+  }
+  const appRole = (req as any).userRole || process.env.DEFAULT_GUEST_ROLE_ARN!;
+
+  try {
+    switch (action) {
+      case 'playback-url': {
+        if (req.method !== 'POST') {
+          res.setHeader('Allow', 'POST');
+          return res.status(405).json({ error: 'Method Not Allowed' });
+        }
+        const { aid, subEvent, index, language } = req.body || {};
+        const entitlement = await resolveAudioEntitlement({
+          pid,
+          aid: String(aid ?? ''),
+          subEvent: String(subEvent ?? ''),
+          index: Number(index),
+          language: String(language ?? ''),
+          appRole,
+          oidcToken,
+        });
+
+        if (!entitlement.allowed) {
+          // The reason stays in the logs. Returning it would let a caller distinguish
+          // "not eligible" from "does not exist" and map out the whole library.
+          console.log('AUDIO DENIED:', { pid, aid, subEvent, index, language, reason: entitlement.reason });
+          return res.status(403).json({ error: 'AUDIO_NOT_ENTITLED' });
+        }
+
+        const { url, expiresAt } = signAudioUrl(entitlement.asset.key, pid);
+        return res.status(200).json({
+          url,
+          expiresAt,
+          durationSec: entitlement.asset.durationSec,
+          bytes: entitlement.asset.bytes,
+          language,
+        });
+      }
+      default:
+        return res.status(404).json({ error: `Unknown audio action: ${action}` });
+    }
+  } catch (error: any) {
+    console.error(`Audio action ${action} failed:`, error);
+    return res.status(500).json({ error: error.message || 'Audio action failed' });
   }
 }
