@@ -2,44 +2,14 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faMinus, faPlus } from '@fortawesome/free-solid-svg-icons';
 import { promptLookup, promptLookupAIDSpecific } from 'sharedFrontend';
+import { getAvailableLanguages, languageLabel, resolveInitialMediaLanguage } from './mediaLanguage';
 
-const VIDEO_ENTRY_METADATA_KEYS = new Set(['title', 'password']);
-
-const VIDEO_LANGUAGE_LABELS: Record<string, string> = {
-    Chinese: '中文',
-    Czech: 'čeština',
-    Dutch: 'Nederlands',
-    English: 'English',
-    French: 'Français',
-    German: 'Deutsch',
-    Italian: 'Italiano',
-    Portuguese: 'Português',
-    Russian: 'русский',
-    Spanish: 'Español',
-};
-
+/** A video language value is a Vimeo id string. */
 export function getVideoAvailableLanguages(videoEntry: Record<string, unknown>): string[] {
-    return Object.keys(videoEntry)
-        .filter((key) => !VIDEO_ENTRY_METADATA_KEYS.has(key))
-        .filter((key) => typeof videoEntry[key] === 'string' && Boolean(videoEntry[key]))
-        .sort((a, b) => a.localeCompare(b));
+    return getAvailableLanguages(videoEntry, (value) => typeof value === 'string' && Boolean(value));
 }
 
-export function resolveInitialVideoLanguage(
-    available: string[],
-    preferred: string
-): { language: string; usedFallback: boolean } {
-    if (available.length === 0) {
-        return { language: preferred, usedFallback: false };
-    }
-    if (available.includes(preferred)) {
-        return { language: preferred, usedFallback: false };
-    }
-    if (available.includes('English')) {
-        return { language: 'English', usedFallback: preferred !== 'English' };
-    }
-    return { language: available[0], usedFallback: true };
-}
+export const resolveInitialVideoLanguage = resolveInitialMediaLanguage;
 
 function getVideoLanguageFallbackNote(): string {
     const videoLangNote = promptLookup('videoLanguageNotAvailable');
@@ -51,10 +21,6 @@ function getVideoLanguageFallbackNote(): string {
         return emailLangNote.replace(/email/gi, 'video');
     }
     return 'This video is unavailable in your language. Displaying English instead.';
-}
-
-function languageLabel(language: string): string {
-    return VIDEO_LANGUAGE_LABELS[language] ?? language;
 }
 
 type EmbeddedVideoProps = {

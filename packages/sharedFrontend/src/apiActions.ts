@@ -1182,3 +1182,59 @@ export async function completeOffering(
     if (response && response.redirected) return { redirected: true };
     return response;
 } 
+/**
+ * @interface AudioPlayback
+ * @description A minted, time-limited playback URL for one teaching audio track.
+ */
+export interface AudioPlayback {
+    /** CloudFront signed URL. Valid only for this exact track and only until expiresAt. */
+    url: string;
+    /** Epoch milliseconds at which the signature stops being accepted. */
+    expiresAt: number;
+    durationSec: number;
+    bytes: number;
+    language: string;
+}
+
+/**
+ * @async
+ * @function getAudioPlaybackUrl
+ * @description Request a playback URL for one event/sub-event/index/language.
+ *
+ * The server re-checks eligibility for this exact track, so a denial here is authoritative
+ * and is deliberately indistinguishable from "no such track".
+ * @param {string} aid - The event aid, e.g. 'vy2026'.
+ * @param {string} subEvent - The sub-event name, e.g. 'weekend1'.
+ * @param {number} index - Session index within the sub-event.
+ * @param {string} language - English language name, e.g. 'English'.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<AudioPlayback | RedirectedResponse>} The playback URL, or a redirect marker.
+ * @throws {Error} 'AUDIO_NOT_ENTITLED' when the student may not stream this track.
+ */
+export async function getAudioPlaybackUrl(
+    aid: string,
+    subEvent: string,
+    index: number,
+    language: string,
+    pid: string,
+    hash: string
+): Promise<AudioPlayback | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/audio/playback-url`, pid, hash, {
+            aid,
+            subEvent,
+            index,
+            language,
+        });
+
+        if (response && response.redirected) {
+            return { redirected: true };
+        }
+
+        return response as AudioPlayback;
+    } catch (error: any) {
+        console.error(`[API] getAudioPlaybackUrl failed for ${aid}/${subEvent}[${index}]/${language}:`, error);
+        throw new Error(error.message || 'Failed to get audio playback URL');
+    }
+}

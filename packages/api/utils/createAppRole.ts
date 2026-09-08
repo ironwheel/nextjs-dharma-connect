@@ -241,6 +241,22 @@ function mapAppActionsToPermissions(appActions) {
                 } catch (e) { console.warn(e.message); }
                 break;
 
+            // Teaching audio: entitlement is evaluated server-side, so this action needs
+            // to read the event, the student, and the pool definitions itself. The
+            // eligible-via-showcase fallback scans events. Signing the URL is pure RSA
+            // and needs no AWS permission at all.
+            case 'POST/audio/playback-url':
+                try {
+                    const eventsArn = getTableArn('events');
+                    const studentsArn = getTableArn('students');
+                    const poolsArn = getTableArn('pools');
+                    readTables.add(eventsArn);   // the event being requested
+                    scanTables.add(eventsArn);   // the eligible-via-showcase fallback
+                    readTables.add(studentsArn); // the requesting student
+                    scanTables.add(poolsArn);    // pool definitions (listAll only)
+                } catch (e) { console.warn(e.message); }
+                break;
+
             // Pools Table - POST can be used for chunked listing (Scan)
             case 'POST/table/pools':
                 try {
