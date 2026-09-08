@@ -11,6 +11,14 @@ import { getAvailableLanguages, languageLabel, resolveInitialMediaLanguage } fro
 /** Give up re-minting after this many consecutive media errors on one track. */
 const MAX_ERROR_RETRIES = 2;
 
+/**
+ * Wait this long after a media error before acting on it. iOS drops the connection when
+ * the screen locks, which surfaces as a media error, and Safari often resumes on its own
+ * once the connection returns. Reacting immediately destroyed playback that would have
+ * recovered by itself.
+ */
+const ERROR_RECOVERY_DELAY_MS = 3000;
+
 /** Re-mint this far before the URL expires, so a scrub never lands on a dead signature. */
 const REFRESH_AT_FRACTION = 0.8;
 
@@ -108,6 +116,10 @@ export default function EmbeddedAudio({
 
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const errorRetriesRef = useRef(0);
+    const recoveryPendingRef = useRef(false);
+    const recoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Mirrors playbackUrl so mintUrl can tell whether there is a working player to keep.
+    const playbackUrlRef = useRef<string | null>(null);
     // Survives the src swap on re-mint, so playback resumes where the student was.
     const resumeRef = useRef<{ time: number; playing: boolean } | null>(null);
 
@@ -118,6 +130,10 @@ export default function EmbeddedAudio({
         setSelectedLanguage(next.language);
         setShowFallbackNote(next.usedFallback);
     }, [availableLanguages, preferredLanguage, audioKey]);
+
+    useEffect(() => {
+        playbackUrlRef.current = playbackUrl;
+    }, [playbackUrl]);
 
     // Switching language starts a different recording; do not carry the old position.
     useEffect(() => {
@@ -153,6 +169,13 @@ export default function EmbeddedAudio({
             setDurationSec(result.durationSec || 0);
         } catch (e: any) {
             console.error('[EmbeddedAudio] failed to get playback URL:', e);
+            // Clearing playbackUrl unmounts the <audio> element, which stops playback and
+            // ends the Now Playing session. Only do that when there is nothing playing to
+            // preserve; a failed refresh must leave a working player alone.
+            if (playbackUrlRef.current) {
+                console.warn('[EmbeddedAudio] keeping the existing URL after a failed refresh');
+                return;
+            }
             const notAvailable = promptLookup('audioNotAvailable');
             setError(notAvailable.includes('-unknown')
                 ? 'This audio is not available.'
@@ -229,27 +252,77 @@ export default function EmbeddedAudio({
     }, []);
 
     /*
-     * Media errors here are usually recoverable: an expired signature, or iOS tearing
-     * down the connection while the screen is locked. Both are fixed by minting a fresh
-     * URL and resuming where the student was. The previous version only retried once the
-     * URL was near expiry and otherwise latched a permanent "could not be played"
-     * message, which turned a transient stall into a dead player.
+     * Recovering from a media error means assigning a new src, which reloads the element.
+     * That stops playback and ends the Now Playing session, so it must never happen while
+     * the screen is locked — which is exactly when iOS raises the error. On lock Safari
+     * drops the connection, the element errors, and reacting to it killed the playback the
+     * student was listening to. Chrome for iOS keeps its connection alive so the error
+     * never fired there, which is why the fault looked browser-specific.
+     *
+     * An error now only schedules a check. The check runs when the page is visible, after
+     * a delay, and does nothing if the element recovered on its own meanwhile.
      */
+    const attemptRecovery = useCallback(() => {
+        recoveryTimerRef.current = null;
+        const element = audioRef.current;
+        if (!element || !recoveryPendingRef.current) return;
+        recoveryPendingRef.current = false;
+
+        // Recovered without help once the connection came back.
+        if (!element.error) return;
+
+        if (errorRetriesRef.current >= MAX_ERROR_RETRIES) {
+            setError(promptLookup('audioNotAvailable').includes('-unknown')
+                ? 'This audio could not be played.'
+                : promptLookup('audioNotAvailable'));
+            return;
+        }
+        errorRetriesRef.current += 1;
+        void mintUrl(selectedLanguage, true);
+    }, [selectedLanguage, mintUrl]);
+
+    const scheduleRecovery = useCallback(() => {
+        if (typeof document !== 'undefined' && document.hidden) return;
+        if (recoveryTimerRef.current) clearTimeout(recoveryTimerRef.current);
+        recoveryTimerRef.current = setTimeout(attemptRecovery, ERROR_RECOVERY_DELAY_MS);
+    }, [attemptRecovery]);
+
     const handleError = useCallback(() => {
         if (!isOpen) return;
         const element = audioRef.current;
-        // MEDIA_ERR_ABORTED is our own src swap; there is nothing to recover from.
+        // Left in deliberately: if playback still stops on a locked phone, this line in
+        // Safari's Web Inspector says whether the element errored at all, and with what.
+        // Silence here means iOS suspended the page and no page code can prevent it.
+        console.warn('[EmbeddedAudio] media error', {
+            code: element?.error?.code,
+            message: element?.error?.message,
+            readyState: element?.readyState,
+            networkState: element?.networkState,
+            currentTime: element?.currentTime,
+            visibility: typeof document !== 'undefined' ? document.visibilityState : 'unknown',
+        });
+        // MEDIA_ERR_ABORTED is this component swapping src; nothing to recover from.
         if (element?.error?.code === MediaError.MEDIA_ERR_ABORTED) return;
+        recoveryPendingRef.current = true;
+        scheduleRecovery();
+    }, [isOpen, scheduleRecovery]);
 
-        if (errorRetriesRef.current < MAX_ERROR_RETRIES) {
-            errorRetriesRef.current += 1;
-            void mintUrl(selectedLanguage, true);
-            return;
-        }
-        setError(promptLookup('audioNotAvailable').includes('-unknown')
-            ? 'This audio could not be played.'
-            : promptLookup('audioNotAvailable'));
-    }, [isOpen, selectedLanguage, mintUrl]);
+    // An error raised while the screen was locked waits here until the student is back.
+    useEffect(() => {
+        if (typeof document === 'undefined') return;
+        const onVisibilityChange = () => {
+            if (document.hidden || !recoveryPendingRef.current) return;
+            scheduleRecovery();
+        };
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        return () => {
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+            if (recoveryTimerRef.current) {
+                clearTimeout(recoveryTimerRef.current);
+                recoveryTimerRef.current = null;
+            }
+        };
+    }, [scheduleRecovery]);
 
     const togglePlay = useCallback(() => {
         const element = audioRef.current;
