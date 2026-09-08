@@ -5,6 +5,7 @@
   "types": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./eligible": "./src/eligible.ts",
     "./installmentsHelpers": "./src/installmentsHelpers.ts"
   },
   "files": [
