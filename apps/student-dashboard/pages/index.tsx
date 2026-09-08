@@ -1697,6 +1697,9 @@ const HomeContent = () => {
                             index={index}
                             pid={pid as string}
                             hash={hash as string}
+                            eventTitle={el.eventname}
+                            sessionLabel={el.subEventDisplayName ?? undefined}
+                            artworkUrl={el.parentEvent.config?.eventImage}
                             isAudioOpen={isAudioOpen}
                             onAudioToggle={onAudioToggle}
                         />
