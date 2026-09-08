@@ -8,6 +8,9 @@ import { getAvailableLanguages, languageLabel, resolveInitialMediaLanguage } fro
 // control row below, so it can be restored without rebuilding it.
 // const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
 
+/** Give up re-minting after this many consecutive media errors on one track. */
+const MAX_ERROR_RETRIES = 2;
+
 /** Re-mint this far before the URL expires, so a scrub never lands on a dead signature. */
 const REFRESH_AT_FRACTION = 0.8;
 
@@ -60,6 +63,10 @@ type EmbeddedAudioProps = {
     index: number;
     pid: string;
     hash: string;
+    /** Shown on the iOS lock screen / Android notification via the Media Session API. */
+    eventTitle?: string;
+    sessionLabel?: string;
+    artworkUrl?: string;
     isAudioOpen: (audioKey: string) => boolean;
     onAudioToggle: (audioKey: string) => void;
 };
@@ -74,6 +81,9 @@ export default function EmbeddedAudio({
     index,
     pid,
     hash,
+    eventTitle,
+    sessionLabel,
+    artworkUrl,
     isAudioOpen,
     onAudioToggle,
 }: EmbeddedAudioProps) {
@@ -97,6 +107,7 @@ export default function EmbeddedAudio({
     const [metadataDuration, setMetadataDuration] = useState(0);
 
     const audioRef = useRef<HTMLAudioElement | null>(null);
+    const errorRetriesRef = useRef(0);
     // Survives the src swap on re-mint, so playback resumes where the student was.
     const resumeRef = useRef<{ time: number; playing: boolean } | null>(null);
 
@@ -113,6 +124,7 @@ export default function EmbeddedAudio({
         setCurrentTime(0);
         setMetadataDuration(0);
         setIsPlaying(false);
+        errorRetriesRef.current = 0;
     }, [selectedLanguage, audioKey]);
 
     /**
@@ -164,10 +176,35 @@ export default function EmbeddedAudio({
         if (!isOpen || !expiresAt) return;
         const remaining = expiresAt - Date.now();
         if (remaining <= 0) return;
-        const timer = setTimeout(() => {
+
+        let cancelled = false;
+        let onVisible: (() => void) | null = null;
+
+        const refresh = () => {
+            if (cancelled) return;
+            // Assigning src reloads the element, which stops playback outright. Never do
+            // that while the phone is locked or the tab is in the background: defer until
+            // the student is looking at the page again. The old URL keeps working in the
+            // meantime, since the refresh happens well before it expires.
+            if (typeof document !== 'undefined' && document.hidden) {
+                onVisible = () => {
+                    if (document.hidden || cancelled) return;
+                    document.removeEventListener('visibilitychange', onVisible!);
+                    onVisible = null;
+                    void mintUrl(selectedLanguage, true);
+                };
+                document.addEventListener('visibilitychange', onVisible);
+                return;
+            }
             void mintUrl(selectedLanguage, true);
-        }, Math.max(remaining * REFRESH_AT_FRACTION, 1000));
-        return () => clearTimeout(timer);
+        };
+
+        const timer = setTimeout(refresh, Math.max(remaining * REFRESH_AT_FRACTION, 1000));
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+            if (onVisible) document.removeEventListener('visibilitychange', onVisible);
+        };
     }, [isOpen, expiresAt, selectedLanguage, mintUrl]);
 
     // Restore position after a re-mint swapped the src.
@@ -180,24 +217,39 @@ export default function EmbeddedAudio({
             element.currentTime = resume.time;
             setCurrentTime(resume.time);
             // element.playbackRate = rate;   // restore speed if the control returns
-            if (resume.playing) void element.play();
+            if (resume.playing) {
+                // iOS rejects play() outside a user gesture. If that happens, leave the
+                // player paused at the right position so one tap resumes, rather than
+                // appearing to be playing while silent.
+                void element.play().catch(() => setIsPlaying(false));
+            }
         } catch {
             // A failed resume is not worth interrupting playback over.
         }
     }, []);
 
-    // A signature that expired early (clock skew, a long pause) surfaces as a media error;
-    // re-mint once and pick up where the student was rather than showing a dead player.
+    /*
+     * Media errors here are usually recoverable: an expired signature, or iOS tearing
+     * down the connection while the screen is locked. Both are fixed by minting a fresh
+     * URL and resuming where the student was. The previous version only retried once the
+     * URL was near expiry and otherwise latched a permanent "could not be played"
+     * message, which turned a transient stall into a dead player.
+     */
     const handleError = useCallback(() => {
-        if (!isOpen || !expiresAt) return;
-        if (Date.now() < expiresAt - 60_000) {
-            setError(promptLookup('audioNotAvailable').includes('-unknown')
-                ? 'This audio could not be played.'
-                : promptLookup('audioNotAvailable'));
+        if (!isOpen) return;
+        const element = audioRef.current;
+        // MEDIA_ERR_ABORTED is our own src swap; there is nothing to recover from.
+        if (element?.error?.code === MediaError.MEDIA_ERR_ABORTED) return;
+
+        if (errorRetriesRef.current < MAX_ERROR_RETRIES) {
+            errorRetriesRef.current += 1;
+            void mintUrl(selectedLanguage, true);
             return;
         }
-        void mintUrl(selectedLanguage, true);
-    }, [isOpen, expiresAt, selectedLanguage, mintUrl]);
+        setError(promptLookup('audioNotAvailable').includes('-unknown')
+            ? 'This audio could not be played.'
+            : promptLookup('audioNotAvailable'));
+    }, [isOpen, selectedLanguage, mintUrl]);
 
     const togglePlay = useCallback(() => {
         const element = audioRef.current;
@@ -209,12 +261,16 @@ export default function EmbeddedAudio({
         }
     }, []);
 
-    const handleSeek = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const seekTo = useCallback((seconds: number) => {
         const element = audioRef.current;
-        const next = Number(event.target.value);
+        const next = Math.max(0, seconds);
         setCurrentTime(next);
         if (element) element.currentTime = next;
     }, []);
+
+    const handleSeek = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        seekTo(Number(event.target.value));
+    }, [seekTo]);
 
     // const changeRate = useCallback((nextRate: number) => {
     //     setRate(nextRate);
@@ -224,6 +280,87 @@ export default function EmbeddedAudio({
     if (availableLanguages.length === 0) {
         return null;
     }
+
+    /*
+     * Media Session is what puts a title, artwork and transport controls on the iOS lock
+     * screen and in Control Center. Without it iOS has nothing to display, which is why
+     * the lock screen showed no player. It also tells iOS this is a genuine Now Playing
+     * session rather than incidental page audio.
+     */
+    useEffect(() => {
+        if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+        const session = navigator.mediaSession;
+        if (!isOpen || !playbackUrl) {
+            session.metadata = null;
+            return;
+        }
+
+        try {
+            session.metadata = new MediaMetadata({
+                title: [eventTitle, sessionLabel].filter(Boolean).join(' — ') || 'Teaching audio',
+                artist: languageLabel(selectedLanguage),
+                artwork: artworkUrl ? [{ src: artworkUrl }] : undefined,
+            });
+        } catch {
+            // MediaMetadata is unavailable on some engines; controls still work without it.
+        }
+
+        const handlers: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
+            ['play', () => { void audioRef.current?.play(); }],
+            ['pause', () => { audioRef.current?.pause(); }],
+            ['seekbackward', (details) => {
+                const element = audioRef.current;
+                if (element) seekTo(element.currentTime - (details.seekOffset || 15));
+            }],
+            ['seekforward', (details) => {
+                const element = audioRef.current;
+                if (element) seekTo(element.currentTime + (details.seekOffset || 30));
+            }],
+            ['seekto', (details) => {
+                if (typeof details.seekTime === 'number') seekTo(details.seekTime);
+            }],
+        ];
+        for (const [action, handler] of handlers) {
+            try {
+                session.setActionHandler(action, handler);
+            } catch {
+                // Unsupported actions simply do not appear on the lock screen.
+            }
+        }
+
+        return () => {
+            for (const [action] of handlers) {
+                try {
+                    session.setActionHandler(action, null);
+                } catch {
+                    // ignore
+                }
+            }
+        };
+    }, [isOpen, playbackUrl, eventTitle, sessionLabel, artworkUrl, selectedLanguage, seekTo]);
+
+    // Keep the lock screen's play/pause state and scrubber in step with the element.
+    useEffect(() => {
+        if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+        navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    }, [isPlaying]);
+
+    useEffect(() => {
+        if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+        const session = navigator.mediaSession;
+        if (typeof session.setPositionState !== 'function') return;
+        const total = durationSec > 0 ? durationSec : metadataDuration;
+        if (!(total > 0)) return;
+        try {
+            session.setPositionState({
+                duration: total,
+                position: Math.min(Math.max(currentTime, 0), total),
+                playbackRate: 1,
+            });
+        } catch {
+            // Position reporting is advisory; a rejected value must not break playback.
+        }
+    }, [currentTime, durationSec, metadataDuration]);
 
     // The API reports duration up front, so the scrubber is usable before the browser
     // has finished reading metadata over the network.
@@ -346,7 +483,10 @@ export default function EmbeddedAudio({
                                     handleLoadedMetadata();
                                 }}
                                 onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-                                onPlay={() => setIsPlaying(true)}
+                                onPlay={() => {
+                                    errorRetriesRef.current = 0;
+                                    setIsPlaying(true);
+                                }}
                                 onPause={() => setIsPlaying(false)}
                                 onEnded={() => setIsPlaying(false)}
                                 onError={handleError}
