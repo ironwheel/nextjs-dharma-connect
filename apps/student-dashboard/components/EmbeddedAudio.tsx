@@ -3,6 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faMinus, faPause, faPlay, faPlus } from '@fortawesome/free-solid-svg-icons';
 import { getAudioPlaybackUrl, promptLookup, promptLookupAIDSpecific } from 'sharedFrontend';
 import { getAvailableLanguages, languageLabel, resolveInitialMediaLanguage } from './mediaLanguage';
+import { chromeIosUrl, isIosSafari } from './platform';
 import {
     DIAG_MEDIA_EVENTS,
     diagAsText,
@@ -145,6 +146,10 @@ export default function EmbeddedAudio({
     // const [rate, setRate] = useState(1);   // playback speed (removed from the UI)
     const [isPlaying, setIsPlaying] = useState(false);
     const [diagText, setDiagText] = useState('');
+    // Resolved after mount, never during render: the server has no user agent, and
+    // deciding this while rendering would produce a hydration mismatch.
+    const [iosSafari, setIosSafari] = useState(false);
+    const [chromeUrl, setChromeUrl] = useState<string | null>(null);
     const [currentTime, setCurrentTime] = useState(0);
     const [metadataDuration, setMetadataDuration] = useState(0);
 
@@ -168,6 +173,11 @@ export default function EmbeddedAudio({
     useEffect(() => {
         playbackUrlRef.current = playbackUrl;
     }, [playbackUrl]);
+
+    useEffect(() => {
+        setIosSafari(isIosSafari());
+        setChromeUrl(chromeIosUrl());
+    }, []);
 
     // Switching language starts a different recording; do not carry the old position.
     useEffect(() => {
@@ -708,6 +718,30 @@ export default function EmbeddedAudio({
                                     </div>
                                 </div>
                             </div>
+
+                            {iosSafari ? (
+                                <div className="mt-3 rounded-md border border-amber-600 bg-gray-800 p-3 text-sm text-gray-100">
+                                    <p>
+                                        {(() => {
+                                            const prompt = promptLookup('audioIosSafariNotice');
+                                            return prompt.includes('-unknown')
+                                                ? 'Safari stops audio when your screen locks. Chrome on iPhone keeps playing. To listen with the screen off, open this dashboard in Chrome.'
+                                                : prompt;
+                                        })()}
+                                    </p>
+                                    {chromeUrl ? (
+                                        <a
+                                            href={chromeUrl}
+                                            className="mt-3 inline-block rounded-md border border-gray-500 bg-gray-700 px-3 py-2 font-medium text-white transition-colors hover:bg-gray-600"
+                                        >
+                                            {(() => {
+                                                const prompt = promptLookup('audioOpenInChrome');
+                                                return prompt.includes('-unknown') ? 'Open in Chrome' : prompt;
+                                            })()}
+                                        </a>
+                                    ) : null}
+                                </div>
+                            ) : null}
 
                             {/*
                              * Range thumb and track need vendor pseudo-elements, which

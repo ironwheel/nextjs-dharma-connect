@@ -45,6 +45,12 @@ ENGLISH_PROMPTS = {
         "This audio is unavailable in your language. Playing English instead.",
     "audioNotAvailable": "This audio is not available.",
     "audioSpeed": "Speed",
+    # Shown under the player on iOS Safari only. Safari pauses audio when the screen
+    # locks and Chrome for iOS does not; see the audio diagnostics for the evidence.
+    "audioIosSafariNotice":
+        "Safari stops audio when your screen locks. Chrome on iPhone keeps playing. "
+        "To listen with the screen off, open this dashboard in Chrome.",
+    "audioOpenInChrome": "Open in Chrome",
 }
 
 VIDEO_YEAR_PREFIX = "dashboard-controlTitleVideos"
