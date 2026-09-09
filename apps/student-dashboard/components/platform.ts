@@ -49,14 +49,38 @@ export function isIosSafari(overrides?: PlatformProbe): boolean {
     return /Safari\//.test(userAgent);
 }
 
+export interface AlternateBrowser {
+    name: string;
+    url: string;
+}
+
 /**
- * A link that reopens the current page in Chrome for iOS. Chrome registers googlechrome://
- * and googlechromes:// for http and https. Returns null when there is nothing sensible to
- * offer, so the caller can omit the button rather than render a dead one.
+ * Links that reopen the current page in an iOS browser that keeps playing audio when the
+ * screen locks. Chrome, Firefox and Edge were all confirmed to keep playing on the device;
+ * only Safari stops.
+ *
+ * Confidence in these schemes is not equal. Chrome's googlechrome:// and googlechromes://
+ * are documented by Google, and Firefox's firefox://open-url comes from Firefox iOS
+ * itself. Edge's microsoft-edge-https:// is widely used but poorly documented, so it is
+ * the one to check on a real device; a scheme that is not registered simply does nothing
+ * when tapped, which is why the notice also tells people they can switch browsers by hand.
+ *
+ * Returns an empty list for anything that is not http(s) — a file:// page has nothing
+ * meaningful to hand over — so callers can omit the buttons rather than render dead ones.
  */
-export function chromeIosUrl(href?: string): string | null {
+export function alternateBrowserUrls(href?: string): AlternateBrowser[] {
     const current = href ?? (typeof window !== 'undefined' ? window.location.href : '');
-    if (current.startsWith('https://')) return `googlechromes://${current.slice('https://'.length)}`;
-    if (current.startsWith('http://')) return `googlechrome://${current.slice('http://'.length)}`;
-    return null;
+    const https = current.startsWith('https://');
+    if (!https && !current.startsWith('http://')) return [];
+    const withoutScheme = current.replace(/^https?:\/\//, '');
+
+    const browsers: AlternateBrowser[] = [
+        { name: 'Chrome', url: `${https ? 'googlechromes' : 'googlechrome'}://${withoutScheme}` },
+        { name: 'Firefox', url: `firefox://open-url?url=${encodeURIComponent(current)}` },
+    ];
+    // Edge only publishes the https form, so do not invent an http one for local testing.
+    if (https) {
+        browsers.push({ name: 'Edge', url: `microsoft-edge-https://${withoutScheme}` });
+    }
+    return browsers;
 }
