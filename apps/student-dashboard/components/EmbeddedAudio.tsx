@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faMinus, faPause, faPlay, faPlus } from '@fortawesome/free-solid-svg-icons';
 import { getAudioPlaybackUrl, promptLookup, promptLookupAIDSpecific } from 'sharedFrontend';
 import { getAvailableLanguages, languageLabel, resolveInitialMediaLanguage } from './mediaLanguage';
-import { chromeIosUrl, isIosSafari } from './platform';
+import { alternateBrowserUrls, isIosSafari, type AlternateBrowser } from './platform';
 import {
     DIAG_MEDIA_EVENTS,
     diagAsText,
@@ -149,7 +149,7 @@ export default function EmbeddedAudio({
     // Resolved after mount, never during render: the server has no user agent, and
     // deciding this while rendering would produce a hydration mismatch.
     const [iosSafari, setIosSafari] = useState(false);
-    const [chromeUrl, setChromeUrl] = useState<string | null>(null);
+    const [altBrowsers, setAltBrowsers] = useState<AlternateBrowser[]>([]);
     const [currentTime, setCurrentTime] = useState(0);
     const [metadataDuration, setMetadataDuration] = useState(0);
 
@@ -176,7 +176,7 @@ export default function EmbeddedAudio({
 
     useEffect(() => {
         setIosSafari(isIosSafari());
-        setChromeUrl(chromeIosUrl());
+        setAltBrowsers(alternateBrowserUrls());
     }, []);
 
     // Switching language starts a different recording; do not carry the old position.
@@ -725,20 +725,32 @@ export default function EmbeddedAudio({
                                         {(() => {
                                             const prompt = promptLookup('audioIosSafariNotice');
                                             return prompt.includes('-unknown')
-                                                ? 'Safari stops audio when your screen locks. Chrome on iPhone keeps playing. To listen with the screen off, open this dashboard in Chrome.'
+                                                ? 'Safari stops audio when your screen locks. Chrome, Firefox and Edge on iPhone keep playing. To listen with the screen off, open this dashboard in one of them.'
                                                 : prompt;
                                         })()}
                                     </p>
-                                    {chromeUrl ? (
-                                        <a
-                                            href={chromeUrl}
-                                            className="mt-3 inline-block rounded-md border border-gray-500 bg-gray-700 px-3 py-2 font-medium text-white transition-colors hover:bg-gray-600"
-                                        >
-                                            {(() => {
-                                                const prompt = promptLookup('audioOpenInChrome');
-                                                return prompt.includes('-unknown') ? 'Open in Chrome' : prompt;
-                                            })()}
-                                        </a>
+                                    {altBrowsers.length ? (
+                                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                                            <span className="text-gray-300">
+                                                {(() => {
+                                                    const prompt = promptLookup('audioOpenInBrowser');
+                                                    return prompt.includes('-unknown') ? 'Open this page in:' : prompt;
+                                                })()}
+                                            </span>
+                                            {/*
+                                              * Browser names are proper nouns, so they are
+                                              * not prompts; only the lead-in is translated.
+                                              */}
+                                            {altBrowsers.map((browser) => (
+                                                <a
+                                                    key={browser.name}
+                                                    href={browser.url}
+                                                    className="rounded-md border border-gray-500 bg-gray-700 px-3 py-2 font-medium text-white transition-colors hover:bg-gray-600"
+                                                >
+                                                    {browser.name}
+                                                </a>
+                                            ))}
+                                        </div>
                                     ) : null}
                                 </div>
                             ) : null}
