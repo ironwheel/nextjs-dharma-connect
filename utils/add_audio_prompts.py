@@ -45,6 +45,13 @@ ENGLISH_PROMPTS = {
         "This audio is unavailable in your language. Playing English instead.",
     "audioNotAvailable": "This audio is not available.",
     "audioSpeed": "Speed",
+    # Shown under the player on iOS Safari only. Safari pauses audio when the screen
+    # locks and Chrome for iOS does not; see the audio diagnostics for the evidence.
+    "audioIosSafariNotice":
+        "Safari stops audio when your screen locks. Chrome, Firefox and Edge on iPhone "
+        "keep playing. To listen with the screen off, open this dashboard in one of them.",
+    # Only the lead-in is translated; the browser names are proper nouns.
+    "audioOpenInBrowser": "Open this page in:",
 }
 
 VIDEO_YEAR_PREFIX = "dashboard-controlTitleVideos"
@@ -105,6 +112,9 @@ def main():
     parser.add_argument("--region", default=AWS_REGION)
     parser.add_argument("--overwrite", action="store_true",
                         help="Replace prompts that already exist (default: leave them alone)")
+    parser.add_argument("--only", metavar="NAME", action="append",
+                        help="Restrict to these prompt names. Use with --overwrite to correct "
+                             "one prompt without rewriting wording edited in the table.")
     parser.add_argument("--dryrun", action="store_true",
                         help="Show what would be written without writing")
     args = parser.parse_args()
@@ -117,11 +127,17 @@ def main():
     print("Fixed audio prompts (English):")
     written = 0
     for name, text in ENGLISH_PROMPTS.items():
+        if args.only and name not in args.only:
+            continue
         written += put_prompt(table, name, "English", text, args.dryrun, args.overwrite)
 
     print("\nYear titles, carried over from the video section in every language:")
-    year_titles = collect_video_year_titles(table)
-    if not year_titles:
+    if args.only:
+        print("\n(year titles skipped: --only given)")
+        year_titles = {}
+    else:
+        year_titles = collect_video_year_titles(table)
+    if not year_titles and not args.only:
         print(f"  none found — no {VIDEO_YEAR_PREFIX}<YYYY> prompts in {args.table}")
     for year in sorted(year_titles):
         for language, text in sorted(year_titles[year].items()):
