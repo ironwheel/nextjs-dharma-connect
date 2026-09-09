@@ -20,15 +20,15 @@ import {
 /**
  * Tell WebKit this page's audio is primary playback, not incidental page sound.
  *
- * Safari infers a session type when the page does not declare one, and an <audio> element
- * with no visible controls is readily inferred as "ambient" — a category iOS silences
- * when the screen locks. That matches the recorded failure exactly: a pause with no media
- * error, a fraction of a second before the page is marked hidden, with the page still
- * running afterwards. "playback" is the category for media the listener expects to
- * continue with the screen off.
+ * This was introduced as a candidate fix for Safari pausing audio on screen lock, on the
+ * theory that an <audio> element with no visible controls was being inferred as "ambient",
+ * a category iOS silences. The device log settles it: the type is accepted and reads back
+ * as "playback", and Safari still pauses. So it is not the fix, and the iOS Safari notice
+ * below exists because of that.
  *
- * navigator.audioSession is Safari 16.4+ and absent elsewhere, which is harmless: other
- * browsers already keep this audio playing.
+ * It stays because declaring intent is correct regardless — this is primary playback and
+ * saying so is better than letting WebKit guess. navigator.audioSession is Safari 16.4+
+ * and absent elsewhere, which is harmless: every other browser already keeps this playing.
  */
 function declarePlaybackAudioSession(): string {
     if (typeof navigator === 'undefined') return 'no-navigator';
@@ -46,10 +46,14 @@ function declarePlaybackAudioSession(): string {
 const MAX_ERROR_RETRIES = 2;
 
 /**
- * Wait this long after a media error before acting on it. iOS drops the connection when
- * the screen locks, which surfaces as a media error, and Safari often resumes on its own
- * once the connection returns. Reacting immediately destroyed playback that would have
- * recovered by itself.
+ * Wait this long after a media error before acting on it, and re-check the element first.
+ *
+ * This is not about the screen-lock failure. That was the original rationale and it was
+ * wrong: the recorded logs show Safari pauses the element on lock without raising a media
+ * error at all, so this path never runs there. It earns its place for an ordinary reason
+ * instead — a media error on a phone network is often transient, and recovering means
+ * assigning a new src, which reloads the element and stops playback. Tearing down a
+ * session that would have righted itself is the worse of the two outcomes.
  */
 const ERROR_RECOVERY_DELAY_MS = 3000;
 
@@ -299,15 +303,15 @@ export default function EmbeddedAudio({
     }, []);
 
     /*
-     * Recovering from a media error means assigning a new src, which reloads the element.
-     * That stops playback and ends the Now Playing session, so it must never happen while
-     * the screen is locked — which is exactly when iOS raises the error. On lock Safari
-     * drops the connection, the element errors, and reacting to it killed the playback the
-     * student was listening to. Chrome for iOS keeps its connection alive so the error
-     * never fired there, which is why the fault looked browser-specific.
+     * Recovering from a media error means assigning a new src, which reloads the element,
+     * stops playback and ends the Now Playing session. So an error only schedules a check:
+     * it runs when the page is visible, after a delay, and does nothing if the element
+     * recovered on its own in the meantime.
      *
-     * An error now only schedules a check. The check runs when the page is visible, after
-     * a delay, and does nothing if the element recovered on its own meanwhile.
+     * The visibility gate matters more than it first looks. Chrome, Firefox and Edge on
+     * iOS all keep playing with the screen locked, so re-minting while hidden would break
+     * background playback in exactly the browsers the notice sends people to. Safari's own
+     * failure to keep playing is not this code path — it raises no error at all.
      */
     const attemptRecovery = useCallback(() => {
         recoveryTimerRef.current = null;
@@ -341,9 +345,8 @@ export default function EmbeddedAudio({
     const handleError = useCallback(() => {
         if (!isOpen) return;
         const element = audioRef.current;
-        // Left in deliberately: if playback still stops on a locked phone, this line in
-        // Safari's Web Inspector says whether the element errored at all, and with what.
-        // Silence here means iOS suspended the page and no page code can prevent it.
+        // Media errors are rare enough to be worth a line in production logs. This is not
+        // the screen-lock failure: on lock Safari pauses the element without erroring.
         console.warn('[EmbeddedAudio] media error', {
             code: element?.error?.code,
             message: element?.error?.message,
