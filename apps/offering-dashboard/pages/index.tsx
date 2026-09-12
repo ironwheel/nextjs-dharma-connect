@@ -23,6 +23,7 @@ import { DataTable, Column } from '../components/DataTable';
 import { CustomDropdown } from '../components/CustomDropdown';
 import { ConfirmLoadModal } from '../components/ConfirmLoadModal';
 import { EventSelection } from '../components/EventSelection';
+import { apportionTransactionToSubEvent } from '../lib/subEventShare';
 // Types
 interface Transaction {
     transaction: string;
@@ -852,7 +853,10 @@ const Home = () => {
                 }
                 const subEventKey = getSubEventKeyFromEventKey(selectedEventKey);
                 if (subEventKey) {
-                    filtered = filtered.filter((t: Transaction) => transactionMatchesSubEvent(t, subEventKey));
+                    // Payments spanning several subevents count only the selected subevent's share.
+                    filtered = filtered
+                        .filter((t: Transaction) => transactionMatchesSubEvent(t, subEventKey))
+                        .map((t: Transaction) => apportionTransactionToSubEvent(t, subEventKey));
                 }
             } else {
                 // Category Filter
