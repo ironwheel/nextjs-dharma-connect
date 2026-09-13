@@ -399,7 +399,10 @@ const Home = () => {
                     const myProfile = profiles.find(p => p.profile === offeringViewsProfile);
                     if (myProfile && myProfile.views && Array.isArray(myProfile.views)) {
                         const viewNames = myProfile.views;
-                        const filteredViews = viewsData.filter(v => viewNames.includes(v.name));
+                        // Normalize like the startup loader: the status filter reads `conditions`, stored as `viewConditions`.
+                        const filteredViews = viewsData
+                            .filter(v => viewNames.includes(v.name))
+                            .map(v => ({ ...v, conditions: v.conditions || v.viewConditions || [] }));
                         setViews(filteredViews);
 
                         // Set default view if not already selected or if selected is invalid
