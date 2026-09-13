@@ -35,6 +35,8 @@ interface SubEvent {
     date?: string;
     embeddedEmails?: any;
     embeddedVideoList?: any[];
+    /** Audio recordings, written by utils/upload_event_audio.py; same shape as the video list. */
+    embeddedAudioList?: any[];
     embeddedShowcaseList?: string[];
     eventComplete?: boolean;
     eventOnDeck?: boolean;
@@ -1130,6 +1132,10 @@ const Home = () => {
                 // Remove fields
                 delete subEvent.embeddedEmails;
                 delete subEvent.embeddedVideoList;
+                // Recordings belong to the occurrence they were made at. Each entry stores
+                // the S3 key of the previous event's object, so a copy that kept them would
+                // present last time's audio as this event's once it is marked complete.
+                delete subEvent.embeddedAudioList;
                 delete subEvent.timeString;
                 delete subEvent.zoomLink;
                 delete subEvent.tangra;
