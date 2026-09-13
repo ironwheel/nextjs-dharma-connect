@@ -1,7 +1,23 @@
 import { checkEligibility } from 'sharedFrontend';
 import type { ScriptContext } from '../components/script/types';
 
-/** True when every subevent is complete and at least one has an embeddedVideoList. */
+/**
+ * A subevent has recordings once either media list is present. Audio uses the same
+ * availability model as video, so a complete event whose only recordings are audio is as
+ * finished as one with video, and must reach the same offering flow.
+ *
+ * The exported names below keep "video" because "video dashboard" is the established name
+ * for this flow — it is also baked into the videoIntroduction step and the
+ * offeringCompleteVideoDashboard prompt key, which are data. What they test is recordings
+ * of either kind.
+ */
+function hasRecordings(subEvent: object): boolean {
+    const media = subEvent as { embeddedVideoList?: unknown; embeddedAudioList?: unknown };
+    return typeof media.embeddedVideoList !== 'undefined'
+        || typeof media.embeddedAudioList !== 'undefined';
+}
+
+/** True when every subevent is complete and at least one has recordings (video or audio). */
 export function isVideoDashboardEvent(event: { subEvents?: Record<string, unknown> } | null | undefined): boolean {
     const subEvents = event?.subEvents;
     if (!subEvents || typeof subEvents !== 'object') return false;
@@ -9,18 +25,16 @@ export function isVideoDashboardEvent(event: { subEvents?: Record<string, unknow
     const entries = Object.values(subEvents);
     if (entries.length === 0) return false;
 
-    let hasEmbeddedVideoList = false;
+    let anyRecordings = false;
     for (const subEvent of entries) {
         if (!subEvent || typeof subEvent !== 'object') return false;
         if ((subEvent as { eventComplete?: boolean }).eventComplete !== true) return false;
-        if (typeof (subEvent as { embeddedVideoList?: unknown }).embeddedVideoList !== 'undefined') {
-            hasEmbeddedVideoList = true;
-        }
+        if (hasRecordings(subEvent)) anyRecordings = true;
     }
-    return hasEmbeddedVideoList;
+    return anyRecordings;
 }
 
-/** True when every subevent is complete and none has an embeddedVideoList. */
+/** True when every subevent is complete and none has recordings (video or audio). */
 export function isAllSubeventsCompleteNoVideos(event: { subEvents?: Record<string, unknown> } | null | undefined): boolean {
     const subEvents = event?.subEvents;
     if (!subEvents || typeof subEvents !== 'object') return false;
@@ -31,9 +45,7 @@ export function isAllSubeventsCompleteNoVideos(event: { subEvents?: Record<strin
     for (const subEvent of entries) {
         if (!subEvent || typeof subEvent !== 'object') return false;
         if ((subEvent as { eventComplete?: boolean }).eventComplete !== true) return false;
-        if (typeof (subEvent as { embeddedVideoList?: unknown }).embeddedVideoList !== 'undefined') {
-            return false;
-        }
+        if (hasRecordings(subEvent)) return false;
     }
     return true;
 }
