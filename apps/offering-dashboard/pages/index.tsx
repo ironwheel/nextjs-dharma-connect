@@ -24,6 +24,7 @@ import { CustomDropdown } from '../components/CustomDropdown';
 import { ConfirmLoadModal } from '../components/ConfirmLoadModal';
 import { EventSelection } from '../components/EventSelection';
 import { apportionTransactionToSubEvent } from '../lib/subEventShare';
+import { calculateUsdTotals, type UsdTotals } from '../lib/usdTotals';
 // Types
 interface Transaction {
     transaction: string;
@@ -47,6 +48,10 @@ interface Transaction {
     summary: string;
     timestamp: string;
     total: number;
+    /** USD cents equivalent to payerData.amount, when known (see lib/usdTotals). */
+    usdAmount?: number;
+    /** USD per unit of `currency`, when known (1 for USD). */
+    exchangeRate?: number;
     [key: string]: any;
 }
 
@@ -71,7 +76,7 @@ interface SubEventItem {
 }
 
 
-type TotalsSummary = { count: number; amount: number; stripeFee: number; kmFee: number; net: number };
+type TotalsSummary = UsdTotals;
 
 function getSubEventKeyFromEventKey(eventKey: string): string | null {
     if (!eventKey.includes(':')) return null;
@@ -131,6 +136,11 @@ function parseLegacyCart(raw: unknown): any[] {
 function normalizeLegacyTransaction(rec: any): Transaction {
     const cart = parseLegacyCart(rec?.cart);
     const subEvent = readSubEventField(rec);
+    // payerData is Stripe's balance transaction: its amount is already the USD Stripe settled, with the
+    // exchange rate from the payment's own currency.
+    const payerData = rec?.payerData && typeof rec.payerData === 'object' ? rec.payerData : undefined;
+    const isUsd = String(rec?.currency ?? 'usd').toUpperCase() === 'USD';
+    const settledInUsd = String(payerData?.currency ?? '').toUpperCase() === 'USD';
     return {
         ...rec,
         cart,
@@ -138,6 +148,8 @@ function normalizeLegacyTransaction(rec: any): Transaction {
         subEvent: subEvent || undefined,
         eventCode: typeof rec?.eventCode === 'string' ? rec.eventCode : undefined,
         legacyHeartGiftAid: typeof rec?.legacyHeartGiftAid === 'string' ? rec.legacyHeartGiftAid : undefined,
+        usdAmount: isUsd || settledInUsd ? Number(payerData?.amount || 0) : undefined,
+        exchangeRate: payerData?.exchange_rate != null ? Number(payerData.exchange_rate) : isUsd ? 1 : undefined,
     } as Transaction;
 }
 
@@ -172,28 +184,6 @@ function transactionBelongsToEventAid(t: Transaction, eventAid: string): boolean
 
 function effectiveTransactionEventAid(t: Transaction): string {
     return (typeof t.eventCode === 'string' && t.eventCode) || t.aid || '';
-}
-
-function calculateTotalsForTransactions(txs: Transaction[]): TotalsSummary {
-    const total = { count: 0, amount: 0, stripeFee: 0, kmFee: 0, net: 0 };
-    txs.forEach(t => {
-        total.count += 1;
-        const amount = (t.payerData?.amount || 0);
-        const fee = (t.payerData?.fee || 0);
-
-        if (t.status === 'REFUNDED') {
-            total.amount += amount;
-            total.stripeFee += fee;
-            total.net += -(amount + fee);
-        } else {
-            const km = ((t.kmFee || 0) * 100);
-            total.amount += amount;
-            total.stripeFee += fee;
-            total.kmFee += km;
-            total.net += (amount - (fee + km));
-        }
-    });
-    return total;
 }
 
 interface View {
@@ -589,6 +579,23 @@ const Home = () => {
             grossAmountCents - kmFeeCents;
         const dashboardAmountCents = status === 'REFUNDED' ? amountExcludingKmCents : grossAmountCents;
 
+        // USD equivalents for totals. Non-USD rows get Stripe's settled USD amount and rate from the
+        // cache builder; rows migrated from v1 (no line items) already hold the settled USD in `amount`.
+        const isUsd = String(rec?.currency ?? 'usd').toUpperCase() === 'USD';
+        const exchangeRate = isUsd ? 1 : rec?.dashboardExchangeRate != null ? Number(rec.dashboardExchangeRate) : undefined;
+        const usdGrossCents =
+            rec?.dashboardUsdAmountCents != null
+                ? Number(rec.dashboardUsdAmountCents)
+                : isUsd || skuSummary.length === 0
+                    ? grossAmountCents
+                    : undefined;
+        const usdAmount =
+            usdGrossCents === undefined || status !== 'REFUNDED'
+                ? usdGrossCents
+                : exchangeRate !== undefined
+                    ? usdGrossCents - Math.round(kmFeeCents * exchangeRate)
+                    : undefined;
+
         const refundedAt =
             rec?.refundedAt ??
             (status === 'REFUNDED' ? rec?.updatedAt : undefined);
@@ -633,6 +640,8 @@ const Home = () => {
             anonymousHeartGift: rec?.anonymousHeartGift === true,
             subEvent: typeof rec?.subEvent === 'string' ? rec.subEvent : undefined,
             skuSummary,
+            usdAmount,
+            exchangeRate,
         } as Transaction;
     };
 
@@ -1050,17 +1059,17 @@ const Home = () => {
         ? [
             {
                 label: 'Registration Offerings',
-                totals: calculateTotalsForTransactions(transactions.filter(t => !isHeartGiftTransaction(t))),
+                totals: calculateUsdTotals(transactions.filter(t => !isHeartGiftTransaction(t))),
                 dateColumn: 'subevent',
             },
             {
                 label: 'Heart Gifts',
-                totals: calculateTotalsForTransactions(transactions.filter(isHeartGiftTransaction)),
+                totals: calculateUsdTotals(transactions.filter(isHeartGiftTransaction)),
                 dateColumn: 'empty',
             },
-            { label: 'Total', totals: calculateTotalsForTransactions(transactions), dateColumn: 'empty' },
+            { label: 'Total', totals: calculateUsdTotals(transactions), dateColumn: 'empty' },
         ]
-        : [{ label: '', totals: calculateTotalsForTransactions(transactions), dateColumn: 'default' }];
+        : [{ label: '', totals: calculateUsdTotals(transactions), dateColumn: 'default' }];
 
     // Render Totals Section
     const renderTotalsSection = () => {
@@ -1139,9 +1148,19 @@ const Home = () => {
             return <td key={col.field} style={style} />;
         };
 
+        const overall = totalsRows[totalsRows.length - 1].totals;
+        const plural = (n: number) => `${n} payment${n === 1 ? '' : 's'}`;
+        const conversionNote = [
+            overall.estimated > 0 &&
+                `${plural(overall.estimated)} converted at an estimated rate until the cache builder records Stripe's settled amount.`,
+            overall.unconverted > 0 && `${plural(overall.unconverted)} left out: no exchange rate known for their currency.`,
+        ]
+            .filter(Boolean)
+            .join(' ');
+
         return (
             <div className="mb-3 px-3">
-                <h6 className="text-white mb-2" style={{ fontWeight: 600 }}>Totals</h6>
+                <h6 className="text-white mb-2" style={{ fontWeight: 600 }}>Totals (USD)</h6>
                 <div className="table-responsive">
                     <table className="table table-dark table-sm mb-0 frozen-table" style={{ backgroundColor: 'transparent', minWidth: '1000px', width: '100%' }}>
                         <thead>
@@ -1187,6 +1206,11 @@ const Home = () => {
                         </tbody>
                     </table>
                 </div>
+                {conversionNote && (
+                    <div className="mt-1" style={{ color: '#9ca3af', fontSize: '0.85rem' }}>
+                        {conversionNote}
+                    </div>
+                )}
             </div>
         );
     };
