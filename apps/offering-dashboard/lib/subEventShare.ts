@@ -67,7 +67,7 @@ export function subEventShare(t: ApportionableTransaction, subEventKey: string):
     return fromCart ?? 1;
 }
 
-/** Returns a copy of `t` whose amount, fees, net and total are scaled to the subevent's share. */
+/** Returns a copy of `t` whose amount, fees, net, total and USD amount are scaled to the subevent's share. */
 export function apportionTransactionToSubEvent<T extends ApportionableTransaction>(t: T, subEventKey: string): T {
     const share = subEventShare(t, subEventKey);
     if (share >= 1) return t;
@@ -82,5 +82,6 @@ export function apportionTransactionToSubEvent<T extends ApportionableTransactio
         },
         kmFee: Math.round((t.kmFee || 0) * 100 * share) / 100,
         total: typeof t.total === 'number' ? Math.round(t.total * 100 * share) / 100 : t.total,
+        usdAmount: typeof t.usdAmount === 'number' ? Math.round(t.usdAmount * share) : t.usdAmount,
     };
 }
