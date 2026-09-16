@@ -9,6 +9,7 @@ import {
     RenderSpokenTranslation,
     RenderJoin,
     RenderMotivation,
+    RenderExperience,
     RenderOath,
     RenderLocation,
     RenderWhichRetreats,
@@ -628,6 +629,20 @@ export const stepRegistry: Record<string, ScriptStep> = {
             if (!eventCode) return null;
             const text = value?.[eventCode]?.motivation;
             if (!text || String(text).trim() === '') return promptLookup(context, 'motivationRequired');
+            return null;
+        }
+    },
+    'experience': {
+        id: 'experience',
+        type: 'custom',
+        component: RenderExperience as any,
+        field: 'student.programs',
+        promptKey: 'experience',
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const text = value?.[eventCode]?.experience;
+            if (!text || String(text).trim() === '') return promptLookup(context, 'experienceRequired');
             return null;
         }
     },

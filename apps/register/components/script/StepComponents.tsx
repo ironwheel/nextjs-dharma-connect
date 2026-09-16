@@ -367,6 +367,21 @@ export const RenderMotivation: React.FC<{ context: ScriptContext, engineOnChange
     );
 };
 
+export const RenderExperience: React.FC<{ context: ScriptContext, engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
+    const eventCode = context.event.aid;
+    const experience = context.student.programs?.[eventCode]?.experience;
+
+    return (
+        <div className="mb-4">
+            <textarea
+                className="w-full p-2 rounded bg-reg-input border border-reg-border focus:border-reg-focus-ring text-reg-text h-32"
+                value={experience || ''}
+                onChange={(e) => engineOnChange(`student.programs.${eventCode}.experience`, e.target.value)}
+            />
+        </div>
+    );
+};
+
 
 export const RenderOath: React.FC<{ context: ScriptContext, engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
     const eventCode = context.event.aid;

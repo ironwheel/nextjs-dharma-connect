@@ -160,7 +160,7 @@ const PROMPT_LANGUAGES = ['Czech', 'English', 'French', 'German', 'Italian', 'Po
 
 // Available script step definitions (from join.js stepDefs)
 const AVAILABLE_SCRIPT_STEPS = [
-    'writtenTranslation', 'spokenTranslation', 'location', 'experienceMeditation', 'experienceBuddhism', 'motivation',
+    'writtenTranslation', 'spokenTranslation', 'location', 'experienceMeditation', 'experienceBuddhism', 'motivation', 'experience',
     'supplication', 'supplicationMY', 'supplicationAB', 'supplicationVY',
     'joinMY', 'joinAB', 'joinVY', 'join', 'visibleSignature', 'shareEmail',
     'socialMedia', 'selfCare', 'refugeVow', 'preRefugeVow', 'refugeSupplication',
