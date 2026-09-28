@@ -512,7 +512,9 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
                     <b>Country:</b> {student.country || 'Unknown'} <br />
                     <b>Languages:</b> {student.spokenLangPref || ''}{student.writtenLangPref ? ` / ${student.writtenLangPref}` : ''} <br />
                     <b>Refuge:</b> {checkEligibility('refuge', student, 'refuge', allPools) ? <span style={{ color: '#60a5fa', fontSize: '1.2em', fontWeight: 'bold' }}>✓</span> : <span style={{ color: '#ef4444', fontSize: '1.2em', fontWeight: 'bold' }}>✗</span>} <br />
-                    <b>Oathed:</b> {checkEligibility('oath', student, 'oath', allPools) ? <span style={{ color: '#60a5fa', fontSize: '1.2em', fontWeight: 'bold' }}>✓</span> : <span style={{ color: '#ef4444', fontSize: '1.2em', fontWeight: 'bold' }}>✗</span>}
+                    <b>Oathed:</b> {checkEligibility('oath', student, 'oath', allPools) ? <span style={{ color: '#60a5fa', fontSize: '1.2em', fontWeight: 'bold' }}>✓</span> : <span style={{ color: '#ef4444', fontSize: '1.2em', fontWeight: 'bold' }}>✗</span>} <br />
+                    <b>PSB Lung:</b> {checkEligibility('psb', student, 'psb', allPools) ? <span style={{ color: '#60a5fa', fontSize: '1.2em', fontWeight: 'bold' }}>✓</span> : <span style={{ color: '#ef4444', fontSize: '1.2em', fontWeight: 'bold' }}>✗</span>} <br />
+                    <b>Amitayus Lung:</b> {checkEligibility('amitayus-lung', student, 'amitayus-lung', allPools) ? <span style={{ color: '#60a5fa', fontSize: '1.2em', fontWeight: 'bold' }}>✓</span> : <span style={{ color: '#ef4444', fontSize: '1.2em', fontWeight: 'bold' }}>✗</span>}
                     <br />
                 </div>
                 {fallbackUrl && (
