@@ -1039,6 +1039,26 @@ export const RenderSocialMedia: React.FC<{ context: ScriptContext; engineOnChang
     );
 };
 
+// --- Self care (same pattern as socialMedia; promptKey selfCare) ---
+export const RenderSelfCare: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
+    const eventCode = context.event?.aid;
+    const checked = !!context.student?.programs?.[eventCode]?.selfCare;
+
+    return (
+        <div className="mb-2">
+            <label className="flex items-center text-reg-muted">
+                <input
+                    type="checkbox"
+                    className="mr-2 rounded text-reg-accent"
+                    checked={checked}
+                    onChange={(e) => engineOnChange(`student.programs.${eventCode}.selfCare`, e.target.checked)}
+                />
+                <span>{promptLookup(context, 'agree')}</span>
+            </label>
+        </div>
+    );
+};
+
 // --- Series commitment (same pattern as socialMedia; promptKey seriesCommitment) ---
 export const RenderSeriesCommitment: React.FC<{ context: ScriptContext; engineOnChange: (path: string, val: any) => void }> = ({ context, engineOnChange }) => {
     const eventCode = context.event?.aid;

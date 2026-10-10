@@ -38,6 +38,7 @@ import {
     RenderJoinVY,
     RenderVisibleSignature,
     RenderSocialMedia,
+    RenderSelfCare,
     RenderSeriesCommitment,
     RenderAbhishekaCommitment,
     RenderSave,
@@ -556,6 +557,20 @@ export const stepRegistry: Record<string, ScriptStep> = {
             const eventCode = context.event?.aid;
             if (!eventCode) return null;
             const checked = value?.[eventCode]?.socialMedia === true;
+            if (!checked) return promptLookup(context, 'agreeRequired');
+            return null;
+        }
+    },
+    'selfCare': {
+        id: 'selfCare',
+        type: 'custom',
+        component: RenderSelfCare as any,
+        field: 'student.programs',
+        promptKey: 'selfCare',
+        validation: (value: any, context: ScriptContext): string | null => {
+            const eventCode = context.event?.aid;
+            if (!eventCode) return null;
+            const checked = value?.[eventCode]?.selfCare === true;
             if (!checked) return promptLookup(context, 'agreeRequired');
             return null;
         }
