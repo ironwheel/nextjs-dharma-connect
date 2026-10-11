@@ -195,7 +195,8 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
     const stepTitleIsHtml =
         step.promptKey === 'lrAccChoice1' ||
         step.promptKey === 'lrAccChoice2' ||
-        step.promptKey === 'lrAccChoice3';
+        step.promptKey === 'lrAccChoice3' ||
+        step.promptKey === 'selfCare';
     const rawEventImage = context.config?.eventImage;
     const eventImageUrl =
         typeof rawEventImage === 'string' && (rawEventImage.startsWith('http://') || rawEventImage.startsWith('https://'))
