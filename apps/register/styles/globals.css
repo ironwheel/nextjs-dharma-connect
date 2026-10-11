@@ -99,3 +99,21 @@ body {
             transparent,
             rgb(var(--background-end-rgb))) rgb(var(--background-start-rgb));
 }
+
+/* Links inside HTML-rendered step titles (Tailwind preflight strips link styling) */
+.reg-html-title a {
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+}
+
+.reg-html-title a:hover {
+    color: var(--reg-accent-hover);
+    text-decoration-thickness: 2px;
+}
+
+.reg-html-title a[target="_blank"]::after {
+    content: "\2197";
+    margin-left: 0.15em;
+    font-size: 0.85em;
+}

@@ -216,7 +216,7 @@ export const ScriptEngine: React.FC<ScriptEngineProps & { onComplete?: () => Pro
             {showStepTitle && (
                 stepTitleIsHtml ? (
                     <h2
-                        className="text-xl font-semibold mb-4 text-reg-accent"
+                        className="reg-html-title text-xl font-semibold mb-4 text-reg-accent"
                         dangerouslySetInnerHTML={{ __html: stepTitle }}
                     />
                 ) : (
