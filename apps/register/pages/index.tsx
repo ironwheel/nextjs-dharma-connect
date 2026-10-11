@@ -91,6 +91,7 @@ function getStepStorageRows(stepId: string, eventCode: string): Array<{ scriptSt
         joinVY: [{ scriptStep: 'joinVY', displayPath: `${ev}.joinVY`, storagePath: `programs.${eventCode}.joinVY` }],
         visibleSignature: [{ scriptStep: 'visibleSignature', displayPath: `${ev}.visible`, storagePath: `programs.${eventCode}.visible` }],
         socialMedia: [{ scriptStep: 'socialMedia', displayPath: `${ev}.socialMedia`, storagePath: `programs.${eventCode}.socialMedia` }],
+        selfCare: [{ scriptStep: 'selfCare', displayPath: `${ev}.selfCare`, storagePath: `programs.${eventCode}.selfCare` }],
         save: [
             { scriptStep: 'save', displayPath: `${ev}.join`, storagePath: `programs.${eventCode}.join` },
             { scriptStep: 'save', displayPath: `${ev}.submitCount`, storagePath: `programs.${eventCode}.submitCount` },
