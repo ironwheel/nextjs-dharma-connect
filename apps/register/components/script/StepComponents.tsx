@@ -113,8 +113,9 @@ const RadioYesNo = ({ context, path, label, engineOnChange }: { context: ScriptC
     );
 };
 
-// Checkbox list from event.config[configKey] (e.g. whichRetreatsConfig). Each entry: { prompt, order, retreatRequired?, pool?, key }.
+// Checkbox list from event.config[configKey] (e.g. whichRetreatsConfig). Each entry: { prompt, order, retreatRequired?, pool?, radioGroups?, key }.
 // Option labels are looked up via promptLookup(context, obj.prompt). Section label is optional (step title is shown above).
+// Entries sharing any radioGroups value are mutually exclusive: checking one clears the others in its group(s).
 const CheckboxMap = ({
     context,
     configKey,
@@ -128,7 +129,7 @@ const CheckboxMap = ({
     engineOnChange: (path: string, val: any) => void;
     label?: string; // optional; when omitted, no duplicate heading (step name is already shown)
 }) => {
-    const config = context.config?.[configKey] as Record<string, { prompt: string; order?: number; retreatRequired?: string; pool?: string }> | undefined;
+    const config = context.config?.[configKey] as Record<string, { prompt: string; order?: number; retreatRequired?: string; pool?: string; radioGroups?: string[] }> | undefined;
     const eventCode = context.event?.aid;
     if (!config) return <div className="text-reg-muted text-sm">No options configured ({configKey})</div>;
     const whichRetreats = context.student?.programs?.[eventCode]?.whichRetreats || {};
@@ -146,6 +147,23 @@ const CheckboxMap = ({
             return true;
         })
         .sort((a, b) => ((a[1]?.order ?? 0) - (b[1]?.order ?? 0)));
+
+    const toggle = (key: string, checked: boolean) => {
+        const groups = config[key]?.radioGroups;
+        if (!checked || !Array.isArray(groups) || groups.length === 0) {
+            engineOnChange(`${basePath}.${mapName}.${key}`, checked);
+            return;
+        }
+        const next: Record<string, boolean> = { ...safeMap };
+        for (const [otherKey, otherObj] of Object.entries(config)) {
+            if (otherKey !== key && otherObj?.radioGroups?.some((g) => groups.includes(g))) {
+                next[otherKey] = false;
+            }
+        }
+        next[key] = true;
+        engineOnChange(`${basePath}.${mapName}`, next);
+    };
+
     return (
         <div className="mb-4">
             {label ? <label className="block text-sm font-medium mb-2 text-reg-muted">{label}</label> : null}
@@ -155,7 +173,7 @@ const CheckboxMap = ({
                         <input
                             type="checkbox"
                             checked={!!safeMap[key]}
-                            onChange={(e) => engineOnChange(`${basePath}.${mapName}.${key}`, e.target.checked)}
+                            onChange={(e) => toggle(key, e.target.checked)}
                             className="mr-2 rounded text-reg-accent"
                         />
                         <span>{typeof obj?.prompt === 'string' ? promptLookup(context, obj.prompt) : key}</span>
