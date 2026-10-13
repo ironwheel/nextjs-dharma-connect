@@ -75,4 +75,4 @@ labels for new types can be added in `apps/student-manager/components/ActivityLo
   `packages/api/utils/createAppRole.ts` derives this from the profile.
   Do not grant `POST/table/activity-log`: generic POST table operations include writes.
 - **API:** `DYNAMODB_TABLE_ACTIVITY_LOG` names the table.
-- **Writers:** need `dynamodb:PutItem` on the table. neon-sync reads the table name from `ACTIVITY_LOG_TABLE`.
+- **Writers:** need `dynamodb:PutItem` on the table. neon-sync and email-agent both read the table name from `ACTIVITY_LOG_TABLE`.

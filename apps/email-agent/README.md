@@ -41,6 +41,11 @@ MAILCHIMP_SERVER_PREFIX=us18  # The server prefix for your Mailchimp account (e.
 # Logging Configuration
 LOG_LEVEL=INFO
 
+# Activity log (optional): record each sent email in the shared activity log
+# shown in student-manager (see docs/ACTIVITY_LOG.md)
+ACTIVITY_LOG_TABLE=your-activity-log-table
+ACTIVITY_LOG_RETENTION_DAYS=365
+
 # Email Templates Configuration
 TEMPLATES_DIR=src/templates
 ```

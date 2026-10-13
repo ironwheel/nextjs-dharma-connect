@@ -638,19 +638,40 @@ class AWSClient:
             print(f"Error getting S3 object content: {e}")
             return None
 
-    def update_student_emails(self, student_id: str, emails: Dict) -> bool:
-        """Update the emails field of a student record."""
+    def record_student_email_sent(self, student_id: str, campaign_string: str, sent_at: str) -> bool:
+        """
+        Record a send as emails.<campaign> on a student record.
+
+        Sets only this campaign's key, so it can't undo concurrent changes to the
+        rest of the map (other sends, or neon-sync clearing sends after an email
+        address change).
+        """
+        student_table = self.dynamodb.Table(STUDENT_TABLE)
         try:
-            student_table = self.dynamodb.Table(STUDENT_TABLE)
             student_table.update_item(
                 Key={'id': student_id},
-                UpdateExpression='SET #emails = :emails',
-                ExpressionAttributeNames={'#emails': 'emails'},
-                ExpressionAttributeValues={':emails': emails}
+                UpdateExpression='SET #emails.#campaign = :sentAt',
+                ConditionExpression='attribute_exists(#emails)',
+                ExpressionAttributeNames={'#emails': 'emails', '#campaign': campaign_string},
+                ExpressionAttributeValues={':sentAt': sent_at}
             )
             return True
         except ClientError as e:
-            print(f"Error updating student emails: {e}")
+            if e.response.get('Error', {}).get('Code') != 'ConditionalCheckFailedException':
+                print(f"Error recording email sent for student {student_id}: {e}")
+                return False
+        # The record has no emails map yet: create it, but never create a student record.
+        try:
+            student_table.update_item(
+                Key={'id': student_id},
+                UpdateExpression='SET #emails = :emails',
+                ConditionExpression='attribute_exists(id) AND attribute_not_exists(#emails)',
+                ExpressionAttributeNames={'#emails': 'emails'},
+                ExpressionAttributeValues={':emails': {campaign_string: sent_at}}
+            )
+            return True
+        except ClientError as e:
+            print(f"Error recording email sent for student {student_id}: {e}")
             return False
 
     def get_offering_transactions(self) -> List[Dict]:
