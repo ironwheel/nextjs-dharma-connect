@@ -666,6 +666,58 @@ export async function queryGetTableIndexItems(
     }
 }
 
+export interface TablePageQuery {
+    /** Partition key value (of the table, or of `index` when given). */
+    pk: string;
+    /** GSI name, as configured for the resource in the API's tableConfig. */
+    index?: string;
+    /** Only return items whose sort key is greater than this. */
+    after?: string;
+    limit?: number;
+    /** Sort key order; defaults to newest/greatest first. */
+    order?: 'asc' | 'desc';
+    /** `nextStart` from the previous page. */
+    start?: string;
+}
+
+export interface TablePage<T = any> {
+    items: T[];
+    /** Pass as `start` to fetch the next page; null when the partition is exhausted. */
+    nextStart: string | null;
+}
+
+/**
+ * @async
+ * @function queryTablePage
+ * @description Retrieve one page of a partition from a table that supports the 'query-page' operation.
+ * @param {string} resource - The resource to query.
+ * @param {TablePageQuery} query - Partition, optional index, sort key bound, and pagination.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<TablePage | RedirectedResponse>} A promise that resolves to one page of items.
+ */
+export async function queryTablePage<T = any>(
+    resource: string,
+    query: TablePageQuery,
+    pid: string,
+    hash: string
+): Promise<TablePage<T> | RedirectedResponse> {
+    const params = new URLSearchParams();
+    Object.entries(query).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+    });
+    try {
+        const response = await api.get(`${API_BASE_URL}/table/${resource}/query-page?${params.toString()}`, pid, hash);
+        if (response && response.redirected) {
+            return { redirected: true };
+        }
+        return { items: response.items || [], nextStart: response.nextStart ?? null };
+    } catch (error: any) {
+        console.error(`[API] queryTablePage failed for ${resource}:`, error);
+        throw new Error(error.message || 'Failed to query table page');
+    }
+}
+
 /**
  * @async
  * @function getTableCount

@@ -8,7 +8,7 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import { tables, TableConfig, tableGetConfig } from './tableConfig';
 import { websockets, WebSocketConfig, websocketGetConfig } from './websocketConfig';
-import { listAll, listAllChunked, getOne, deleteOne, deleteOneWithSort, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll, batchGetItems, listAllQueryBeginsWithSortKeyMultiple, queryIndex } from './dynamoClient';
+import { listAll, listAllChunked, getOne, deleteOne, deleteOneWithSort, updateItem, updateItemWithCondition, listAllFiltered, putOne, countAll, batchGetItems, listAllQueryBeginsWithSortKeyMultiple, queryIndex, queryPage } from './dynamoClient';
 import { verificationEmailSend, verificationEmailCallback, verificationCheck, createToken, getActionsProfiles, getAuthList, getViews, getViewsProfiles, putAuthItem, linkEmailSend, getConfigValue, authGetRegisterLink, authGetLink } from './authUtils';
 import { serialize } from 'cookie';
 import { v4 as uuidv4 } from 'uuid';
@@ -125,6 +125,57 @@ async function dispatchTable(
       }
       await deleteOneWithSort(tableName, cfg.pk, pkVal, cfg.sk, skVal, appRole, oidcToken);
       return res.status(204).end();
+    }
+
+    // QUERY PAGE (GET: one page of a partition, newest first by default)
+    // ?pk=<value>[&index=<name>][&after=<sort key>][&limit=<n>][&order=asc][&start=<base64url JSON key>]
+    if (req.method === 'GET' && id === 'query-page' && cfg.ops.includes('query-page')) {
+      const param = (name: string) => {
+        const value = req.query[name];
+        return typeof value === 'string' && value !== '' ? value : undefined;
+      };
+      const pkValue = param('pk');
+      if (!pkValue) {
+        return res.status(400).json({ error: 'Missing query parameter: pk' });
+      }
+      const indexName = param('index');
+      const keys = indexName ? cfg.indexes?.[indexName] : { pk: cfg.pk, sk: cfg.sk };
+      if (!keys) {
+        return res.status(400).json({ error: `Unknown index for ${resource}: ${indexName}` });
+      }
+      const limit = Math.min(Math.max(parseInt(param('limit') ?? '100', 10) || 100, 1), 500);
+      let exclusiveStartKey: Record<string, any> | undefined;
+      const start = param('start');
+      if (start) {
+        try {
+          exclusiveStartKey = JSON.parse(Buffer.from(start, 'base64url').toString('utf8'));
+        } catch {
+          return res.status(400).json({ error: 'Invalid start key' });
+        }
+        // Only key attributes, as strings, may be passed back in.
+        const allowed = new Set([cfg.pk, cfg.sk, keys.pk, keys.sk].filter(Boolean));
+        const valid = exclusiveStartKey && typeof exclusiveStartKey === 'object' && !Array.isArray(exclusiveStartKey) &&
+          Object.entries(exclusiveStartKey).every(([k, v]) => allowed.has(k) && typeof v === 'string');
+        if (!valid) {
+          return res.status(400).json({ error: 'Invalid start key' });
+        }
+      }
+      const result = await queryPage(tableName, {
+        pkName: keys.pk,
+        pkValue,
+        indexName,
+        skName: keys.sk || undefined,
+        skAfter: param('after'),
+        limit,
+        ascending: param('order') === 'asc',
+        exclusiveStartKey,
+      }, appRole, oidcToken);
+      return res.status(200).json({
+        items: result.items,
+        nextStart: result.lastEvaluatedKey
+          ? Buffer.from(JSON.stringify(result.lastEvaluatedKey), 'utf8').toString('base64url')
+          : null,
+      });
     }
 
     // GET ONE

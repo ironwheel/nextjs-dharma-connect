@@ -12,6 +12,9 @@ export interface Config {
   resendWindowDays: number;
   maxCreates: number;
   maxEmailUpdates: number;
+  /** Activity log table; activity logging is off when unset. */
+  activityLogTable?: string;
+  activityRetentionDays: number;
 }
 
 type Env = Record<string, string | undefined>;
@@ -54,6 +57,8 @@ export function loadConfig(env: Env = process.env): Config {
     resendWindowDays: nonNegativeInt(env, 'NEON_SYNC_RESEND_WINDOW_DAYS', 7),
     maxCreates: nonNegativeInt(env, 'NEON_SYNC_MAX_CREATES', 25),
     maxEmailUpdates: nonNegativeInt(env, 'NEON_SYNC_MAX_EMAIL_UPDATES', 25),
+    activityLogTable: env.ACTIVITY_LOG_TABLE?.trim() || undefined,
+    activityRetentionDays: nonNegativeInt(env, 'ACTIVITY_LOG_RETENTION_DAYS', 365),
   };
   if (missing.length) {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);

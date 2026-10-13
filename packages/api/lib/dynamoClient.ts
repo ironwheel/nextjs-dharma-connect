@@ -857,3 +857,54 @@ export async function queryIndex(
     throw new Error(`Failed to query index ${indexName} on table ${tableName}: Unknown error occurred`);
   }
 }
+
+/**
+ * @async
+ * @function queryPage
+ * @description Query one page of a partition (on the table or a GSI), newest sort key first by default.
+ * @param {string} tableName - The name of the table to query.
+ * @param {object} params - Key names/values, optional index, sort key lower bound, limit, and pagination key.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
+ * @returns {Promise<{ items: any[]; lastEvaluatedKey?: Record<string, any> }>} One page of items and the key to continue from.
+ * @throws {Error} When AWS operation fails or the partition cannot be queried.
+ */
+export async function queryPage(
+  tableName: string,
+  params: {
+    pkName: string;
+    pkValue: string;
+    indexName?: string;
+    skName?: string;
+    skAfter?: string;
+    limit: number;
+    ascending?: boolean;
+    exclusiveStartKey?: Record<string, any>;
+  },
+  appSpecificRoleArn: string,
+  oidcToken?: string
+) {
+  const client = await getDocClient(appSpecificRoleArn, oidcToken);
+  const useSkBound = Boolean(params.skName && params.skAfter);
+
+  try {
+    const response = await client.send(
+      new QueryCommand({
+        TableName: tableName,
+        IndexName: params.indexName,
+        KeyConditionExpression: useSkBound ? '#pk = :pk AND #sk > :skAfter' : '#pk = :pk',
+        ExpressionAttributeNames: useSkBound ? { '#pk': params.pkName, '#sk': params.skName! } : { '#pk': params.pkName },
+        ExpressionAttributeValues: useSkBound ? { ':pk': params.pkValue, ':skAfter': params.skAfter } : { ':pk': params.pkValue },
+        ScanIndexForward: params.ascending ?? false,
+        Limit: params.limit,
+        ExclusiveStartKey: params.exclusiveStartKey,
+      })
+    );
+    return { items: response.Items || [], lastEvaluatedKey: response.LastEvaluatedKey };
+  } catch (error) {
+    console.error(`Failed to query page of ${tableName}${params.indexName ? ` (${params.indexName})` : ''}:`, error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to query page of ${tableName}: ${error.message}`);
+    }
+    throw new Error(`Failed to query page of ${tableName}: Unknown error occurred`);
+  }
+}

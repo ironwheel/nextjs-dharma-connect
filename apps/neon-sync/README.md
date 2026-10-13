@@ -31,6 +31,11 @@ is skipped if another participant already uses the address.
 Every write is conditioned on the state it was planned from. A record edited
 during the run is reported as a conflict and left untouched.
 
+**Activity log.** When `ACTIVITY_LOG_TABLE` is set, every applied change is recorded in the
+shared activity log ([docs/ACTIVITY_LOG.md](../../docs/ACTIVITY_LOG.md)). So is a summary of
+each run that changed something, and any blocked or failed run. All of these show up in
+student-manager. Dry runs record nothing.
+
 **Safety limits.** A run that plans more than `NEON_SYNC_MAX_CREATES` creates or
 `NEON_SYNC_MAX_EMAIL_UPDATES` email updates writes nothing and exits with status 2.
 Review it with `--dry-run`, then rerun with `--force`.

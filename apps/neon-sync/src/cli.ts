@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { parseArgs } from 'node:util';
+import { ActivityLog, activityForChange } from './activity.ts';
 import { loadConfig } from './config.ts';
 import { log } from './log.ts';
 import { NeonClient } from './neon.ts';
@@ -65,6 +66,9 @@ function describe(change: Change, verbose: boolean): string {
   }
 }
 
+// Set once configuration is loaded, for real (non dry) runs with an activity table.
+let activity: ActivityLog | undefined;
+
 function count(plan: Plan, kind: Change['kind']): number {
   return plan.changes.filter((c) => c.kind === kind).length;
 }
@@ -78,6 +82,9 @@ async function main(): Promise<number> {
   const config = loadConfig();
   const dryRun = args['dry-run'];
   log.info(`neon-sync starting${dryRun ? ' (dry run)' : ''}${args.only ? `, only ${args.only}` : ''}`);
+  if (config.activityLogTable && !dryRun) {
+    activity = new ActivityLog(config.activityLogTable, config.awsRegion, config.activityRetentionDays);
+  }
 
   const neon = new NeonClient(config.neon);
   const table = new ParticipantTable(config.studentTable, config.awsRegion);
@@ -86,6 +93,7 @@ async function main(): Promise<number> {
     table.scanAll(),
   ]);
   log.info(`Loaded ${accounts.length} Neon individual accounts and ${participants.length} participants`);
+  const participantsById = new Map(participants.map((p) => [p.id, p]));
 
   const plan = planSync(participants, accounts, {
     accounts: args.only !== 'emails',
@@ -116,6 +124,11 @@ async function main(): Promise<number> {
   if (overLimit.length && !args.force && !dryRun) {
     for (const message of overLimit) log.error(message);
     log.error('Refusing to write. Review with --dry-run, then rerun with --force if the changes are expected.');
+    await activity?.record({
+      type: 'sync.blocked',
+      summary: `Neon sync wrote nothing: ${overLimit.join('; ')}. Review with --dry-run and rerun with --force.`,
+      details: { creates, emailUpdates },
+    });
     return 2;
   }
   for (const message of overLimit) log.warn(message);
@@ -130,8 +143,13 @@ async function main(): Promise<number> {
     try {
       const result = await table.apply(change);
       results[result]++;
-      if (result === 'applied') log.info(description);
-      else log.warn(`Skipped (record changed since it was read): ${description}`);
+      if (result === 'applied') {
+        log.info(description);
+        const participantId = change.kind === 'create' ? undefined : change.participantId;
+        await activity?.record(activityForChange(change, participantId ? participantsById.get(participantId) : undefined));
+      } else {
+        log.warn(`Skipped (record changed since it was read): ${description}`);
+      }
     } catch (err) {
       results.failed++;
       log.error(`Failed: ${description}: ${err instanceof Error ? err.message : String(err)}`);
@@ -149,6 +167,13 @@ async function main(): Promise<number> {
     return 0;
   }
   log.info(`Planned ${summary}; applied ${results.applied}, conflicts ${results.conflict}, failed ${results.failed}`);
+  if (plan.changes.length) {
+    await activity?.record({
+      type: 'sync.run',
+      summary: `Neon sync planned ${summary}; applied ${results.applied}, conflicts ${results.conflict}, failed ${results.failed}`,
+      details: { ...results, planned: plan.changes.length },
+    });
+  }
   return results.failed ? 1 : 0;
 }
 
@@ -156,8 +181,12 @@ main().then(
   (code) => {
     process.exitCode = code;
   },
-  (err: unknown) => {
+  async (err: unknown) => {
     log.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
     process.exitCode = 1;
+    await activity?.record({
+      type: 'sync.failed',
+      summary: `Neon sync failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 500),
+    });
   },
 );

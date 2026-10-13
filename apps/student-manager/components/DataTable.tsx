@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from 'react';
 import { Table, Button, Form } from 'react-bootstrap';
-import { VersionBadge } from 'sharedFrontend';
 
 export interface Column {
     field: string;
@@ -29,9 +28,6 @@ export interface DataTableProps {
     canWriteViews?: boolean;
     canExportCSV?: boolean;
     canViewStudentHistory?: boolean;
-    currentUserName?: string;
-    pid?: string;
-    hash?: string;
 }
 
 export const DataTable: React.FC<DataTableProps> = ({
@@ -48,10 +44,7 @@ export const DataTable: React.FC<DataTableProps> = ({
     itemCount,
     canWriteViews,
     canExportCSV,
-    canViewStudentHistory,
-    currentUserName,
-    pid,
-    hash
+    canViewStudentHistory
 }) => {
     const [sortConfig, setSortConfig] = useState<{ field: string; direction: 'asc' | 'desc' }>({ field: 'studentName', direction: 'asc' });
     const [editingCell, setEditingCell] = useState<{ rowIndex: number; field: string } | null>(null);
@@ -289,16 +282,6 @@ export const DataTable: React.FC<DataTableProps> = ({
                 <span className="status-item">
                     Records: {itemCount}
                 </span>
-                {currentUserName && (
-                    <span className="status-item user-info">
-                        {currentUserName}
-                    </span>
-                )}
-                {pid && hash && (
-                    <span className="status-item version-info">
-                        <VersionBadge pid={pid} hash={hash} />
-                    </span>
-                )}
             </div>
 
             <div className="table-container">

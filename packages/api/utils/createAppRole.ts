@@ -78,6 +78,7 @@ const tables = [
     { resource: 'transactions-cache', envVar: 'DYNAMODB_TABLE_TRANSACTIONS_CACHE' },
     { resource: 'auditors', envVar: 'DYNAMODB_TABLE_AUDITORS' },
     { resource: 'signers', envVar: 'DYNAMODB_TABLE_SIGNERS' },
+    { resource: 'activity-log', envVar: 'DYNAMODB_TABLE_ACTIVITY_LOG' },
 ];
 
 function getTableArn(resource) {
