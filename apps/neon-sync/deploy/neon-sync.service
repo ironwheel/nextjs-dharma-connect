@@ -1,0 +1,15 @@
+[Unit]
+Description=Neon CRM to participant table sync
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=@USER@
+WorkingDirectory=@APP_DIR@
+EnvironmentFile=/etc/neon-sync/neon-sync.env
+ExecStart=@APP_DIR@/bin/run.sh
+TimeoutStartSec=20min
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full

@@ -1,0 +1,30 @@
+{
+  "name": "neon-sync",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Syncs Neon CRM individual accounts into the participant (student) DynamoDB table",
+  "type": "module",
+  "files": [
+    "src",
+    "bin",
+    "deploy",
+    ".env.example"
+  ],
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/cli.ts",
+    "dry-run": "node --env-file-if-exists=.env src/cli.ts --dry-run",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.844.0",
+    "@aws-sdk/lib-dynamodb": "^3.844.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.2"
+  }
+}
