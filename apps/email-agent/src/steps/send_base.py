@@ -9,6 +9,7 @@ from typing import Dict, List, Any, Tuple, Optional
 from datetime import datetime, timezone
 from ..models import WorkOrder, Step, StepStatus
 from ..aws_client import AWSClient
+from ..activity_log import ActivityLog
 from ..email_sender import send_email
 from ..eligible import check_eligibility
 from ..config import STUDENT_TABLE, POOLS_TABLE, PROMPTS_TABLE, EVENTS_TABLE, EMAIL_BURST_SIZE, EMAIL_RECOVERY_SLEEP_SECS, SMTP_24_HOUR_SEND_LIMIT
@@ -32,6 +33,7 @@ class SendBaseStep:
         self.actual_step_name = "Send"  # Actual step name in work order (always "Send")
         self.dryrun = dryrun
         self.logging_config = logging_config
+        self.activity_log = ActivityLog()
 
     def log(self, level, message):
         """Log a message if the level is enabled."""
@@ -478,18 +480,53 @@ class SendBaseStep:
             
             if not self.dryrun and transaction_data is None:
                 # Record the campaign string in the student's emails field with ISO 8601 timestamp
-                emails = student.get('emails', {})
-                emails[campaign_string] = datetime.utcnow().isoformat()
-                
-                # Update the student record in DynamoDB
-                self.aws_client.update_student_emails(student['id'], emails)
-            
+                sent_at = datetime.utcnow().isoformat()
+                student.setdefault('emails', {})[campaign_string] = sent_at
+                self.aws_client.record_student_email_sent(student['id'], campaign_string, sent_at)
+
+            if not self.dryrun:
+                self._record_email_activity(student, language, work_order, campaign_string, subject, transaction_data)
+
             return True
             
         except Exception as e:
             error_msg = f"Error sending email to {student.get('email')} in {language}: {str(e)}"
             self.log('error', f"[ERROR] {error_msg}")
             raise Exception(error_msg)
+
+    def _record_email_activity(self, student: Dict, language: str, work_order: WorkOrder,
+                               campaign_string: str, subject: str, transaction_data: Optional[Dict]) -> None:
+        """Record a successful send in the shared activity log (best effort)."""
+        student_name = f"{student.get('first', '')} {student.get('last', '')}".strip()
+        details = {
+            'campaign': campaign_string,
+            'account': work_order.account,
+            'language': language,
+            'subject': subject,
+            'to': student.get('email', ''),
+        }
+        if transaction_data is not None:
+            summary = f"Offering receipt emailed ({language})"
+            details.update({
+                'kind': 'receipt',
+                'eventCode': transaction_data.get('eventCode'),
+                'paymentIntentId': transaction_data.get('paymentIntentId'),
+            })
+        else:
+            summary = f"Email sent: {campaign_string}"
+            details.update({
+                'kind': 'campaign',
+                'eventCode': work_order.eventCode,
+                'subEvent': work_order.subEvent,
+                'stage': work_order.stage,
+            })
+        self.activity_log.record(
+            'email.sent',
+            summary,
+            student_id=student.get('id') or None,
+            student_name=student_name or None,
+            details=details,
+        )
 
     async def _update_progress(self, work_order: WorkOrder, message: str, step_name: str = None):
         """Update the work order progress message."""
