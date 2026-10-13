@@ -19,11 +19,13 @@ import {
     authGetViewsProfiles,
     authPutAuthItem,
     authGetConfigValue,
-    Pool
+    Pool,
+    VersionBadge
 } from 'sharedFrontend';
 
 // Import custom DataTable component
 import { DataTable, Column } from '../components/DataTable';
+import { ActivityLog } from '../components/ActivityLog';
 
 // Types
 interface Student {
@@ -511,7 +513,7 @@ const Home = () => {
         return email;
     };
 
-    const buildColumnLabelsAndRowData = (emailDisplayValue: boolean = emailDisplayPermission) => {
+    const buildColumnLabelsAndRowData = (emailDisplayValue: boolean = emailDisplayPermission, searchValue: string = searchTerm) => {
         const columns: Column[] = [
             { field: 'rowIndex', headerName: '#', pinned: 'left', width: 75 },
             { field: 'studentName', headerName: 'Student Name', pinned: 'left', sortable: true },
@@ -533,9 +535,9 @@ const Home = () => {
 
         // Apply search filter
         const filteredStudents = allStudentsForTable.filter(student => {
-            if (searchTerm && searchTerm.trim()) {
+            if (searchValue && searchValue.trim()) {
                 const normalize = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-                const searchNormalized = normalize(searchTerm.trim());
+                const searchNormalized = normalize(searchValue.trim());
                 const fullNameNormalized = normalize(`${student.first} ${student.last}`);
                 const emailNormalized = normalize(student.email || '');
 
@@ -584,7 +586,8 @@ const Home = () => {
     // Event handlers
     const handleSearch = (searchValue: string) => {
         setSearchTerm(searchValue);
-        const [cl, rd] = buildColumnLabelsAndRowData(emailDisplayPermission);
+        // Filter with the new value; the searchTerm state isn't updated until the next render.
+        const [cl, rd] = buildColumnLabelsAndRowData(emailDisplayPermission, searchValue);
         setColumnLabels(cl);
         setRowData(rd);
     };
@@ -1546,22 +1549,34 @@ const Home = () => {
                             </div>
                         </div>
                         <div className="navbar-right">
-                            <div className="search-container">
-                                <input
-                                    value={searchTerm}
-                                    onChange={(e) => handleSearchChange(e.target.value)}
-                                    onKeyUp={(e) => handleSearchChange(e.currentTarget.value)}
-                                    onInput={(e) => handleSearchChange(e.currentTarget.value)}
-                                    id='searchInput'
-                                    type="text"
-                                    placeholder="Search by name..."
-                                    aria-label="Search by name"
-                                    className="search-input"
-                                />
-                            </div>
+                            {currentUserName && (
+                                <span className="status-item user-info">{currentUserName}</span>
+                            )}
+                            {pid && hash && (
+                                <span className="status-item version-info">
+                                    <VersionBadge pid={pid as string} hash={hash as string} />
+                                </span>
+                            )}
                         </div>
                     </div>
                 </nav>
+
+                <div className="section-header">
+                    <h3 className="section-title">Students</h3>
+                    <div className="section-controls">
+                        <div className="search-container">
+                            <input
+                                value={searchTerm}
+                                onChange={(e) => handleSearchChange(e.target.value)}
+                                id='searchInput'
+                                type="text"
+                                placeholder="Search by name..."
+                                aria-label="Search by name"
+                                className="search-input"
+                            />
+                        </div>
+                    </div>
+                </div>
 
                 <DataTable
                     data={rowData}
@@ -1569,11 +1584,14 @@ const Home = () => {
                     onCellClicked={handleCellClicked}
                     loading={!loaded}
                     itemCount={itemCount}
-                    currentUserName={currentUserName}
-                    pid={pid as string}
-                    hash={hash as string}
                     onCheckboxChanged={handleCheckboxChanged}
                     canWriteViews={true}
+                />
+
+                <ActivityLog
+                    pid={pid as string}
+                    hash={hash as string}
+                    emailDisplayPermission={emailDisplayPermission}
                 />
             </Container>
 

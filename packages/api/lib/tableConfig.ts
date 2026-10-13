@@ -10,7 +10,9 @@ export interface TableConfig {
   envVar: string;
   pk: string;
   sk: string;
-  ops: Array<'get' | 'list' | 'delete' | 'put' | 'count' | 'update' | 'query' | 'query-index'>;
+  ops: Array<'get' | 'list' | 'delete' | 'put' | 'count' | 'update' | 'query' | 'query-index' | 'query-page'>;
+  /** GSIs that 'query-page' may target, by index name. */
+  indexes?: Record<string, { pk: string; sk: string }>;
 }
 
 export const tables: TableConfig[] = [
@@ -46,6 +48,8 @@ export const tables: TableConfig[] = [
   { resource: 'transactions-cache', envVar: 'DYNAMODB_TABLE_TRANSACTIONS_CACHE', pk: 'id', sk: '', ops: ['get', 'list', 'put', 'delete'] },
   { resource: 'auditors', envVar: 'DYNAMODB_TABLE_AUDITORS', pk: 'id', sk: '', ops: ['get', 'put', 'list', 'count', 'update'] },
   { resource: 'signers', envVar: 'DYNAMODB_TABLE_SIGNERS', pk: 'name', sk: 'aid', ops: ['list', 'put', 'delete'] },
+  /** activity-log: written directly by backend services (see docs/ACTIVITY_LOG.md); read-only through the API. pk = UTC day, sk = '<ISO timestamp>#<suffix>'. */
+  { resource: 'activity-log', envVar: 'DYNAMODB_TABLE_ACTIVITY_LOG', pk: 'day', sk: 'id', ops: ['query-page'], indexes: { 'studentId-id-index': { pk: 'studentId', sk: 'id' } } },
 ];
 
 /**
