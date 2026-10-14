@@ -40,6 +40,7 @@ const TYPE_INFO: Record<string, { label: string; color: string }> = {
     'email.sent': { label: 'Email sent', color: '#a855f7' },
     'registration.submitted': { label: 'Registration', color: '#14b8a6' },
     'access.rcpLevel': { label: 'Access level', color: '#ec4899' },
+    'auth.signIn': { label: 'Sign-in', color: '#38bdf8' },
     'sync.run': { label: 'Sync run', color: '#9ca3af' },
     'sync.blocked': { label: 'Sync blocked', color: '#f97316' },
     'sync.failed': { label: 'Sync failed', color: '#ef4444' },

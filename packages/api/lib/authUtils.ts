@@ -9,6 +9,7 @@ import axios from 'axios';
 import nodemailer from 'nodemailer';
 import { tableGetConfig } from './tableConfig';
 import { listAllFiltered, listAll, getOne, putOne, getOneWithSort, deleteOne, deleteOneWithSort } from './dynamoClient';
+import { noteSignIn } from './activity';
 import crypto from 'crypto';
 
 // Add this type at the top of the file, after imports
@@ -177,7 +178,7 @@ async function getActionsProfileForHost(host: string, oidcToken?: string): Promi
  * @returns {Promise<{ actions: string[], role: string }>} Actions and role for the app
  * @throws {Error} If host's actions profile is not found
  */
-async function getAppActions(host: string, oidcToken?: string): Promise<{ actions: string[], role: string }> {
+async function getAppActions(host: string, oidcToken?: string): Promise<{ actions: string[], role: string, profile: string }> {
     const actionsProfile = await getActionsProfileForHost(host, oidcToken);
 
     // Lookup the actions list for this profile
@@ -208,7 +209,7 @@ async function getAppActions(host: string, oidcToken?: string): Promise<{ action
         throw new Error(`AUTH_ACTIONS_LIST_INVALID_FORMAT: Actions list is not in expected format for profile '${actionsProfile}'`);
     }
 
-    return { actions: actionsList, role };
+    return { actions: actionsList, role, profile: actionsProfile };
 }
 
 /**
@@ -1011,6 +1012,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
     }
 
     const newAccessToken = createToken(pid, deviceFingerprint, allActionsList, role, host);
+    noteSignIn(pid, deviceFingerprint, actionsProfile, 'email-verification', role, oidcToken);
     return {
         status: 'authenticated',
         accessToken: newAccessToken,
@@ -1375,8 +1377,9 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
                 );
             }
 
-            const { actions: appActions, role: appRole } = await getAppActions(host, oidcToken);
+            const { actions: appActions, role: appRole, profile: appProfile } = await getAppActions(host, oidcToken);
             const accessToken = createToken(pid, deviceFingerprint, appActions, appRole, host);
+            noteSignIn(pid, deviceFingerprint, appProfile, 'silent-session', appRole, oidcToken);
             return {
                 status: 'authenticated',
                 accessToken,
@@ -1393,8 +1396,9 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
 
             if (sessionTTL > currentTimeSeconds && isEmailVerifiedSession) {
                 console.log(`SECURITY CHECK [pid=${pid}]: Valid global session found for SSO - minting new token for ${host}`);
-                const { actions: appActions, role: appRole } = await getAppActions(host, oidcToken);
+                const { actions: appActions, role: appRole, profile: appProfile } = await getAppActions(host, oidcToken);
                 const accessToken = createToken(pid, deviceFingerprint, appActions, appRole, host);
+                noteSignIn(pid, deviceFingerprint, appProfile, 'session', appRole, oidcToken);
                 return {
                     status: 'authenticated',
                     accessToken,

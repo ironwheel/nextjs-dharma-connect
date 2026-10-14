@@ -6,6 +6,7 @@
  */
 
 import { createHash } from 'crypto';
+import { waitUntil } from '@vercel/functions';
 import { tableGetConfig } from './tableConfig';
 import { getOne, putOneWithCondition } from './dynamoClient';
 
@@ -122,4 +123,113 @@ export async function recordRegistration(
     if (err instanceof Error && err.message.startsWith('Condition check failed')) return 'duplicate';
     throw err;
   }
+}
+
+/**
+ * @function parseSignInApps
+ * @description Parses ACTIVITY_LOG_SIGNIN_APPS: comma-separated actions profiles (apps) whose sign-ins
+ * are logged. `*` means every app; `-name` excludes an app (e.g. `*,-register`). Blank logs nothing.
+ */
+export function parseSignInApps(value: string | undefined): (app: string) => boolean {
+  const entries = (value ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const excluded = new Set(entries.filter((e) => e.startsWith('-')).map((e) => e.slice(1).trim()));
+  const included = new Set(entries.filter((e) => !e.startsWith('-')));
+  const all = included.has('*');
+  return (app: string) => !excluded.has(app) && (all || included.has(app));
+}
+
+const signInLogged = parseSignInApps(process.env.ACTIVITY_LOG_SIGNIN_APPS);
+/** Sign-ins by the same participant, device and app within one window are logged once. */
+const SIGNIN_WINDOW_MS = 10 * 60 * 1000;
+/** Partition holding short-lived dedupe markers; never a real day, so the UI never reads it. */
+const DEDUPE_PARTITION = '_dedupe';
+const recentSignIns = new Map<string, number>();
+
+export type SignInMethod = 'email-verification' | 'session' | 'silent-session';
+
+/**
+ * @function noteSignIn
+ * @description Logs an `auth.signIn` activity when a participant gets a fresh access token for an app
+ * selected by ACTIVITY_LOG_SIGNIN_APPS. Returns immediately: the write runs after the response is sent
+ * (waitUntil) and failures are only logged, so it never delays or breaks the auth check.
+ * Entries are written with the API's auth role (AUTH_ROLE_ARN), which needs PutItem on the activity
+ * table; the participant's name is looked up best effort with the app's role.
+ */
+export function noteSignIn(
+  pid: string,
+  deviceFingerprint: string,
+  app: string,
+  method: SignInMethod,
+  appRole: string,
+  oidcToken?: string
+): void {
+  try {
+    if (!signInLogged(app)) return;
+    const now = Date.now();
+    const windowStart = now - (now % SIGNIN_WINDOW_MS);
+    // A page load fires several requests at once; skip repeats seen by this instance.
+    const key = `${pid}|${deviceFingerprint}|${app}`;
+    if (recentSignIns.get(key) === windowStart) return;
+    if (recentSignIns.size > 10_000) recentSignIns.clear();
+    recentSignIns.set(key, windowStart);
+    waitUntil(
+      recordSignIn(pid, deviceFingerprint, app, method, new Date(now), windowStart, appRole, oidcToken).catch((err) =>
+        console.warn(`noteSignIn: failed to log sign-in for ${app}:`, err)
+      )
+    );
+  } catch (err) {
+    console.warn('noteSignIn: skipped:', err);
+  }
+}
+
+async function recordSignIn(
+  pid: string,
+  deviceFingerprint: string,
+  app: string,
+  method: SignInMethod,
+  at: Date,
+  windowStart: number,
+  appRole: string,
+  oidcToken?: string
+): Promise<void> {
+  const activity = tableGetConfig('activity-log');
+  const authRole = process.env.AUTH_ROLE_ARN!;
+  // Other instances may be handling the same page load; the first to claim the marker logs it.
+  const markerKey = createHash('sha256').update(`${pid}|${deviceFingerprint}|${app}|${windowStart}`).digest('hex');
+  try {
+    await putOneWithCondition(
+      activity.tableName,
+      { day: DEDUPE_PARTITION, id: `signin#${markerKey}`, expiresAt: Math.floor(windowStart / 1000) + 2 * 3600 },
+      'attribute_not_exists(id)',
+      undefined,
+      authRole,
+      oidcToken
+    );
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('Condition check failed')) return;
+    throw err;
+  }
+
+  let studentName: string | undefined;
+  try {
+    const students = tableGetConfig('students');
+    const student = await getOne(students.tableName, students.pk, pid, appRole, oidcToken);
+    studentName = [student?.first, student?.last].filter(Boolean).join(' ').trim() || undefined;
+  } catch (err) {
+    console.warn('recordSignIn: participant lookup failed:', err);
+  }
+
+  const item = activityRecord(
+    {
+      type: 'auth.signIn',
+      source: 'api',
+      studentId: pid,
+      studentName,
+      summary: `Signed in to ${app}${method === 'email-verification' ? ' after email verification' : ''}`,
+      details: { app, method },
+    },
+    at,
+    `signin|${markerKey}`
+  );
+  await putOneWithCondition(activity.tableName, item, 'attribute_not_exists(id)', undefined, authRole, oidcToken);
 }
