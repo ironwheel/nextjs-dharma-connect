@@ -59,7 +59,7 @@ Writes are best effort. A failed activity write must never fail the operation it
 | `student.emailChanged` | neon-sync | Participant email replaced with the Neon address | `neonId`, `previousEmail`, `email`, `clearedSends` |
 | `student.updated` | neon-sync | Program flag or vajrayana level copied from Neon | `neonId`, `field`, `value` |
 | `email.sent` | email-agent | A campaign email was sent to a participant | `campaign`, `account`, `language`, `to` |
-| `registration.submitted` | register | Participant completed registration for an event | `eventCode`, `subEvent` |
+| `registration.submitted` | register (via API) | Participant completed registration for an event | `eventCode`, `eventName`, `submitCount`, `retreats`, `joinMY`, `joinVY` |
 | `access.rcpLevel` | video-access-sync | Participant gained a new video access level | `level`, `previousLevel` |
 | `sync.run` | any service | Summary of a run that changed something | counts |
 | `sync.blocked` | any service | A run refused to write (safety limit) | counts |
@@ -76,3 +76,9 @@ labels for new types can be added in `apps/student-manager/components/ActivityLo
   Do not grant `POST/table/activity-log`: generic POST table operations include writes.
 - **API:** `DYNAMODB_TABLE_ACTIVITY_LOG` names the table.
 - **Writers:** need `dynamodb:PutItem` on the table. neon-sync and email-agent both read the table name from `ACTIVITY_LOG_TABLE`.
+- **Register app:** browsers never write to the table. After saving a registration, the register app calls
+  `POST /api/activity/registration` with `{ eventCode }`. The API logs the event for the authenticated
+  participant only if their record shows `programs.<eventCode>.join` with a `submitTime` from the last
+  15 minutes. The sort key is derived from that submission, so repeat calls are ignored. The `register`
+  actions profile needs `POST/activity/registration`, and its app role needs `dynamodb:PutItem` on the
+  activity table, plus `GetItem` on participants and events. `createAppRole.ts` maps this.

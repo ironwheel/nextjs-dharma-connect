@@ -221,6 +221,14 @@ function mapAppActionsToPermissions(appActions) {
                     scanTables.add(promptsArn);
                 } catch (e) { console.warn(e.message); }
                 break;
+            case 'POST/activity/registration':
+                try {
+                    // activity.ts recordRegistration: verifies against the participant and event, then logs
+                    readTables.add(getTableArn('students'));
+                    readTables.add(getTableArn('events'));
+                    writeTables.add(getTableArn('activity-log'));
+                } catch (e) { console.warn(e.message); }
+                break;
             case 'POST/auth/getConfigValue':
                 try {
                     const tableArn = getTableArn('auth');
