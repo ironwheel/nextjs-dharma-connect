@@ -3,7 +3,9 @@ Description=Run neon-sync every 30 minutes
 
 [Timer]
 OnCalendar=*:00/30
-RandomizedDelaySec=60
+# Start on schedule: a monitor watching for the :00/:30 start (e.g. Cronitor's
+# missed-execution check) alerts when a run starts more than about a minute late.
+AccuracySec=1s
 Persistent=true
 Unit=neon-sync.service
 
