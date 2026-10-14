@@ -720,6 +720,24 @@ export async function queryTablePage<T = any>(
 
 /**
  * @async
+ * @function recordRegistrationActivity
+ * @description Asks the API to log the participant's just-saved registration in the activity log.
+ * Best effort: never throws, so it can't affect the registration itself.
+ * @param {string} eventCode - The event the participant registered for.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<void>}
+ */
+export async function recordRegistrationActivity(eventCode: string, pid: string, hash: string): Promise<void> {
+    try {
+        await api.post(`${API_BASE_URL}/activity/registration`, pid, hash, { eventCode });
+    } catch (error: any) {
+        console.warn(`[API] recordRegistrationActivity failed for ${eventCode}:`, error?.message || error);
+    }
+}
+
+/**
+ * @async
  * @function getTableCount
  * @description Get the number of items in a table.
  * @param {string} resource - The resource to get the count from.

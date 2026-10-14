@@ -1140,7 +1140,7 @@ export const RenderSave = React.forwardRef<
         setSaving(true);
         setError(null);
         try {
-            const { putTableItem } = await import('sharedFrontend');
+            const { putTableItem, recordRegistrationActivity } = await import('sharedFrontend');
             const student = context.student;
             student.programs = student.programs || {};
             const eventCode = context.event?.aid;
@@ -1150,6 +1150,7 @@ export const RenderSave = React.forwardRef<
             student.programs[eventCode].submitTime = new Date().toISOString();
             student.programs[eventCode].saved = true;
             await putTableItem('students', pid, student, pid, hash);
+            void recordRegistrationActivity(eventCode, pid, hash);
             onComplete();
         } catch (e: any) {
             setError(e?.message || 'Save failed.');

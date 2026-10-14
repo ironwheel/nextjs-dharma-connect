@@ -7,6 +7,7 @@ import {
     getAllTableItemsFiltered,
     getAllTableItems,
     putTableItem,
+    recordRegistrationActivity,
     deleteTableItemWithSortKey,
     checkEligibility,
     completeOffering,
@@ -951,6 +952,7 @@ export default function Home() {
         }
         try {
             await putTableItem('students', studentPid, student, studentPid, studentHash);
+            void recordRegistrationActivity(activeEventCode, studentPid, studentHash);
             setData({ ...data, student });
             if (needAcceptance) {
                 setPhase('acceptanceThankYouWarm');
