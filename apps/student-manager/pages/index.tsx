@@ -93,7 +93,7 @@ const getEarliestEventDate = (event: Event): Date | null => {
     return new Date(Math.min(...dates.map(d => d.getTime())));
 };
 
-const eventInCurrentOrPreviousYear = (event: Event): boolean => {
+const eventInPreviousYearOrLater = (event: Event): boolean => {
     const currentYear = new Date().getFullYear();
     const previousYear = currentYear - 1;
 
@@ -104,12 +104,12 @@ const eventInCurrentOrPreviousYear = (event: Event): boolean => {
         const parsed = parseSubEventDate(subEvent.date);
         if (!parsed) return false;
         const year = parsed.getFullYear();
-        return year === currentYear || year === previousYear;
+        return year >= previousYear;
     });
 };
 
 const buildEventAccessOptions = (events: Event[]): { codes: string[]; names: Record<string, string> } => {
-    const filtered = events.filter(e => !e.hide && eventInCurrentOrPreviousYear(e));
+    const filtered = events.filter(e => !e.hide && eventInPreviousYearOrLater(e));
 
     filtered.sort((a, b) => {
         const dateA = getEarliestEventDate(a);
@@ -419,7 +419,7 @@ const Home = () => {
             const schema = defaultAuthRecord.config;
             const hosts = Object.keys(schema);
 
-            // Build event access list from events in current and previous year
+            // Build event access list from events in the previous year onward (including future years)
             try {
                 setEventNamesLoading(true);
                 const events = await getAllTableItems('events', pid as string, hash as string);
@@ -1233,7 +1233,7 @@ const Home = () => {
         return ['all', ...baseList, ...orphanCodes];
     };
 
-    // Fetch names for legacy eventAccess codes outside the current/previous year window
+    // Fetch names for legacy eventAccess codes older than the previous year
     useEffect(() => {
         if (!showEditModal || !pid || !hash) return;
 
