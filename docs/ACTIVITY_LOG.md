@@ -60,7 +60,7 @@ Writes are best effort. A failed activity write must never fail the operation it
 | `student.updated` | neon-sync | Program flag or vajrayana level copied from Neon | `neonId`, `field`, `value` |
 | `email.sent` | email-agent | A campaign email was sent to a participant | `campaign`, `account`, `language`, `to` |
 | `registration.submitted` | register (via API) | Participant completed registration for an event | `eventCode`, `eventName`, `submitCount`, `retreats`, `joinMY`, `joinVY` |
-| `auth.signIn` | api | Participant signed in to an app listed in `ACTIVITY_LOG_SIGNIN_APPS`: a new email-verified session, or a fresh access token on a new visit with an existing session. Logged once per participant, device and app per 10 minutes. | `app` (actions profile), `method` (`email-verification`, `session`, `silent-session`) |
+| `auth.signIn` | api | Participant signed in to an app selected by `ACTIVITY_LOG_SIGNIN_APPS`: a new email-verified session, or a fresh access token on a new visit with an existing session. Logged once per participant, device and app per 10 minutes. | `app` (actions profile), `method` (`email-verification`, `session`, `silent-session`) |
 | `access.rcpLevel` | video-access-sync | Participant gained a new video access level | `level`, `previousLevel` |
 | `sync.run` | any service | Summary of a run that changed something | counts |
 | `sync.blocked` | any service | A run refused to write (safety limit) | counts |
@@ -77,11 +77,13 @@ labels for new types can be added in `apps/student-manager/components/ActivityLo
   Do not grant `POST/table/activity-log`: generic POST table operations include writes.
 - **API:** `DYNAMODB_TABLE_ACTIVITY_LOG` names the table.
 - **Writers:** need `dynamodb:PutItem` on the table. neon-sync and email-agent both read the table name from `ACTIVITY_LOG_TABLE`.
-- **Sign-ins:** set `ACTIVITY_LOG_SIGNIN_APPS` on the API to a comma-separated list of actions profiles
-  (e.g. `student-dashboard`). Nothing is logged for apps not listed. The API writes the entry after
-  responding (`waitUntil`) with the app's role, which needs `dynamodb:PutItem` on the activity table and
-  `GetItem` on participants. Concurrent requests from one page load are deduplicated with short-lived
-  marker items in the `_dedupe` partition, which the UI never reads.
+- **Sign-ins:** `ACTIVITY_LOG_SIGNIN_APPS` on the API selects which apps' sign-ins are logged: a
+  comma-separated list of actions profiles (e.g. `student-dashboard,event-dashboard`), `*` for every
+  app, and `-name` to exclude one (e.g. `*,-register`). Blank logs nothing. The API writes the entry
+  after responding (`waitUntil`) with its auth role (`AUTH_ROLE_ARN`), which needs `dynamodb:PutItem`
+  on the activity table. The participant's name is looked up best effort with the app's role.
+  Concurrent requests from one page load are deduplicated with short-lived marker items in the
+  `_dedupe` partition, which the UI never reads.
 - **Register app:** browsers never write to the table. After saving a registration, the register app calls
   `POST /api/activity/registration` with `{ eventCode }`. The API logs the event for the authenticated
   participant only if their record shows `programs.<eventCode>.join` with a `submitTime` from the last

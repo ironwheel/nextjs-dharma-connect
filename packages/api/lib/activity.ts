@@ -125,10 +125,20 @@ export async function recordRegistration(
   }
 }
 
-/** Actions profiles (apps) whose sign-ins are logged, from ACTIVITY_LOG_SIGNIN_APPS (comma-separated). */
-const SIGNIN_APPS = new Set(
-  (process.env.ACTIVITY_LOG_SIGNIN_APPS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
-);
+/**
+ * @function parseSignInApps
+ * @description Parses ACTIVITY_LOG_SIGNIN_APPS: comma-separated actions profiles (apps) whose sign-ins
+ * are logged. `*` means every app; `-name` excludes an app (e.g. `*,-register`). Blank logs nothing.
+ */
+export function parseSignInApps(value: string | undefined): (app: string) => boolean {
+  const entries = (value ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const excluded = new Set(entries.filter((e) => e.startsWith('-')).map((e) => e.slice(1).trim()));
+  const included = new Set(entries.filter((e) => !e.startsWith('-')));
+  const all = included.has('*');
+  return (app: string) => !excluded.has(app) && (all || included.has(app));
+}
+
+const signInLogged = parseSignInApps(process.env.ACTIVITY_LOG_SIGNIN_APPS);
 /** Sign-ins by the same participant, device and app within one window are logged once. */
 const SIGNIN_WINDOW_MS = 10 * 60 * 1000;
 /** Partition holding short-lived dedupe markers; never a real day, so the UI never reads it. */
@@ -140,9 +150,10 @@ export type SignInMethod = 'email-verification' | 'session' | 'silent-session';
 /**
  * @function noteSignIn
  * @description Logs an `auth.signIn` activity when a participant gets a fresh access token for an app
- * listed in ACTIVITY_LOG_SIGNIN_APPS. Returns immediately: the write runs after the response is sent
+ * selected by ACTIVITY_LOG_SIGNIN_APPS. Returns immediately: the write runs after the response is sent
  * (waitUntil) and failures are only logged, so it never delays or breaks the auth check.
- * Uses the app's role, which needs PutItem on the activity table and GetItem on participants.
+ * Entries are written with the API's auth role (AUTH_ROLE_ARN), which needs PutItem on the activity
+ * table; the participant's name is looked up best effort with the app's role.
  */
 export function noteSignIn(
   pid: string,
@@ -153,7 +164,7 @@ export function noteSignIn(
   oidcToken?: string
 ): void {
   try {
-    if (!SIGNIN_APPS.has(app)) return;
+    if (!signInLogged(app)) return;
     const now = Date.now();
     const windowStart = now - (now % SIGNIN_WINDOW_MS);
     // A page load fires several requests at once; skip repeats seen by this instance.
@@ -182,6 +193,7 @@ async function recordSignIn(
   oidcToken?: string
 ): Promise<void> {
   const activity = tableGetConfig('activity-log');
+  const authRole = process.env.AUTH_ROLE_ARN!;
   // Other instances may be handling the same page load; the first to claim the marker logs it.
   const markerKey = createHash('sha256').update(`${pid}|${deviceFingerprint}|${app}|${windowStart}`).digest('hex');
   try {
@@ -190,7 +202,7 @@ async function recordSignIn(
       { day: DEDUPE_PARTITION, id: `signin#${markerKey}`, expiresAt: Math.floor(windowStart / 1000) + 2 * 3600 },
       'attribute_not_exists(id)',
       undefined,
-      appRole,
+      authRole,
       oidcToken
     );
   } catch (err) {
@@ -219,5 +231,5 @@ async function recordSignIn(
     at,
     `signin|${markerKey}`
   );
-  await putOneWithCondition(activity.tableName, item, 'attribute_not_exists(id)', undefined, appRole, oidcToken);
+  await putOneWithCondition(activity.tableName, item, 'attribute_not_exists(id)', undefined, authRole, oidcToken);
 }
