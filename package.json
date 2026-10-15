@@ -8,6 +8,7 @@
   "scripts": {
     "dev:api": "pnpm --filter api dev",
     "dev:student-manager": "pnpm --filter student-manager dev",
+    "dev:activity-log": "pnpm --filter activity-log dev",
     "dev:student-dashboard": "pnpm --filter student-dashboard dev",
     "dev:event-manager": "pnpm --filter event-manager dev",
     "dev:event-dashboard": "pnpm --filter event-dashboard dev",
@@ -19,6 +20,7 @@
     "dev:register": "pnpm --filter register dev",
     "build:api": "pnpm --filter api build",
     "build:student-manager": "pnpm --filter student-manager build",
+    "build:activity-log": "pnpm --filter activity-log build",
     "build:student-dashboard": "pnpm --filter student-dashboard build",
     "build:event-manager": "pnpm --filter event-manager build",
     "build:event-dashboard": "pnpm --filter event-dashboard build",

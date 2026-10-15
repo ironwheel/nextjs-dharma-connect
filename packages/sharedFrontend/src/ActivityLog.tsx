@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Form, Spinner, Table } from 'react-bootstrap';
-import { queryTablePage } from 'sharedFrontend';
+import { queryTablePage } from './apiActions';
 
 /** One activity log record; see docs/ACTIVITY_LOG.md. */
 export interface ActivityItem {
@@ -16,11 +16,13 @@ export interface ActivityItem {
     searchText?: string;
 }
 
-interface ActivityLogProps {
+export interface ActivityLogProps {
     pid: string;
     hash: string;
     /** Operator may see email addresses (the app's emailDisplay permission). */
     emailDisplayPermission: boolean;
+    /** Section heading; defaults to "Activity". */
+    title?: string;
 }
 
 const RESOURCE = 'activity-log';
@@ -99,7 +101,7 @@ function haystack(item: ActivityItem, showEmails: boolean): string {
     return parts.join(' ').toLowerCase();
 }
 
-export const ActivityLog: React.FC<ActivityLogProps> = ({ pid, hash, emailDisplayPermission }) => {
+export const ActivityLog: React.FC<ActivityLogProps> = ({ pid, hash, emailDisplayPermission, title = 'Activity' }) => {
     const [items, setItems] = useState<ActivityItem[]>([]);
     const [cursor, setCursor] = useState<{ day: string; start: string | null }>({ day: utcDay(new Date()), start: null });
     const [loading, setLoading] = useState(false);
@@ -211,7 +213,7 @@ export const ActivityLog: React.FC<ActivityLogProps> = ({ pid, hash, emailDispla
     return (
         <section className="activity-section">
             <div className="section-header">
-                <h3 className="section-title">Activity</h3>
+                <h3 className="section-title">{title}</h3>
                 <div className="section-controls">
                     <div className="search-container">
                         <input
