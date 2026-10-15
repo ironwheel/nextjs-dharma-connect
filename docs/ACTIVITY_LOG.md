@@ -1,7 +1,9 @@
 # Activity log
 
 A single DynamoDB table where backend services record notable system activity. Operators
-browse and search it in the student-manager app, below the student list.
+browse and search it in the student-manager app, below the student list. Admins without
+student-manager access can use the stand-alone activity-log app (`apps/activity-log`); both use
+the shared `ActivityLog` component from `sharedFrontend`.
 
 Services write to the table directly with their own credentials. The API exposes it
 **read-only** through the `activity-log` resource.
@@ -71,7 +73,7 @@ labels for new types can be added in `apps/student-manager/components/ActivityLo
 
 ## Access
 
-- **Student-manager:** the `student-manager` actions profile needs `GET/table/activity-log`.
+- **Student-manager / activity-log app:** the app's actions profile needs `GET/table/activity-log`.
   Its app role needs `dynamodb:Query` on the table and `<table>/index/*`.
   `packages/api/utils/createAppRole.ts` derives this from the profile.
   Do not grant `POST/table/activity-log`: generic POST table operations include writes.

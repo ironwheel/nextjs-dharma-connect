@@ -14,4 +14,6 @@ export * from './layout';
 export * from './prompts';
 export { default as AuthVerification } from './AuthVerification';
 export { WebSocketProvider, useWebSocket } from './WebSocketProvider';
+export { ActivityLog } from './ActivityLog';
+export type { ActivityItem, ActivityLogProps } from './ActivityLog';
 export { default as VersionBadge } from './VersionBadge';

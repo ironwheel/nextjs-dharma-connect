@@ -20,12 +20,12 @@ import {
     authPutAuthItem,
     authGetConfigValue,
     Pool,
-    VersionBadge
+    VersionBadge,
+    ActivityLog
 } from 'sharedFrontend';
 
 // Import custom DataTable component
 import { DataTable, Column } from '../components/DataTable';
-import { ActivityLog } from '../components/ActivityLog';
 
 // Types
 interface Student {
