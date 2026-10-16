@@ -305,7 +305,13 @@ class AWSClient:
                         # Update the work order data with the current locked status
                         work_order_data['locked'] = locked
                         work_order_data['lockedBy'] = locked_by
-                        
+
+                        # Pass stored values through unchanged; the model resets createdAt to now
+                        # and reformats sendUntil, which clients may write back to the table
+                        for field in ('createdAt', 'sendUntil'):
+                            if field in current_item:
+                                work_order_data[field] = current_item[field]
+
                         self.log('debug', f"[DEBUG] Current locked status from DynamoDB: locked={locked}, lockedBy={locked_by}")
                 except Exception as e:
                     self.log('debug', f"[DEBUG] Error getting current locked status: {e}")

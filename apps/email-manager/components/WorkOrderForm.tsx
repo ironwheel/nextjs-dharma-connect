@@ -304,7 +304,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     setInPerson(response.inPerson || false)
                     setTesters(response.testers || [])
                     setSendContinuously(response.sendContinuously || false)
-                    setSendUntil(response.sendUntil || '')
+                    setSendUntil((response.sendUntil || '').slice(0, 16))  // datetime-local can't show seconds/offset
                     setSendInterval(String(response.sendInterval || process.env.EMAIL_CONTINUOUS_SLEEP_SECS || '600'))
                     setSalutationByName(response.salutationByName !== false)  // Default to true if not explicitly false
                     setRegLinkPresent(response.regLinkPresent !== false)  // Default to true if not explicitly false
@@ -335,7 +335,7 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
             setInPerson(response.inPerson || false)
             setTesters(response.testers || [])
             setSendContinuously(response.sendContinuously || false)
-            setSendUntil(response.sendUntil || '')
+            setSendUntil((response.sendUntil || '').slice(0, 16))  // datetime-local can't show seconds/offset
             setSendInterval(String(response.sendInterval || process.env.EMAIL_CONTINUOUS_SLEEP_SECS || '600'))
             setSalutationByName(response.salutationByName !== false)  // Default to true if not explicitly false
             setRegLinkPresent(response.regLinkPresent !== false)  // Default to true if not explicitly false
