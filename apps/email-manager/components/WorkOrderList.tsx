@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { Table, Button, Badge, Modal, Spinner, Dropdown } from 'react-bootstrap'
 import { toast } from 'react-toastify'
-import { getAllTableItems, useWebSocket, getTableItem, getTableItemOrNull, updateTableItem, sendSQSMessage, putTableItem, deleteTableItem, authGetConfigValue } from 'sharedFrontend'
+import { getAllTableItems, useWebSocket, getTableItem, getTableItemOrNull, updateTableItem, sendSQSMessage, deleteTableItem, authGetConfigValue } from 'sharedFrontend'
 import { unmarshall } from '@aws-sdk/util-dynamodb'
 
 interface WorkOrder {
@@ -709,8 +709,9 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                 updatedAt: new Date().toISOString()
             }
 
-            // Update the work order using putTableItem
-            await putTableItem('work-orders', workOrderId, updatedWorkOrder, userPid, userHash)
+            // Update only the lock fields so a stale local copy can't overwrite other fields
+            await updateTableItem('work-orders', workOrderId, 'locked', false, userPid, userHash)
+            await updateTableItem('work-orders', workOrderId, 'lockedBy', null, userPid, userHash)
 
             // Update state immediately to reflect the unlock
             setWorkOrdersLocal(prevOrders => {
@@ -838,8 +839,9 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                 updatedAt: new Date().toISOString()
             }
 
-            // Lock the work order using putTableItem
-            await putTableItem('work-orders', workOrder.id, updatedWorkOrder, userPid, userHash)
+            // Update only the lock fields so a stale local copy can't overwrite other fields
+            await updateTableItem('work-orders', workOrder.id, 'locked', true, userPid, userHash)
+            await updateTableItem('work-orders', workOrder.id, 'lockedBy', userPid, userPid, userHash)
 
             // Update state immediately to reflect the lock
             setWorkOrdersLocal(prevOrders => {

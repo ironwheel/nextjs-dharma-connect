@@ -109,7 +109,14 @@ class StepProcessor:
                     now = datetime.now(timezone.utc)
                     send_until = getattr(work_order, 'sendUntil', None)
                     send_continuously = getattr(work_order, 'sendContinuously', False)
-                    
+
+                    # Without a sendUntil the work order would send once and never sleep
+                    if send_continuously and not send_until:
+                        error_message = "Continuous sending is enabled but Send Until date is missing or invalid. Set it in the work order and restart Send."
+                        self.log('error', f"[SEND-STEP] Work order {work_order.id}: {error_message}")
+                        await self._update_step_status(work_order, step, StepStatus.ERROR, error_message)
+                        return False
+
                     if send_continuously and send_until:
                         send_until_dt = datetime.fromisoformat(send_until) if isinstance(send_until, str) else send_until
                         if now >= send_until_dt:
@@ -201,7 +208,7 @@ class StepProcessor:
                                 return True
                         
                         # If we get here, sendUntil has been exceeded or is not set - mark as complete
-                        self.log('progress', f"[SEND-LIMIT] Work order {work_order.id} hit send limit and sendUntil exceeded, marking as complete")
+                        self.log('progress', f"[SEND-LIMIT] Work order {work_order.id} hit send limit and sendUntil {'exceeded' if send_until else 'not set'}, marking as complete")
                         await self._update_step_status(work_order, step, StepStatus.COMPLETE, error_message)
                         self.aws_client.update_work_order({
                             'id': work_order.id,
