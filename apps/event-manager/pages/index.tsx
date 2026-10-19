@@ -42,7 +42,7 @@ interface SubEvent {
     eventOnDeck?: boolean;
     mediaNotify?: boolean;
     offeringMode?: string;
-    /** Offering-config oid for anonymous Zoom heart gift (config.mode === 'variable'). */
+    /** Optional heart gift offering-config oid (config.mode === 'variable'); otherwise the config-table default applies. */
     heartGiftOfferingMode?: string;
     rcpLevel?: number;
     regLinkAvailable?: boolean;
@@ -518,6 +518,7 @@ const Home = () => {
 
     // State variables
     const [loaded, setLoaded] = useState(false);
+    const [registrationDomain, setRegistrationDomain] = useState<string>('');
     const [loadingProgress, setLoadingProgress] = useState({ current: 0, total: 0, message: '' });
     const [errMsg, setErrMsg] = useState<string | null>(null);
     const [currentResource, setCurrentResource] = useState<ResourceType>('events');
@@ -1162,31 +1163,23 @@ const Home = () => {
         toast.info(`Creating duplicate of "${event.name}". Please review and modify the aid and other fields before saving.`);
     };
 
-    const isHeartGiftOfferingConfig = (oc: OfferingConfig | undefined): boolean =>
-        oc?.config?.mode === 'variable';
-
+    /** Subevents that accept heart gifts: event uses reglinkv2 and the subevent's registration link is open. */
     const getHeartGiftSubEventLinks = (event: Event): Array<{ subEventKey: string }> => {
+        if (event.list || event.config?.reglinkv2 !== true) return [];
         const subEvents = event.subEvents || {};
         return Object.keys(subEvents)
             .sort()
-            .filter((key) => {
-                const se = subEvents[key];
-                const hgOid = typeof se?.heartGiftOfferingMode === 'string' ? se.heartGiftOfferingMode.trim() : '';
-                if (hgOid) {
-                    const oc = allOfferings.find((o) => o.oid === hgOid);
-                    return isHeartGiftOfferingConfig(oc);
-                }
-                const oid = se?.offeringMode;
-                if (!oid) return false;
-                const oc = allOfferings.find((o) => o.oid === oid);
-                return isHeartGiftOfferingConfig(oc);
-            })
+            .filter((key) => subEvents[key]?.regLinkAvailable === true)
             .map((subEventKey) => ({ subEventKey }));
     };
 
     const handleCopyHeartGiftLink = async (eventAid: string, subEventKey: string) => {
+        if (!registrationDomain) {
+            toast.error('Registration domain not loaded; cannot build the Heart Gift link');
+            return;
+        }
         const url =
-            `https://register.slsupport.link/?mode=heartGift&eventCode=${encodeURIComponent(eventAid)}` +
+            `${registrationDomain.replace(/\/+$/, '')}/?mode=heartGift&eventCode=${encodeURIComponent(eventAid)}` +
             `&subEvent=${encodeURIComponent(subEventKey)}`;
         try {
             await navigator.clipboard.writeText(url);
@@ -2504,6 +2497,15 @@ const Home = () => {
                 // Load categories
                 const categories = await fetchCategories();
                 setEventCategories(categories);
+
+                // Registration domain, used to build Heart Gift links
+                try {
+                    const regDomainItem = await getTableItemOrNull('config', 'registrationDomain', pid as string, hash as string);
+                    const regDomainValue = typeof regDomainItem === 'string' ? regDomainItem : regDomainItem?.value;
+                    if (typeof regDomainValue === 'string') setRegistrationDomain(regDomainValue);
+                } catch (error) {
+                    console.error('Error fetching registration domain:', error);
+                }
 
                 // Group prompts by aid after events are loaded
                 groupPromptsByAid();
