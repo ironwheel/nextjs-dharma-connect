@@ -1,5 +1,3 @@
-import { isNoOfferingMode } from './offeringModeConstants';
-
 /** Synthetic cart person id for anonymous heart gifts (no student offeringHistory write). */
 export const ANONYMOUS_HEART_GIFT_CART_ID = '__anonymous__';
 
@@ -8,10 +6,19 @@ export const HEART_GIFT_SHORTCUT_AMOUNTS = [27, 54, 108, 162] as const;
 
 export type HeartGiftServiceCredentials = { pid: string; hash: string };
 
+/** config-table key whose value is the offering-config oid used when a subevent has no override. */
+export const DEFAULT_HEART_GIFT_OFFERING_CONFIG_KEY = 'defaultHeartGiftOfferingMode';
+
 export type SubEventHeartGiftFields = {
-  offeringMode?: string;
-  /** Dedicated offering-config oid for anonymous / Zoom heart gift (variable mode). */
+  /** Registration link is open for this subevent. */
+  regLinkAvailable?: boolean;
+  /** Optional per-subevent offering-config oid (variable mode); otherwise the config-table default applies. */
   heartGiftOfferingMode?: string;
+};
+
+export type HeartGiftEventLike = {
+  config?: { reglinkv2?: boolean } & Record<string, unknown>;
+  subEvents?: Record<string, SubEventHeartGiftFields>;
 };
 
 export function getHeartGiftServiceCredentials(): HeartGiftServiceCredentials | null {
@@ -38,33 +45,6 @@ export function isHeartGiftConfig(oc: OfferingConfigLike | null | undefined): bo
   return oc?.config?.mode === 'variable';
 }
 
-/** Offering-config oid used for heart gift on this subevent (heartGiftOfferingMode preferred). */
-export function getHeartGiftOfferingOid(
-  se: SubEventHeartGiftFields | undefined,
-  configs: Record<string, OfferingConfigLike>,
-): string | null {
-  if (!se) return null;
-  const hgOid = typeof se.heartGiftOfferingMode === 'string' ? se.heartGiftOfferingMode.trim() : '';
-  if (hgOid) return hgOid;
-  const mainOid = se.offeringMode;
-  if (mainOid && isHeartGiftConfig(configs[mainOid])) return mainOid;
-  return null;
-}
-
-/** Collect all offering-config oids needed to evaluate heart gift on an event. */
-export function collectHeartGiftOfferingOids(
-  subEvents: Record<string, SubEventHeartGiftFields> | undefined,
-): string[] {
-  const oids = new Set<string>();
-  if (!subEvents) return [];
-  Object.values(subEvents).forEach((se) => {
-    if (se?.offeringMode && !isNoOfferingMode(se.offeringMode)) oids.add(se.offeringMode);
-    const hg = typeof se?.heartGiftOfferingMode === 'string' ? se.heartGiftOfferingMode.trim() : '';
-    if (hg) oids.add(hg);
-  });
-  return [...oids];
-}
-
 /** Dollar amounts for shortcut buttons (from config.amounts, else defaults). */
 export function heartGiftShortcutAmountsFromConfig(oc: OfferingConfigLike | null | undefined): number[] {
   const amounts = oc?.amounts;
@@ -74,48 +54,46 @@ export function heartGiftShortcutAmountsFromConfig(oc: OfferingConfigLike | null
   return positive;
 }
 
-/** List subevent keys that have a valid heart gift offering-config. */
-export function listHeartGiftSubEventKeys(
-  subEvents: Record<string, SubEventHeartGiftFields> | undefined,
-  configs: Record<string, OfferingConfigLike>,
-): string[] {
-  if (!subEvents) return [];
-  return Object.keys(subEvents).filter((key) => {
-    const oid = getHeartGiftOfferingOid(subEvents[key], configs);
-    return oid != null && isHeartGiftConfig(configs[oid]);
-  });
+/** A subevent can take heart gifts when the event uses reglinkv2 and the subevent's registration link is open. */
+export function isHeartGiftEligible(
+  event: HeartGiftEventLike | null | undefined,
+  subEventKey: string,
+): boolean {
+  return event?.config?.reglinkv2 === true && event?.subEvents?.[subEventKey]?.regLinkAvailable === true;
+}
+
+/** Per-subevent offering-config oid override, or null when the config-table default applies. */
+export function getHeartGiftOverrideOid(se: SubEventHeartGiftFields | undefined): string | null {
+  const oid = typeof se?.heartGiftOfferingMode === 'string' ? se.heartGiftOfferingMode.trim() : '';
+  return oid || null;
 }
 
 export function resolveHeartGiftSubEvent(
-  subEvents: Record<string, SubEventHeartGiftFields> | undefined,
-  configs: Record<string, OfferingConfigLike>,
+  event: HeartGiftEventLike,
   subEventParam: string | undefined,
 ): { subEventKey: string } | { error: string } {
-  const keys = listHeartGiftSubEventKeys(subEvents, configs);
-  if (keys.length === 0) {
-    return {
-      error:
-        'No heart gift offering is configured for this event. Set subEvents.<key>.heartGiftOfferingMode to a variable offering-config oid.',
-    };
+  const subEvents = event.subEvents || {};
+  if (event.config?.reglinkv2 !== true) {
+    return { error: 'Heart gift is not available for this event.' };
   }
-  if (subEventParam && subEventParam.trim()) {
-    const key = subEventParam.trim();
-    if (!keys.includes(key)) {
-      const se = subEvents?.[key];
-      const hgOid = typeof se?.heartGiftOfferingMode === 'string' ? se.heartGiftOfferingMode.trim() : '';
-      if (hgOid && !isHeartGiftConfig(configs[hgOid])) {
-        return {
-          error: `Offering "${hgOid}" must have config.mode === "variable" for heart gift.`,
-        };
-      }
-      return { error: `Subevent "${key}" is not configured as a heart gift for this event.` };
+  const eligible = Object.keys(subEvents).filter((key) => isHeartGiftEligible(event, key));
+  const requested = subEventParam && subEventParam.trim() ? subEventParam.trim() : '';
+  if (requested) {
+    if (!subEvents[requested]) {
+      return { error: `Subevent "${requested}" does not exist on this event.` };
     }
-    return { subEventKey: key };
+    if (!eligible.includes(requested)) {
+      return { error: `Heart gift is not available for subevent "${requested}".` };
+    }
+    return { subEventKey: requested };
   }
-  if (keys.length === 1) {
-    return { subEventKey: keys[0] };
+  if (eligible.length === 0) {
+    return { error: 'No heart gift is available for this event.' };
+  }
+  if (eligible.length === 1) {
+    return { subEventKey: eligible[0] };
   }
   return {
-    error: `Multiple heart gift subevents (${keys.join(', ')}). Add subEvent= to the URL.`,
+    error: `Multiple subevents accept heart gifts (${eligible.join(', ')}). Add subEvent= to the URL.`,
   };
 }

@@ -32,6 +32,8 @@ export interface DataTableProps {
     currentUserName?: string;
     canRefreshCache?: boolean;
     onRefreshCache?: () => void;
+    /** When provided, shows the Heart Gift Link badge for the selected event/subevent. */
+    onHeartGift?: () => void;
     /**
      * Authentication context required for sharedFrontend API calls (e.g., VersionBadge).
      */
@@ -58,6 +60,7 @@ export const DataTable: React.FC<DataTableProps> = ({
     currentUserName,
     canRefreshCache,
     onRefreshCache,
+    onHeartGift,
     pid,
     hash,
     recordCountLabel
@@ -280,6 +283,24 @@ export const DataTable: React.FC<DataTableProps> = ({
                             <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
                         </svg>
                         Refresh Cache
+                    </button>
+                )}
+                {onHeartGift && (
+                    <button
+                        className="status-item heart-gift-link"
+                        onClick={onHeartGift}
+                        title="Click to show the Heart Gift link for this event"
+                        style={{
+                            backgroundColor: '#be185d',
+                            color: 'white',
+                            border: 'none',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                        }}
+                    >
+                        ❤️ Heart Gift Link
                     </button>
                 )}
                 {canExportCSV && (

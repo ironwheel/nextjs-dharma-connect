@@ -601,6 +601,87 @@ const StudentHistoryModal = ({ show, onClose, student, fetchConfig, allEvents, a
     );
 };
 
+/** Builds the anonymous Heart Gift URL for one subevent; empty until the registration domain is known. */
+function buildHeartGiftUrl(regDomain: string, eventCode: string, subEventKey: string): string {
+    if (!regDomain) return '';
+    return `${regDomain.replace(/\/+$/, '')}/?mode=heartGift&eventCode=${encodeURIComponent(eventCode)}&subEvent=${encodeURIComponent(subEventKey)}`;
+}
+
+// HeartGiftLinkModal component
+const HeartGiftLinkModal = ({ show, onClose, event, subEventKey, regDomain }) => {
+    const [copyFailed, setCopyFailed] = React.useState(false);
+    const urlRef = React.useRef<HTMLInputElement>(null);
+
+    React.useEffect(() => {
+        if (show) setCopyFailed(false);
+    }, [show, subEventKey]);
+
+    if (!event || !subEventKey) return null;
+
+    const url = buildHeartGiftUrl(regDomain, event.aid, subEventKey);
+    const subEventDate = event.subEvents?.[subEventKey]?.date;
+    const subEventLabel = `${subEventKey}${subEventDate ? ` (${subEventDate})` : ''}`;
+
+    const handleCopy = () => {
+        if (!url) return;
+        // Write synchronously from the click handler (required for Safari).
+        navigator.clipboard.writeText(url)
+            .then(() => toast.success('Heart Gift link copied to the clipboard', { autoClose: 2000 }))
+            .catch(() => {
+                setCopyFailed(true);
+                urlRef.current?.select();
+            });
+    };
+
+    return (
+        <Modal show={show} onHide={onClose} centered size="lg" backdrop="static">
+            <Modal.Header closeButton>
+                <Modal.Title>❤️ Heart Gift Link</Modal.Title>
+            </Modal.Header>
+            <Modal.Body>
+                <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
+                    <div style={{ fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.08em', opacity: 0.7 }}>
+                        This link is for
+                    </div>
+                    <div style={{ fontSize: '1.75rem', fontWeight: 700, lineHeight: 1.25, margin: '0.25rem 0' }}>
+                        {event.name}
+                    </div>
+                    <div style={{ fontSize: '1rem', opacity: 0.85 }}>
+                        Event code: <strong>{event.aid}</strong> &middot; Subevent: <strong>{subEventLabel}</strong>
+                    </div>
+                </div>
+                <p style={{ textAlign: 'center' }}>
+                    This link accepts anonymous heart gifts for this event and subevent only.
+                </p>
+                {url ? (
+                    <>
+                        <input
+                            ref={urlRef}
+                            type="text"
+                            readOnly
+                            value={url}
+                            onClick={(e) => e.currentTarget.select()}
+                            className="form-control"
+                            aria-label="Heart Gift link"
+                        />
+                        {copyFailed && (
+                            <div style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>
+                                Could not copy automatically. The link is selected; copy it manually.
+                            </div>
+                        )}
+                    </>
+                ) : (
+                    <div>Registration domain not loaded yet.</div>
+                )}
+            </Modal.Body>
+            <Modal.Footer>
+                <Button variant="secondary" onClick={onClose}>Close</Button>
+                <Button variant="primary" onClick={handleCopy} disabled={!url}>Copy link</Button>
+            </Modal.Footer>
+        </Modal>
+    );
+};
+
 /** Dark theme colors for the offering graph */
 const GRAPH_DARK = {
     bg: '#0f172a',
@@ -826,6 +907,8 @@ const Home = () => {
 
     // Modal state for student history
     const [showHistoryModal, setShowHistoryModal] = useState(false);
+    const [showHeartGiftModal, setShowHeartGiftModal] = useState(false);
+    const [heartGiftRegDomain, setHeartGiftRegDomain] = useState<string>('');
     const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
     const [eventDropdownOpen, setEventDropdownOpen] = useState(false);
     const [viewDropdownOpen, setViewDropdownOpen] = useState(false);
@@ -1358,6 +1441,28 @@ const Home = () => {
             return null;
         }
     };
+
+    // Pre-fetch the registration domain so the Heart Gift link can be copied synchronously on click.
+    useEffect(() => {
+        if (!loaded) return;
+        let cancelled = false;
+        (async () => {
+            const cfg = await fetchConfig('registrationDomain');
+            const value = typeof cfg === 'string' ? cfg : cfg?.value;
+            if (!cancelled && typeof value === 'string') setHeartGiftRegDomain(value);
+        })();
+        return () => { cancelled = true; };
+    }, [loaded]);
+
+    // Heart gift links apply to the selected subevent of a reglinkv2 event whose registration link is open.
+    const heartGiftSubEventKey =
+        evShadow
+        && evShadow.list !== true
+        && evShadow.config?.reglinkv2 === true
+        && typeof evShadow.selectedSubEvent === 'string'
+        && evShadow.subEvents?.[evShadow.selectedSubEvent]?.regLinkAvailable === true
+            ? evShadow.selectedSubEvent
+            : null;
 
     const fetchViews = async () => {
         try {
@@ -3965,12 +4070,20 @@ const Home = () => {
                         canViewStudentHistory={canViewStudentHistory}
                         canRefreshCache={canRefreshCache && evShadow?.config?.eligibilityCacheDisabled !== true && evShadow?.list !== true}
                         onRefreshCache={handleRefreshCache}
+                        onHeartGift={heartGiftSubEventKey ? () => setShowHeartGiftModal(true) : undefined}
                         currentUserName={currentUserName}
                         pid={pid as string}
                         hash={hash as string}
                     />
                 )}
             </Container>
+            <HeartGiftLinkModal
+                show={showHeartGiftModal && !!heartGiftSubEventKey}
+                onClose={() => setShowHeartGiftModal(false)}
+                event={evShadow}
+                subEventKey={heartGiftSubEventKey}
+                regDomain={heartGiftRegDomain}
+            />
             <StudentHistoryModal
                 show={showHistoryModal}
                 onClose={() => setShowHistoryModal(false)}

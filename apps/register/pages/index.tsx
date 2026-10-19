@@ -25,8 +25,9 @@ import {
     getHeartGiftServiceCredentials,
     isHeartGiftMode,
     resolveHeartGiftSubEvent,
-    collectHeartGiftOfferingOids,
-    getHeartGiftOfferingOid,
+    getHeartGiftOverrideOid,
+    isHeartGiftConfig,
+    DEFAULT_HEART_GIFT_OFFERING_CONFIG_KEY,
     type OfferingConfigLike,
 } from '../lib/heartGiftConstants';
 import { isAllSubeventsCompleteNoVideos, isVideoDashboardEvent } from '../lib/videoDashboard';
@@ -291,24 +292,43 @@ export default function Home() {
                         throw new Error('Event not found or access denied.');
                     }
 
-                    const subEvents = eventData.subEvents || {};
-                    const configMap: Record<string, OfferingConfigLike> = {};
-                    for (const oid of collectHeartGiftOfferingOids(subEvents)) {
-                        const row = await getTableItem('offering-config', oid, svcPid, svcHash);
-                        if (row && !(row as any).redirected) configMap[oid] = row;
-                    }
-
-                    const resolved = resolveHeartGiftSubEvent(subEvents, configMap, subEventParam);
+                    const resolved = resolveHeartGiftSubEvent(eventData, subEventParam);
                     if ('error' in resolved) {
                         setError(resolved.error);
                         setLoading(false);
                         return;
                     }
 
-                    const oid = getHeartGiftOfferingOid(subEvents[resolved.subEventKey], configMap);
-                    const offeringConfig = oid ? configMap[oid] : null;
-                    if (!offeringConfig) {
-                        setError('Offering configuration not found for this heart gift.');
+                    // A missing row surfaces as a request error; treat it as "not configured".
+                    const getRowOrNull = async (resource: string, id: string): Promise<any> => {
+                        try {
+                            return await getTableItem(resource, id, svcPid, svcHash);
+                        } catch (rowErr) {
+                            console.error(`Heart gift: could not read ${resource}/${id}`, rowErr);
+                            return null;
+                        }
+                    };
+
+                    // Per-subevent override, else the config-table default. The default is only
+                    // read when no override exists.
+                    let oid = getHeartGiftOverrideOid(eventData.subEvents?.[resolved.subEventKey]);
+                    if (!oid) {
+                        const defaultRow = await getRowOrNull('config', DEFAULT_HEART_GIFT_OFFERING_CONFIG_KEY);
+                        const defaultValue =
+                            defaultRow && !defaultRow.redirected && typeof defaultRow.value === 'string'
+                                ? defaultRow.value.trim()
+                                : '';
+                        oid = defaultValue || null;
+                    }
+                    if (!oid) {
+                        setError('Heart gift is not configured for this event.');
+                        setLoading(false);
+                        return;
+                    }
+
+                    const offeringConfig: OfferingConfigLike | null = await getRowOrNull('offering-config', oid);
+                    if (!offeringConfig || (offeringConfig as any).redirected || !isHeartGiftConfig(offeringConfig)) {
+                        setError('Heart gift is not configured for this event.');
                         setLoading(false);
                         return;
                     }
