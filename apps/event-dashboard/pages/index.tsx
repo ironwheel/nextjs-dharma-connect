@@ -1442,12 +1442,12 @@ const Home = () => {
         }
     };
 
-    // Pre-fetch the registration domain so the Heart Gift link can be copied synchronously on click.
+    // Pre-fetch the v2 registration domain so the Heart Gift link can be copied synchronously on click.
     useEffect(() => {
         if (!loaded) return;
         let cancelled = false;
         (async () => {
-            const cfg = await fetchConfig('registrationDomain');
+            const cfg = await fetchConfig('v2RegistrationDomain');
             const value = typeof cfg === 'string' ? cfg : cfg?.value;
             if (!cancelled && typeof value === 'string') setHeartGiftRegDomain(value);
         })();
