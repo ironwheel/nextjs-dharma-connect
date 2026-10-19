@@ -518,7 +518,7 @@ const Home = () => {
 
     // State variables
     const [loaded, setLoaded] = useState(false);
-    const [registrationDomain, setRegistrationDomain] = useState<string>('');
+    const [v2RegistrationDomain, setV2RegistrationDomain] = useState<string>('');
     const [loadingProgress, setLoadingProgress] = useState({ current: 0, total: 0, message: '' });
     const [errMsg, setErrMsg] = useState<string | null>(null);
     const [currentResource, setCurrentResource] = useState<ResourceType>('events');
@@ -1174,12 +1174,12 @@ const Home = () => {
     };
 
     const handleCopyHeartGiftLink = async (eventAid: string, subEventKey: string) => {
-        if (!registrationDomain) {
+        if (!v2RegistrationDomain) {
             toast.error('Registration domain not loaded; cannot build the Heart Gift link');
             return;
         }
         const url =
-            `${registrationDomain.replace(/\/+$/, '')}/?mode=heartGift&eventCode=${encodeURIComponent(eventAid)}` +
+            `${v2RegistrationDomain.replace(/\/+$/, '')}/?mode=heartGift&eventCode=${encodeURIComponent(eventAid)}` +
             `&subEvent=${encodeURIComponent(subEventKey)}`;
         try {
             await navigator.clipboard.writeText(url);
@@ -2498,11 +2498,11 @@ const Home = () => {
                 const categories = await fetchCategories();
                 setEventCategories(categories);
 
-                // Registration domain, used to build Heart Gift links
+                // v2 registration domain, used to build Heart Gift links
                 try {
-                    const regDomainItem = await getTableItemOrNull('config', 'registrationDomain', pid as string, hash as string);
+                    const regDomainItem = await getTableItemOrNull('config', 'v2RegistrationDomain', pid as string, hash as string);
                     const regDomainValue = typeof regDomainItem === 'string' ? regDomainItem : regDomainItem?.value;
-                    if (typeof regDomainValue === 'string') setRegistrationDomain(regDomainValue);
+                    if (typeof regDomainValue === 'string') setV2RegistrationDomain(regDomainValue);
                 } catch (error) {
                     console.error('Error fetching registration domain:', error);
                 }

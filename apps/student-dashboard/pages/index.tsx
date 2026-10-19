@@ -1420,7 +1420,9 @@ const HomeContent = () => {
         if (useRegLinkV2) {
             void ensureRegLinkV2(el.parentEvent.aid);
         }
-        const regLink = (useRegLinkV2 && regLinkV2ByAid[el.parentEvent.aid]) ? regLinkV2ByAid[el.parentEvent.aid] : regLinkV1;
+        // reglinkv2 links need the server-generated hash, so never fall back to the v1 link for them;
+        // use an inert '#' until the server link has loaded.
+        const regLink = useRegLinkV2 ? (regLinkV2ByAid[el.parentEvent.aid] || '#') : regLinkV1;
 
         const ConditionalEMail = (state: string, prompt?: string, rootStageOverride?: 'eligible-registration' | 'welcome' | 'acceptance') => {
             // Prefer sub-event embeddedEmails (existing behavior)
