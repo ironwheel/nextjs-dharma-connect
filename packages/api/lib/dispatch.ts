@@ -645,6 +645,9 @@ async function dispatchVimeo(
         return res.status(200).json(videoList);
       } catch (error: any) {
         console.error(`[VIMEO] Error extracting showcase ${showcaseId}:`, error);
+        if (/Vimeo API error: (403|404)/.test(error.message || '')) {
+          return res.status(404).json({ error: `Showcase ${showcaseId} is not accessible to the configured Vimeo account(s)` });
+        }
         return res.status(500).json({ error: error.message || 'Failed to extract showcase videos' });
       }
     }
