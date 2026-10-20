@@ -10,6 +10,29 @@ import axios from 'axios';
 const VIMEO_API_BASE = process.env.VIMEO_API_BASE_URL || 'https://api.vimeo.com';
 const VIMEO_BEARER_TOKEN = process.env.VIMEO_BEARER_TOKEN;
 
+// Optional second Vimeo account (e.g. a team whose showcases the primary token cannot read).
+// Its token reaches showcases via /users/{owner}/albums/{id} rather than /me/albums/{id}.
+const VIMEO_TEAM_BEARER_TOKEN = process.env.VIMEO_TEAM_BEARER_TOKEN;
+const VIMEO_TEAM_OWNER_ID = process.env.VIMEO_TEAM_OWNER_ID;
+
+interface VimeoAccount {
+  token: string;
+  albumsBase: string;
+}
+
+// Accounts are tried in order; a 403/404 from one moves on to the next.
+const VIMEO_ACCOUNTS: VimeoAccount[] = [];
+if (VIMEO_BEARER_TOKEN) {
+  VIMEO_ACCOUNTS.push({ token: VIMEO_BEARER_TOKEN, albumsBase: '/me/albums' });
+}
+if (VIMEO_TEAM_BEARER_TOKEN && VIMEO_TEAM_OWNER_ID) {
+  VIMEO_ACCOUNTS.push({ token: VIMEO_TEAM_BEARER_TOKEN, albumsBase: `/users/${VIMEO_TEAM_OWNER_ID}/albums` });
+} else if (VIMEO_TEAM_BEARER_TOKEN || VIMEO_TEAM_OWNER_ID) {
+  console.warn('VIMEO_TEAM_BEARER_TOKEN and VIMEO_TEAM_OWNER_ID must both be set to use the second Vimeo account');
+}
+
+const isAccessDenied = (error: any) => error?.response?.status === 403 || error?.response?.status === 404;
+
 // Parse VIMEO_ALLOWED_DOMAINS as comma-separated list or JSON array
 let VIMEO_ALLOWED_DOMAINS: string[] = [];
 if (process.env.VIMEO_ALLOWED_DOMAINS) {
@@ -28,7 +51,7 @@ if (process.env.VIMEO_ALLOWED_DOMAINS) {
   }
 }
 
-if (!VIMEO_BEARER_TOKEN) {
+if (VIMEO_ACCOUNTS.length === 0) {
   console.warn('VIMEO_BEARER_TOKEN environment variable is not set');
 }
 
@@ -73,18 +96,29 @@ export async function getShowcaseVideos(
   showcaseId: string,
   perLanguage: boolean = false
 ): Promise<Array<{ videoId: string; name: string; language: string; index?: number }>> {
-  if (!VIMEO_BEARER_TOKEN) {
+  if (VIMEO_ACCOUNTS.length === 0) {
     throw new Error('VIMEO_BEARER_TOKEN environment variable is not set');
   }
 
-  const url = `${VIMEO_API_BASE}/me/albums/${showcaseId}/videos`;
-  const headers = {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${VIMEO_BEARER_TOKEN}`,
-  };
-
   try {
-    const response = await axios.get(url, { headers });
+    let response;
+    let lastError: any;
+    for (const account of VIMEO_ACCOUNTS) {
+      try {
+        response = await axios.get(`${VIMEO_API_BASE}${account.albumsBase}/${showcaseId}/videos`, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${account.token}`,
+          },
+        });
+        break;
+      } catch (error: any) {
+        lastError = error;
+        if (!isAccessDenied(error)) throw error;
+        console.warn(`Showcase ${showcaseId} not accessible via ${account.albumsBase} (${error.response.status})`);
+      }
+    }
+    if (!response) throw lastError;
 
     const result = response.data;
 
@@ -177,7 +211,7 @@ export async function extractShowcaseToVideoList(
  * @param videoId - The Vimeo video ID
  */
 export async function enableVideoPlayback(videoId: string): Promise<void> {
-  if (!VIMEO_BEARER_TOKEN) {
+  if (VIMEO_ACCOUNTS.length === 0) {
     throw new Error('VIMEO_BEARER_TOKEN environment variable is not set');
   }
 
@@ -212,14 +246,26 @@ export async function enableVideoPlayback(videoId: string): Promise<void> {
     },
   };
 
-  const headers = {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${VIMEO_BEARER_TOKEN}`,
-  };
-
   try {
-    // Set embed settings
-    await axios.patch(url, payload, { headers });
+    // Set embed settings, using whichever account owns/can edit the video
+    let token: string | undefined;
+    let lastError: any;
+    for (const account of VIMEO_ACCOUNTS) {
+      try {
+        await axios.patch(url, payload, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${account.token}`,
+          },
+        });
+        token = account.token;
+        break;
+      } catch (error: any) {
+        lastError = error;
+        if (!isAccessDenied(error)) throw error;
+      }
+    }
+    if (!token) throw lastError;
 
     // Set allowed domains - enable all domains in the list
     for (const domain of VIMEO_ALLOWED_DOMAINS) {
@@ -228,7 +274,7 @@ export async function enableVideoPlayback(videoId: string): Promise<void> {
         await axios.put(domainUrl, {}, {
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${VIMEO_BEARER_TOKEN}`,
+            'Authorization': `Bearer ${token}`,
           },
         });
       } catch (error: any) {
