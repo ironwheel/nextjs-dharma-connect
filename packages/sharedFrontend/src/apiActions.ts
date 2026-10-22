@@ -718,6 +718,45 @@ export async function queryTablePage<T = any>(
     }
 }
 
+export interface UnsubscribeStatus {
+    found: boolean;
+    first?: string;
+    unsubscribed?: boolean;
+    unsubscribeTS?: string;
+    resubscribeTS?: string;
+    /** Set by setUnsubscribe: false when the participant was already in the requested state. */
+    changed?: boolean;
+}
+
+/**
+ * Hash sent by the unsubscribe app, whose links carry only a pid. The API requires a non-empty
+ * hash header but does not check it for hosts configured with secret "none".
+ */
+const NO_HASH = 'none';
+
+/**
+ * @async
+ * @function getUnsubscribeStatus
+ * @description Fetches the participant's first name and email subscription state.
+ * @param {string} pid - The participant ID.
+ * @returns {Promise<UnsubscribeStatus | RedirectedResponse>}
+ */
+export async function getUnsubscribeStatus(pid: string): Promise<UnsubscribeStatus | RedirectedResponse> {
+    return await api.get(`${API_BASE_URL}/unsubscribe/status`, pid, NO_HASH);
+}
+
+/**
+ * @async
+ * @function setUnsubscribe
+ * @description Unsubscribes the participant from email (true) or re-subscribes them (false).
+ * @param {string} pid - The participant ID.
+ * @param {boolean} unsubscribe - The requested state.
+ * @returns {Promise<UnsubscribeStatus | RedirectedResponse>}
+ */
+export async function setUnsubscribe(pid: string, unsubscribe: boolean): Promise<UnsubscribeStatus | RedirectedResponse> {
+    return await api.post(`${API_BASE_URL}/unsubscribe/set`, pid, NO_HASH, { unsubscribe });
+}
+
 /**
  * @async
  * @function recordRegistrationActivity

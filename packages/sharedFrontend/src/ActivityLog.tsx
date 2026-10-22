@@ -41,12 +41,35 @@ const TYPE_INFO: Record<string, { label: string; color: string }> = {
     'student.updated': { label: 'Student update', color: '#3b82f6' },
     'email.sent': { label: 'Email sent', color: '#a855f7' },
     'registration.submitted': { label: 'Registration', color: '#14b8a6' },
+    'student.unsubscribed': { label: 'Unsubscribed', color: '#ef4444' },
+    'student.resubscribed': { label: 'Re-subscribed', color: '#22c55e' },
     'access.rcpLevel': { label: 'Access level', color: '#ec4899' },
     'auth.signIn': { label: 'Sign-in', color: '#38bdf8' },
     'sync.run': { label: 'Sync run', color: '#9ca3af' },
     'sync.blocked': { label: 'Sync blocked', color: '#f97316' },
     'sync.failed': { label: 'Sync failed', color: '#ef4444' },
 };
+
+/** Pool eligibility details (e.g. on unsubscribes), labelled and marked as in the Student History modal. */
+const ELIGIBILITY_LABELS: Record<string, string> = {
+    'refuge': 'Refuge',
+    'oath': 'Oathed',
+    'psb': 'PSB Lung',
+    'amitayus-lung': 'Amitayus Lung',
+};
+const CHECK_MARK = <span style={{ color: '#60a5fa', fontSize: '1.2em', fontWeight: 'bold' }}>✓</span>;
+const X_MARK = <span style={{ color: '#ef4444', fontSize: '1.2em', fontWeight: 'bold' }}>✗</span>;
+
+function isEligibilityMap(key: string, value: unknown): value is Record<string, boolean> {
+    return key === 'eligibility' && !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Known pools in modal order (DynamoDB maps don't keep key order), then any others. */
+function orderedPools(value: Record<string, boolean>): [string, boolean][] {
+    const known = Object.keys(ELIGIBILITY_LABELS).filter(pool => pool in value);
+    const others = Object.keys(value).filter(pool => !(pool in ELIGIBILITY_LABELS)).sort();
+    return [...known, ...others].map(pool => [pool, value[pool]]);
+}
 
 function typeInfo(type: string) {
     return TYPE_INFO[type] ?? { label: type, color: '#9ca3af' };
@@ -301,7 +324,13 @@ export const ActivityLog: React.FC<ActivityLogProps> = ({ pid, hash, emailDispla
                                         <div>{item.summary}</div>
                                         {item.details && Object.keys(item.details).length > 0 && (
                                             <div className="activity-details">
-                                                {Object.entries(item.details).map(([key, value]) => (
+                                                {Object.entries(item.details).map(([key, value]) => isEligibilityMap(key, value) ? (
+                                                    orderedPools(value).map(([pool, eligible]) => (
+                                                        <span key={`${key}.${pool}`} className="activity-detail">
+                                                            {ELIGIBILITY_LABELS[pool] ?? pool}: {eligible === true ? CHECK_MARK : X_MARK}
+                                                        </span>
+                                                    ))
+                                                ) : (
                                                     <span key={key} className="activity-detail">
                                                         {key}: {formatValue(key, value, emailDisplayPermission)}
                                                     </span>

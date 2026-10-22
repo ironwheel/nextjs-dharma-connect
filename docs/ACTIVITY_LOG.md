@@ -40,7 +40,7 @@ aws dynamodb update-time-to-live --table-name <table> \
 | `day`, `id` | yes | Keys, as above. Derive both from one timestamp. |
 | `ts` | yes | The same ISO timestamp, for display. |
 | `type` | yes | Event type; see below. |
-| `source` | yes | Writer: `neon-sync`, `email-agent`, `register`, `video-access-sync`, … |
+| `source` | yes | Writer: `neon-sync`, `email-agent`, `register`, `unsubscribe`, `video-access-sync`, … |
 | `summary` | yes | One human-readable line. **Never include email addresses.** |
 | `studentId` | when about a student | Participant id. Required for the per-student view. |
 | `studentName` | when about a student | `first last` at the time of the event. |
@@ -62,6 +62,8 @@ Writes are best effort. A failed activity write must never fail the operation it
 | `student.updated` | neon-sync | Program flag or vajrayana level copied from Neon | `neonId`, `field`, `value` |
 | `email.sent` | email-agent | A campaign email was sent to a participant | `campaign`, `account`, `language`, `to` |
 | `registration.submitted` | register (via API) | Participant completed registration for an event | `eventCode`, `eventName`, `submitCount`, `retreats`, `joinMY`, `joinVY` |
+| `student.unsubscribed` | unsubscribe (via API), unsub-backlog | Participant unsubscribed from email with the email footer link (`unsub-backlog`: a request made through the legacy unsubscribe page, processed by `utils/process_unsub_backlog.py`) | `email`, `eligibility` (`refuge`, `oath`, `psb`, `amitayus-lung` → bool, shown as ✓/✗), `requestedAt` (backlog only) |
+| `student.resubscribed` | unsubscribe (via API) | Participant re-subscribed with the same link | `email`, `eligibility` |
 | `auth.signIn` | api | Participant signed in to an app selected by `ACTIVITY_LOG_SIGNIN_APPS`: a new email-verified session, or a fresh access token on a new visit with an existing session. Logged once per participant, device and app per 10 minutes. | `app` (actions profile), `method` (`email-verification`, `session`, `silent-session`) |
 | `access.rcpLevel` | video-access-sync | Participant gained a new video access level | `level`, `previousLevel` |
 | `sync.run` | any service | Summary of a run that changed something | counts |
@@ -69,7 +71,7 @@ Writes are best effort. A failed activity write must never fail the operation it
 | `sync.failed` | any service | A run failed | — |
 
 New types need no schema change. The UI shows unknown types under their raw name, and
-labels for new types can be added in `apps/student-manager/components/ActivityLog.tsx`.
+labels for new types can be added in `packages/sharedFrontend/src/ActivityLog.tsx` (`TYPE_INFO`).
 
 ## Access
 

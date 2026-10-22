@@ -19,6 +19,7 @@ import { putOfferingTransaction, completeOffering, updateOfferingTransactionRefu
 import { translatePromptFromEnglish } from './translate';
 import { resolveAudioEntitlement, signAudioUrl } from './audio';
 import { recordRegistration } from './activity';
+import { getUnsubscribeStatus, setUnsubscribe } from './unsubscribe';
 
 /**
  * @async
@@ -1110,8 +1111,65 @@ export async function dispatch(
       const [activityAction] = rest;
       console.log("DISPATCH: subsystem:", subsystem, "action:", activityAction);
       return await dispatchActivity(activityAction, req, res);
+    case 'unsubscribe':
+      // Unsubscribe URLs: /api/unsubscribe/[action] e.g. /api/unsubscribe/status
+      const [unsubscribeAction] = rest;
+      console.log("DISPATCH: subsystem:", subsystem, "action:", unsubscribeAction);
+      return await dispatchUnsubscribe(unsubscribeAction, req, res);
     default:
       return res.status(404).json({ error: `Unknown subsystem: ${subsystem}` });
+  }
+}
+
+/**
+ * @async
+ * @function dispatchUnsubscribe
+ * @description Email unsubscribe / re-subscribe for the authenticated participant. Acts only on the
+ * request's own pid (x-user-id); there is no id in the URL, so a session cannot reach another record.
+ * @param {string | undefined} action - 'status' (GET) or 'set' (POST, body { unsubscribe: boolean }).
+ * @param {NextApiRequest} req - The Next.js API request object.
+ * @param {NextApiResponse} res - The Next.js API response object.
+ * @returns {Promise<void>}
+ */
+async function dispatchUnsubscribe(
+  action: string | undefined,
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  const appRole = (req as any).userRole || process.env.DEFAULT_GUEST_ROLE_ARN!;
+  let oidcToken = req.headers['x-vercel-oidc-token'] as string;
+  if (!oidcToken && process.env.NODE_ENV === 'development') {
+    oidcToken = process.env.VERCEL_OIDC_TOKEN!;
+  }
+  const pid = req.headers['x-user-id'] as string;
+  if (!pid) return res.status(400).json({ error: 'Missing x-user-id header' });
+
+  try {
+    switch (action) {
+      case 'status': {
+        if (req.method !== 'GET') {
+          res.setHeader('Allow', 'GET');
+          return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
+        }
+        return res.status(200).json(await getUnsubscribeStatus(pid, appRole, oidcToken));
+      }
+      case 'set': {
+        if (req.method !== 'POST') {
+          res.setHeader('Allow', 'POST');
+          return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
+        }
+        const unsubscribe = req.body?.unsubscribe;
+        if (typeof unsubscribe !== 'boolean') {
+          return res.status(400).json({ error: 'Missing or invalid unsubscribe' });
+        }
+        return res.status(200).json(await setUnsubscribe(pid, unsubscribe, appRole, oidcToken));
+      }
+      default:
+        return res.status(404).json({ error: `Unknown unsubscribe action: ${action}` });
+    }
+  } catch (error: any) {
+    console.error(`Unsubscribe operation failed:`, error);
+    return res.status(500).json({ error: error.message || 'Unsubscribe operation failed' });
   }
 }
 
