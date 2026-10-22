@@ -229,6 +229,22 @@ function mapAppActionsToPermissions(appActions) {
                     writeTables.add(getTableArn('activity-log'));
                 } catch (e) { console.warn(e.message); }
                 break;
+            // Unsubscribe app: unsubscribe.ts reads and updates only the requesting participant,
+            // then logs the change with their pool eligibility (pool definitions via listAll).
+            case 'GET/unsubscribe/status':
+                try {
+                    readTables.add(getTableArn('students'));
+                } catch (e) { console.warn(e.message); }
+                break;
+            case 'POST/unsubscribe/set':
+                try {
+                    const studentsArn = getTableArn('students');
+                    readTables.add(studentsArn);
+                    writeTables.add(studentsArn);
+                    scanTables.add(getTableArn('pools'));
+                    writeTables.add(getTableArn('activity-log'));
+                } catch (e) { console.warn(e.message); }
+                break;
             case 'POST/auth/getConfigValue':
                 try {
                     const tableArn = getTableArn('auth');

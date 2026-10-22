@@ -18,6 +18,7 @@
     "dev:refund-request": "pnpm --filter refund-request dev",
     "dev:refund-approve": "pnpm --filter refund-approve dev",
     "dev:register": "pnpm --filter register dev",
+    "dev:unsubscribe": "pnpm --filter unsubscribe dev",
     "build:api": "pnpm --filter api build",
     "build:student-manager": "pnpm --filter student-manager build",
     "build:activity-log": "pnpm --filter activity-log build",
@@ -29,6 +30,7 @@
     "build:translation-manager": "pnpm --filter translation-manager build",
     "build:refund-request": "pnpm --filter refund-request build",
     "build:refund-approve": "pnpm --filter refund-approve build",
+    "build:unsubscribe": "pnpm --filter unsubscribe build",
     "build:all": "pnpm -r build",
     "lint:all": "pnpm -r lint"
   }
