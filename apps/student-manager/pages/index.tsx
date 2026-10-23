@@ -37,6 +37,7 @@ interface Student {
     writtenLangPref?: string;
     unsubscribe?: boolean;
     unsubscribeTS?: string;
+    resubscribeTS?: string;
     deceased?: boolean;
     owyaaLease?: string;
     // Note: Other fields like programs, practice, emails, offeringHistory 
@@ -572,8 +573,9 @@ const Home = () => {
                 rowIndex: index + 1,
                 studentName: `${student.first} ${student.last}`,
                 unsubscribed: student.unsubscribe || false,
-                // Raw ISO timestamp so the column sorts by date; DataTable formats it for display
-                unsubscribeTS: student.unsubscribeTS || undefined,
+                // Raw ISO timestamp so the column sorts by date; DataTable formats it for display.
+                // Re-subscribed students keep unsubscribeTS as history, but show no date.
+                unsubscribeTS: student.unsubscribe ? student.unsubscribeTS : undefined,
                 deceased: student.deceased || false,
                 email,
                 language,
@@ -758,6 +760,21 @@ const Home = () => {
         }
     };
 
+    // Stamps unsubscribeTS / resubscribeTS when the unsubscribe flag changes here, as the unsubscribe
+    // app does. Best effort and quiet: the flag itself was already saved and reported.
+    const stampSubscriptionChange = async (studentId: string, unsubscribed: boolean): Promise<Partial<Student>> => {
+        const fieldName = unsubscribed ? 'unsubscribeTS' : 'resubscribeTS';
+        const ts = new Date().toISOString();
+        try {
+            await updateTableItem('students', studentId, fieldName, ts, pid as string, hash as string);
+            return { [fieldName]: ts };
+        } catch (error) {
+            console.error(`Error setting ${fieldName}:`, error);
+            toast.warning(`Saved, but failed to record the ${unsubscribed ? 'unsubscribe' : 're-subscribe'} date`);
+            return {};
+        }
+    };
+
     const handleCheckboxChanged = async (field: string, studentId: string, checked: boolean) => {
         if (!canWriteViews) {
             toast.info('Value not changed. READ ONLY', { autoClose: 3000 });
@@ -773,6 +790,8 @@ const Home = () => {
 
         let dataField = field;
         if (field === 'unsubscribed') dataField = 'unsubscribe';
+        // unsubscribeTS / resubscribeTS written below, kept in sync with allStudents
+        let stamps: Partial<Student> = {};
 
         // Handle deceased checkbox: if checked, also set unsubscribe to true
         if (field === 'deceased' && checked) {
@@ -780,7 +799,10 @@ const Home = () => {
             const deceasedSuccess = await updateStudentField(studentId, 'deceased', checked);
             if (deceasedSuccess) {
                 // Then update unsubscribe to true
-                await updateStudentField(studentId, 'unsubscribe', true);
+                const wasUnsubscribed = allStudents.find(s => s.id === studentId)?.unsubscribe === true;
+                if (await updateStudentField(studentId, 'unsubscribe', true) && !wasUnsubscribed) {
+                    stamps = await stampSubscriptionChange(studentId, true);
+                }
             } else {
                 return; // If deceased update failed, don't proceed
             }
@@ -796,6 +818,9 @@ const Home = () => {
             if (!success) {
                 return;
             }
+            if (field === 'unsubscribed') {
+                stamps = await stampSubscriptionChange(studentId, checked);
+            }
         }
 
         // Update the global allStudents array
@@ -806,12 +831,14 @@ const Home = () => {
                 updatedStudents[studentIndex] = {
                     ...allStudents[studentIndex],
                     deceased: checked,
-                    unsubscribe: checked ? true : allStudents[studentIndex].unsubscribe // If deceased is checked, set unsubscribe to true; otherwise keep current value
+                    unsubscribe: checked ? true : allStudents[studentIndex].unsubscribe, // If deceased is checked, set unsubscribe to true; otherwise keep current value
+                    ...stamps
                 };
             } else if (field === 'unsubscribed') {
                 updatedStudents[studentIndex] = {
                     ...allStudents[studentIndex],
-                    unsubscribe: checked
+                    unsubscribe: checked,
+                    ...stamps
                 };
             }
             allStudents = updatedStudents;
@@ -849,6 +876,7 @@ const Home = () => {
                 [field]: checked,
                 deceased: field === 'deceased' ? checked : (updatedStudent?.deceased || false),
                 unsubscribed: isUnsubscribed,
+                unsubscribeTS: isUnsubscribed ? updatedStudent?.unsubscribeTS : undefined,
                 email,
                 language,
                 permittedApps: permittedApps,
@@ -1015,6 +1043,9 @@ const Home = () => {
             if (Object.keys(studentChanges).length > 0) {
                 for (const [field, value] of Object.entries(studentChanges)) {
                     await updateStudentField(formData.studentId, field, value);
+                }
+                if (typeof studentChanges.unsubscribe === 'boolean') {
+                    Object.assign(studentChanges, await stampSubscriptionChange(formData.studentId, studentChanges.unsubscribe));
                 }
 
                 // Update local student data
