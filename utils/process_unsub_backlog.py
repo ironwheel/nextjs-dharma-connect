@@ -14,6 +14,11 @@ The legacy table is history only: the unsubscribe app updates participant record
 never writes to it. Once the legacy page redirects to the new app, no new requests arrive, so run
 this after that redirect is live to catch every request made before it.
 
+Participants who are already unsubscribed but have no unsubscribeTS (they were unsubscribed
+by hand before timestamps existed) get unsubscribeTS=<the request's timestamp> too, so every
+processed request shows a date. These are not logged: the unsubscribe itself happened earlier.
+An existing unsubscribeTS is never overwritten. Use --skip-timestamp-backfill to leave them alone.
+
 When a pid has several requests, the latest one is used. Pids with no participant record are
 reported and skipped (no record is ever created).
 
@@ -156,6 +161,7 @@ def main():
     parser.add_argument('--poolsTable', default=env_table('POOLS_TABLE', 'DYNAMODB_TABLE_POOLS'), help='Pools table (default: POOLS_TABLE or DYNAMODB_TABLE_POOLS)')
     parser.add_argument('--activityTable', default=env_table('ACTIVITY_LOG_TABLE'), help='Activity log table (default: ACTIVITY_LOG_TABLE; no logging when unset)')
     parser.add_argument('--dry-run', action='store_true', help='Report what would change without writing')
+    parser.add_argument('--skip-timestamp-backfill', action='store_true', help='Do not add unsubscribeTS to participants who are already unsubscribed')
     parser.add_argument('--yes', action='store_true', help='Skip the confirmation prompt')
     parser.add_argument('--output', help='Write the processed pids to this CSV (pid,name,requestedAt,' + ','.join(REPORT_POOLS) + ')')
     args = parser.parse_args()
@@ -182,36 +188,66 @@ def main():
     pending = sorted((pid for pid in requests if pid in participants and participants[pid].get('unsubscribe') is not True),
                      key=lambda pid: requests[pid][0])
 
+    backfill = [] if args.skip_timestamp_backfill else sorted(
+        (pid for pid in already if not participants[pid].get('unsubscribeTS')), key=lambda pid: requests[pid][0])
+
     print(f"  {len(already)} already unsubscribed")
     print(f"  {len(not_found)} with no participant record")
     for pid in not_found:
         print(f"    not found: {pid}")
     print(f"  {len(pending)} pending")
+    if not args.skip_timestamp_backfill:
+        print(f"  {len(backfill)} of the already unsubscribed have no unsubscribeTS")
 
-    if not pending:
+    if not pending and not backfill:
         print("Nothing to do.")
         return
 
-    pools = list(scan_all(dynamodb.Table(args.poolsTable)))
-    print(f"Loaded {len(pools)} pools")
+    pools = list(scan_all(dynamodb.Table(args.poolsTable))) if pending else []
+    if pending:
+        print(f"Loaded {len(pools)} pools")
 
     if not args.dry_run and not args.yes:
-        answer = input(f"Unsubscribe {len(pending)} participants? (yes/no): ").strip().lower()
+        answer = input(f"Unsubscribe {len(pending)} participants and add unsubscribeTS to {len(backfill)} more? (yes/no): ").strip().lower()
         if answer != 'yes':
             print("Aborted.")
             return
 
     updated, failed, log_failed = 0, 0, 0
+    backfilled, backfill_failed = 0, 0
     processed = []
+    prefix = 'DRYRUN: ' if args.dry_run else ''
+
+    for pid in backfill:
+        student = participants[pid]
+        requested_at, count = requests[pid]
+        name = ' '.join(p for p in (student.get('first'), student.get('last')) if p).strip()
+        print(f"{prefix}{pid} {name or '(no name)'} already unsubscribed; unsubscribeTS <- {requested_at}{f' ({count} requests)' if count > 1 else ''}")
+        processed.append([pid, name, requested_at, 'timestamp-backfilled'] + [''] * len(REPORT_POOLS))
+        if args.dry_run:
+            continue
+        try:
+            # Only a record that exists, is unsubscribed, and has no timestamp yet.
+            student_table.update_item(
+                Key={'id': pid},
+                UpdateExpression='SET #ts = :ts',
+                ConditionExpression='attribute_exists(id) AND #u = :true AND attribute_not_exists(#ts)',
+                ExpressionAttributeNames={'#u': 'unsubscribe', '#ts': 'unsubscribeTS'},
+                ExpressionAttributeValues={':true': True, ':ts': requested_at},
+            )
+            backfilled += 1
+        except Exception as e:
+            backfill_failed += 1
+            print(f"  [ERROR] timestamp backfill failed for {pid}: {e}")
+
     for pid in pending:
         student = participants[pid]
         requested_at, count = requests[pid]
         name = ' '.join(p for p in (student.get('first'), student.get('last')) if p).strip()
         eligibility = pool_eligibility(student, pools)
         marks = ' '.join(f"{pool}={'Y' if ok else 'N'}" for pool, ok in eligibility.items())
-        prefix = 'DRYRUN: ' if args.dry_run else ''
         print(f"{prefix}{pid} {name or '(no name)'} requested {requested_at}{f' ({count} requests)' if count > 1 else ''} {marks}")
-        processed.append([pid, name, requested_at] + [eligibility[p] for p in REPORT_POOLS])
+        processed.append([pid, name, requested_at, 'unsubscribed'] + [eligibility[p] for p in REPORT_POOLS])
         if args.dry_run:
             continue
 
@@ -251,15 +287,20 @@ def main():
     print(f"  not found:               {len(not_found)}")
     print(f"  already unsubscribed:    {len(already)}")
     print(f"  pending:                 {len(pending)}")
+    if not args.skip_timestamp_backfill:
+        print(f"  timestamp backfills:     {len(backfill)}")
     if not args.dry_run:
         print(f"  updated:                 {updated}")
         print(f"  update failures:         {failed}")
         print(f"  activity log failures:   {log_failed}")
+        if not args.skip_timestamp_backfill:
+            print(f"  backfilled:              {backfilled}")
+            print(f"  backfill failures:       {backfill_failed}")
 
     if args.output:
         with open(args.output, 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['pid', 'name', 'requestedAt'] + REPORT_POOLS)
+            writer.writerow(['pid', 'name', 'requestedAt', 'action'] + REPORT_POOLS)
             writer.writerows(processed)
         print(f"Wrote {len(processed)} rows to {args.output}")
 
