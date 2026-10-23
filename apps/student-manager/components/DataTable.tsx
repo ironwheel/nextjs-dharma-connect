@@ -143,6 +143,15 @@ export const DataTable: React.FC<DataTableProps> = ({
             );
         }
 
+        // ISO-8601 timestamp, shown in the viewer's locale (sorting uses the raw value)
+        if (col.cellRenderer === 'dateTimeRenderer') {
+            if (!value) return '';
+            const date = new Date(value);
+            return isNaN(date.getTime()) ? String(value) : date.toLocaleString(undefined, {
+                year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+            });
+        }
+
         // Editable cell
         if (isEditing && col.editable && col.writeEnabled && canWriteViews) {
             return (

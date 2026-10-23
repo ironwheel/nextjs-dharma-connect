@@ -36,6 +36,7 @@ interface Student {
     spokenLangPref?: string;
     writtenLangPref?: string;
     unsubscribe?: boolean;
+    unsubscribeTS?: string;
     deceased?: boolean;
     owyaaLease?: string;
     // Note: Other fields like programs, practice, emails, offeringHistory 
@@ -280,13 +281,14 @@ const Home = () => {
 
             // Use projection expression to only load the fields we need
             // Note: 'first' and 'last' are reserved keywords in DynamoDB, so we need to use expression attribute names
-            const projectionExpression = '#id, #first, #last, #email, #unsubscribe, #deceased, #writtenLangPref, #spokenLangPref, #owyaaLease';
+            const projectionExpression = '#id, #first, #last, #email, #unsubscribe, #unsubscribeTS, #deceased, #writtenLangPref, #spokenLangPref, #owyaaLease';
             const expressionAttributeNames = {
                 '#id': 'id',
                 '#first': 'first',
                 '#last': 'last',
                 '#email': 'email',
                 '#unsubscribe': 'unsubscribe',
+                '#unsubscribeTS': 'unsubscribeTS',
                 '#deceased': 'deceased',
                 '#writtenLangPref': 'writtenLangPref',
                 '#spokenLangPref': 'spokenLangPref',
@@ -518,6 +520,7 @@ const Home = () => {
             { field: 'rowIndex', headerName: '#', pinned: 'left', width: 75 },
             { field: 'studentName', headerName: 'Student Name', pinned: 'left', sortable: true },
             { field: 'unsubscribed', headerName: 'Unsub', width: 80, cellRenderer: 'checkboxRenderer', writeEnabled: true, sortable: true },
+            { field: 'unsubscribeTS', headerName: 'Unsub Date', width: 170, cellRenderer: 'dateTimeRenderer', sortable: true },
             { field: 'deceased', headerName: 'Deceased', width: 100, cellRenderer: 'checkboxRenderer', writeEnabled: true, sortable: true },
             { field: 'email', headerName: 'Email', sortable: true },
             { field: 'language', headerName: 'Language', sortable: true },
@@ -569,6 +572,8 @@ const Home = () => {
                 rowIndex: index + 1,
                 studentName: `${student.first} ${student.last}`,
                 unsubscribed: student.unsubscribe || false,
+                // Raw ISO timestamp so the column sorts by date; DataTable formats it for display
+                unsubscribeTS: student.unsubscribeTS || undefined,
                 deceased: student.deceased || false,
                 email,
                 language,
