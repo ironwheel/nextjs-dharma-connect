@@ -27,9 +27,9 @@ App defaults live in `APP_ACCESS_JSON` (changed by deploy). Per-user overrides l
 | Apps | `authMode` | Minimum trust | `maxDevices` | `allowEmailFallback` |
 |---|---|---|---|---|
 | register, unsubscribe | `silent` (unchanged) | silent | not enforced | n/a |
-| event-manager, student-manager, offering-dashboard, refund-request, refund-approve | passkey | `passkey-uv` | 1 | no |
+| event-manager, event-dashboard, email-manager, student-manager, offering-dashboard, refund-request, refund-approve | passkey | `passkey-uv` | 1 | no |
 | student-dashboard | passkey | `passkey` | 2 | yes |
-| email-manager, event-dashboard, translation-manager, activity-log, auth-test | passkey | `passkey` | 1 | no |
+| translation-manager, activity-log, auth-test | passkey | `passkey` | 1 | no |
 | sys-admin console | passkey | `passkey-uv` | 1 | no |
 
 - Per-user overrides: `maxDevices` (per app), `maxPasskeys` (global, default 1), `emailFallback` (needs the
