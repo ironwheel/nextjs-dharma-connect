@@ -88,7 +88,7 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
           oidcToken = process.env.VERCEL_OIDC_TOKEN!;
         }
         // console.log("API MIDDLEWARE: COOKIES:", req.cookies);
-        const checkResult = await checkAccess(req.headers['x-user-id'] as string, req.headers['x-verification-hash'] as string, req.headers['x-host'] as string, req.headers['x-device-fingerprint'] as string, operation, req.cookies['token'], oidcToken);
+        const checkResult = await checkAccess(req.headers['x-user-id'] as string, req.headers['x-verification-hash'] as string, req.headers['x-host'] as string, req.headers['x-device-fingerprint'] as string, operation, req.cookies['token'], oidcToken, req.headers['user-agent']);
         console.log("checkResult:", checkResult.status);
         if (checkResult.status === 'authenticated' && checkResult.role) {
           (req as any).userRole = checkResult.role;

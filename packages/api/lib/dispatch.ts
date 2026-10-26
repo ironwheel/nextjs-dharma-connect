@@ -19,6 +19,7 @@ import { putOfferingTransaction, completeOffering, updateOfferingTransactionRefu
 import { translatePromptFromEnglish } from './translate';
 import { resolveAudioEntitlement, signAudioUrl } from './audio';
 import { recordRegistration } from './activity';
+import { deviceList, deviceRemove } from './devices';
 import { passkeyInviteSend, passkeyRegisterOptions, passkeyRegisterVerify, passkeyAuthOptions, passkeyAuthVerify, passkeyList, passkeyRevoke } from './passkeys';
 import { getUnsubscribeStatus, setUnsubscribe } from './unsubscribe';
 
@@ -362,6 +363,7 @@ async function dispatchAuth(
   const host = req.headers['x-host'] as string;
   const deviceFingerprint = req.headers['x-device-fingerprint'] as string;
   const clientIp = req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || null;
+  const userAgent = req.headers['user-agent'];
   let oidcToken = req.headers['x-vercel-oidc-token'] as string;
   if (!oidcToken && process.env.NODE_ENV === 'development') {
     oidcToken = process.env.VERCEL_OIDC_TOKEN!;
@@ -382,10 +384,10 @@ async function dispatchAuth(
         if (!id) {
           return res.status(400).json({ error: 'Verification token ID is required for callback' });
         }
-        const callbackResult = await verificationEmailCallback(pid, hash, host, deviceFingerprint, id, oidcToken);
+        const callbackResult = await verificationEmailCallback(pid, hash, host, deviceFingerprint, id, oidcToken, userAgent);
         return res.status(200).json(callbackResult);
       case 'verificationCheck':
-        const checkResult = await verificationCheck(pid, hash, host, deviceFingerprint);
+        const checkResult = await verificationCheck(pid, hash, host, deviceFingerprint, oidcToken, userAgent);
         return res.status(200).json(checkResult);
       case 'getActionsProfiles':
         const profileNames = await getActionsProfiles(oidcToken);
@@ -469,7 +471,7 @@ async function dispatchAuth(
           if (!invite) {
             return res.status(400).json({ error: 'Missing required parameter: invite' });
           }
-          const result = await passkeyRegisterOptions(pid, hash, host, deviceFingerprint, invite, oidcToken);
+          const result = await passkeyRegisterOptions(pid, hash, host, deviceFingerprint, invite, oidcToken, userAgent);
           return res.status(200).json(result);
         }
       case 'passkeyRegisterVerify':
@@ -478,7 +480,7 @@ async function dispatchAuth(
           if (!invite || !challengeId || !response) {
             return res.status(400).json({ error: 'Missing required parameters: invite, challengeId, response' });
           }
-          const result = await passkeyRegisterVerify(pid, hash, host, deviceFingerprint, challengeId, invite, response, clientIp, oidcToken);
+          const result = await passkeyRegisterVerify(pid, hash, host, deviceFingerprint, challengeId, invite, response, clientIp, oidcToken, userAgent);
           return res.status(200).json(result);
         }
       case 'passkeyAuthOptions':
@@ -492,7 +494,7 @@ async function dispatchAuth(
           if (!challengeId || !response) {
             return res.status(400).json({ error: 'Missing required parameters: challengeId, response' });
           }
-          const result = await passkeyAuthVerify(pid, hash, host, deviceFingerprint, challengeId, response, oidcToken);
+          const result = await passkeyAuthVerify(pid, hash, host, deviceFingerprint, challengeId, response, oidcToken, userAgent);
           return res.status(200).json(result);
         }
       case 'passkeyList':
@@ -511,6 +513,24 @@ async function dispatchAuth(
             return res.status(400).json({ error: 'Missing required parameters: targetUserPid, credentialId' });
           }
           const result = await passkeyRevoke(pid, targetUserPid, credentialId, oidcToken);
+          return res.status(200).json(result);
+        }
+      case 'deviceList':
+        {
+          const { targetUserPid } = req.body;
+          if (!targetUserPid) {
+            return res.status(400).json({ error: 'Missing required parameter: targetUserPid' });
+          }
+          const result = await deviceList(pid, targetUserPid, oidcToken);
+          return res.status(200).json(result);
+        }
+      case 'deviceRemove':
+        {
+          const { targetUserPid, fingerprint } = req.body;
+          if (!targetUserPid || !fingerprint) {
+            return res.status(400).json({ error: 'Missing required parameters: targetUserPid, fingerprint' });
+          }
+          const result = await deviceRemove(pid, targetUserPid, fingerprint, oidcToken);
           return res.status(200).json(result);
         }
       default:

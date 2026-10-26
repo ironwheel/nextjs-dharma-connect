@@ -34,6 +34,8 @@ export const tables: TableConfig[] = [
   /** webauthn-challenges: single-use ceremony challenges, expired by DynamoDB TTL on `ttl`. */
   { resource: 'webauthn-challenges', envVar: 'DYNAMODB_TABLE_WEBAUTHN_CHALLENGES', pk: 'challengeId', sk: '', ops: ['get', 'put'] },
   /** passkey-invites: admin-issued enrollment invites, keyed by a hash of the emailed token; TTL on `ttl`. */
+  /** devices: one item per participant device (fingerprint = device cookie digest), with the apps it holds a slot for. */
+  { resource: 'devices', envVar: 'DYNAMODB_TABLE_DEVICES', pk: 'pid', sk: 'fingerprint', ops: ['get', 'put', 'query', 'update', 'delete'] },
   { resource: 'passkey-invites', envVar: 'DYNAMODB_TABLE_PASSKEY_INVITES', pk: 'inviteHash', sk: '', ops: ['get', 'put'] },
   { resource: 'pools', envVar: 'DYNAMODB_TABLE_POOLS', pk: 'name', sk: '', ops: ['get', 'list', 'count', 'put', 'delete'] },
   { resource: 'scripts', envVar: 'DYNAMODB_TABLE_SCRIPTS', pk: 'name', sk: '', ops: ['get', 'list', 'count', 'put', 'delete'] },
