@@ -390,7 +390,7 @@ async function dispatchAuth(
         const profileNames = await getActionsProfiles(oidcToken);
         return res.status(200).json({ profileNames });
       case 'getAuthList':
-        const authRecords = await getAuthList(oidcToken);
+        const authRecords = await getAuthList(pid, oidcToken);
         return res.status(200).json({ authRecords });
       case 'getViewsProfiles':
         const viewsProfileNames = await getViewsProfiles(oidcToken);
@@ -404,7 +404,7 @@ async function dispatchAuth(
         if (!authRecord || !authRecord.id) {
           return res.status(400).json({ error: 'Missing required parameters: authRecord with id' });
         }
-        await putAuthItem(authRecord.id, authRecord, oidcToken);
+        await putAuthItem(authRecord.id, authRecord, pid, oidcToken);
         return res.status(200).json({ success: true });
       case 'linkEmailSend':
         const { linkHost, targetUserPid } = req.body;

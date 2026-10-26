@@ -4,6 +4,7 @@ import nextConnect from 'next-connect';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import csurf from 'csurf';
+import { resolveDeviceId, deviceCookie, appendSetCookie } from '../../lib/device';
 
 // Parse allowed origins from environment
 let allowedOrigins: string[] = [];
@@ -53,6 +54,12 @@ const handler = nextConnect<NextApiRequest, NextApiResponse>()
         }
     }))
     .get((req, res) => {
+        // Clients fetch the CSRF token before their first API call, so issue the device cookie here.
+        // That keeps a page's parallel first requests from each minting a different device ID.
+        const { deviceId, isNew } = resolveDeviceId(req.cookies);
+        if (isNew) {
+            appendSetCookie(res, deviceCookie(deviceId));
+        }
         // Send back a fresh CSRF token; secret cookie is set by csurf
         console.log("CSRF: req.csrfToken()", req.csrfToken());
         res.status(200).json({ csrfToken: req.csrfToken() });

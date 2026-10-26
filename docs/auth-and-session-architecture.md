@@ -409,19 +409,11 @@ try {
 
 ### Device Fingerprinting
 
-```javascript
-// Client-side fingerprint generation
-async function getDeviceFingerprint() {
-  const fp = await FingerprintJS.load();
-  const result = await fp.get();
-  return result.visitorId;
-}
-
-// Include in all auth requests
-headers: {
-  'X-Device-Fingerprint': await getDeviceFingerprint()
-}
-```
+The device fingerprint is server-issued (see `packages/api/lib/device.ts`). Each browser gets a random
+device ID in an httpOnly `did` cookie scoped to the API domain, set by `/api/csrf` or, if missing, by the
+API middleware. The middleware overwrites the `X-Device-Fingerprint` request header with the SHA-256 digest
+of that cookie, so whatever the client sends is ignored. Sessions, token claims and logs only ever hold the
+digest. See `docs/passkey-auth-plan.md`.
 
 ## DynamoDB Tables
 

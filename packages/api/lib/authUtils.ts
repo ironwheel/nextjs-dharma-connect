@@ -154,6 +154,85 @@ export const DEFAULT_NO_PERMISSIONS = {
 // --- Helper Functions ---
 
 /**
+ * @function verificationTokenKey
+ * @description Builds the verification-tokens primary key for a participant's emailed code.
+ * @param {string} pid - The participant ID.
+ * @param {string} code - The 6-digit code.
+ * @returns {string} The record key.
+ */
+function verificationTokenKey(pid: string, code: string): string {
+    return `${pid}#${code}`;
+}
+
+/**
+ * @function emailLogLabel
+ * @description Returns what to log for an email recipient. Auditor identities stay out of logs.
+ * @param {string} email - The recipient's email address.
+ * @param {string} pid - The recipient's participant ID.
+ * @param {boolean} auditor - Whether the recipient is an auditor.
+ * @returns {string} The label to log.
+ */
+function emailLogLabel(email: string, pid: string, auditor: boolean): string {
+    return auditor ? `auditor ${pid}` : email;
+}
+
+/**
+ * @function parseAccessList
+ * @description Parses APP_ACCESS_JSON.
+ * @returns {any[]} The per-host access entries.
+ * @throws {Error} If APP_ACCESS_JSON is missing or invalid.
+ */
+function parseAccessList(): any[] {
+    const accessJson = process.env.APP_ACCESS_JSON;
+    if (!accessJson) throw new Error('APP_ACCESS_JSON environment variable not set');
+    try {
+        return JSON.parse(accessJson);
+    } catch (e) {
+        throw new Error('APP_ACCESS_JSON is not valid JSON');
+    }
+}
+
+/**
+ * @function getRestrictedHosts
+ * @description Hosts marked `"restricted": true` in APP_ACCESS_JSON. Only sys admins may grant them.
+ * @returns {string[]} The restricted hosts.
+ */
+export function getRestrictedHosts(): string[] {
+    return parseAccessList().filter((e: any) => e.restricted === true).map((e: any) => e.host);
+}
+
+/**
+ * @function isSysAdmin
+ * @description Whether a participant is listed in SYS_ADMIN_PIDS (comma-separated). Set only by deploy,
+ *              never stored in a table other admins can write.
+ * @param {string} pid - The participant ID.
+ * @returns {boolean} True if the participant is a sys admin.
+ */
+export function isSysAdmin(pid: string): boolean {
+    if (!pid) return false;
+    const sysAdmins = (process.env.SYS_ADMIN_PIDS || '').split(',').map((p) => p.trim()).filter(Boolean);
+    return sysAdmins.includes(pid);
+}
+
+/**
+ * @function withoutRestrictedHosts
+ * @description Removes restricted hosts from an auth record's permitted hosts and config.
+ * @param {any} record - The auth record.
+ * @param {string[]} restrictedHosts - The restricted hosts.
+ * @returns {any} A copy of the record without restricted hosts.
+ */
+function withoutRestrictedHosts(record: any, restrictedHosts: string[]): any {
+    const copy = { ...record };
+    if (Array.isArray(record['permitted-hosts'])) {
+        copy['permitted-hosts'] = record['permitted-hosts'].filter((h: string) => !restrictedHosts.includes(h));
+    }
+    if (record.config && typeof record.config === 'object') {
+        copy.config = Object.fromEntries(Object.entries(record.config).filter(([h]) => !restrictedHosts.includes(h)));
+    }
+    return copy;
+}
+
+/**
  * @async
  * @function getActionsProfileForHost
  * @description Gets the actions profile for a given host from the app.actions table
@@ -528,6 +607,11 @@ export async function linkEmailSend(pid: string, hash: string, host: string, lin
         throw new Error('linkEmailSend(): Missing required parameters');
     }
 
+    // Links to restricted hosts are sent by sys admins only
+    if (getRestrictedHosts().includes(linkHost) && !isSysAdmin(pid)) {
+        throw new Error('AUTH_RESTRICTED_HOST_SYS_ADMIN_ONLY');
+    }
+
     // Parse and validate APP_ACCESS_JSON
     const accessJson = process.env.APP_ACCESS_JSON;
     if (!accessJson) throw new Error('APP_ACCESS_JSON environment variable not set');
@@ -628,7 +712,7 @@ export async function linkEmailSend(pid: string, hash: string, host: string, lin
 
     try {
         const info = await transporter.sendMail(mailOptions);
-        console.log(`auth-logic: Link email sent successfully to: ${participantData.email}, Info: ${info.messageId}`);
+        console.log(`auth-logic: Link email sent successfully to: ${emailLogLabel(participantData.email, targetUserPid, auditor)}, Info: ${info.messageId}`);
         return true;
     } catch (emailError: any) {
         console.error("auth-logic: Failed to send confirmation email:", emailError);
@@ -692,12 +776,12 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
     const hasPermission = permittedHosts.includes(host);
     if (!hasPermission) throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
 
-    // Check for rate limiting - look for recent verification emails sent
+    // Check for rate limiting - look for recent verification emails sent.
+    // Limited per participant, not per device: a client can always drop its device cookie.
     tableCfg = tableGetConfig('verification-tokens');
     const recentEmails = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AUTH_ROLE_ARN!, oidcToken);
     const recentVerificationEmails = recentEmails.filter((token: any) =>
         token.pid === pid &&
-        token.deviceFingerprint === deviceFingerprint &&
         !token.failedAttempt &&
         token.createdAt > Date.now() - (2 * 60 * 1000) // Last 2 minutes
     );
@@ -755,8 +839,8 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
         }
     }
 
-    const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
-    const verificationTokenId = generateOTP();
+    const verificationCode = crypto.randomInt(100000, 1000000).toString();
+    const verificationTokenId = verificationTokenKey(pid, verificationCode);
     tableCfg = tableGetConfig('verification-tokens');
 
     try {
@@ -777,13 +861,7 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
     let emailBody = getConfirmPrompt('codeEmail', language)
         .replace(/\|\|name\|\|/g, `${participantData.first} ${participantData.last}`)
         .replace(/\|\|location\|\|/g, location)
-        .replace(/\|\|code\|\|/g, verificationTokenId);
-
-    console.log('verificationEmailSend: Email smtpUser:', smtpUser);
-    console.log('verificationEmailSend: Email smtpPass:', smtpPass);
-    console.log('verificationEmailSend: Email emailFrom:', emailFrom);
-    console.log('verificationEmailSend: Email emailReplyTo:', emailReplyTo);
-    console.log('verificationEmailSend: Email participantData.email:', participantData.email);
+        .replace(/\|\|code\|\|/g, verificationCode);
 
     const transporter = nodemailer.createTransport({
         service: 'gmail',
@@ -805,7 +883,7 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
 
     try {
         const info = await transporter.sendMail(mailOptions);
-        console.log(`auth-logic: Confirmation email sent successfully to: ${participantData.email}, Info: ${info.messageId}`);
+        console.log(`auth-logic: Confirmation email sent successfully to: ${emailLogLabel(participantData.email, pid, auditor)}, Info: ${info.messageId}`);
         return true;
     } catch (emailError: any) {
         console.error("auth-logic: Failed to send confirmation email:", emailError);
@@ -878,12 +956,12 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
     }
     const actionsProfile = await getActionsProfileForHost(host, oidcToken);
 
-    // Check for rate limiting - look for recent failed attempts
+    // Check for rate limiting - look for recent failed attempts.
+    // Limited per participant, not per device: a client can always drop its device cookie.
     tableCfg = tableGetConfig('verification-tokens');
     const recentFailedAttempts = await listAllFiltered(tableCfg.tableName, 'pid', pid, process.env.AUTH_ROLE_ARN!, oidcToken);
     const failedAttempts = recentFailedAttempts.filter((token: any) =>
         token.pid === pid &&
-        token.deviceFingerprint === deviceFingerprint &&
         token.failedAttempt &&
         token.createdAt > Date.now() - (5 * 60 * 1000) // Last 5 minutes
     );
@@ -892,8 +970,10 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
         throw new Error('AUTH_RATE_LIMIT_EXCEEDED');
     }
 
-    // User has access to this host, so if we can find the verification record we're good to go
-    const verificationToken = await getOne(tableCfg.tableName, tableCfg.pk, verificationTokenId, process.env.AUTH_ROLE_ARN!, oidcToken);
+    // User has access to this host, so if we can find the verification record we're good to go.
+    // Records are keyed by participant and code, so one participant's code can never match another's.
+    const verificationTokenRecordId = verificationTokenKey(pid, verificationTokenId);
+    const verificationToken = await getOne(tableCfg.tableName, tableCfg.pk, verificationTokenRecordId, process.env.AUTH_ROLE_ARN!, oidcToken);
 
     if (!verificationToken) {
         // Record failed attempt
@@ -979,7 +1059,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
     console.log("verificationEmailCallback: role:", role);
 
     // Delete the current verification record
-    await deleteOne(tableCfg.tableName, tableCfg.pk, verificationTokenId, process.env.AUTH_ROLE_ARN!, oidcToken);
+    await deleteOne(tableCfg.tableName, tableCfg.pk, verificationTokenRecordId, process.env.AUTH_ROLE_ARN!, oidcToken);
 
     // Verification token is valid, so we can create a session
     tableCfg = tableGetConfig('sessions');
@@ -1632,28 +1712,60 @@ export async function getActionsProfiles(oidcToken?: string): Promise<string[]> 
 /**
  * @async
  * @function getAuthList
- * @description Retrieves all auth records from the auth table.
+ * @description Retrieves all auth records from the auth table. Restricted hosts are left out unless the
+ *              caller is a sys admin, so other admins never see who holds them.
+ * @param {string} callerPid - Participant ID of the admin making the request.
  * @returns {Promise<any[]>} Resolves with a list of all auth records
  * @throws {Error} If the database scan fails or table name is not configured.
  */
-export async function getAuthList(oidcToken?: string): Promise<any[]> {
+export async function getAuthList(callerPid: string, oidcToken?: string): Promise<any[]> {
     const tableCfg = tableGetConfig('auth');
     const allAuthRecords = await listAll(tableCfg.tableName, process.env.AUTH_ROLE_ARN!, oidcToken);
 
-    return allAuthRecords;
+    const restrictedHosts = getRestrictedHosts();
+    if (restrictedHosts.length === 0 || isSysAdmin(callerPid)) {
+        return allAuthRecords;
+    }
+    return allAuthRecords.map((record: any) => withoutRestrictedHosts(record, restrictedHosts));
 }
 
 /**
  * @async
  * @function putAuthItem
- * @description Updates or creates an auth record in the auth table.
+ * @description Updates or creates an auth record in the auth table. Only sys admins may grant or change
+ *              restricted hosts. For anyone else, the stored restricted grants and settings are kept as they
+ *              are, since getAuthList never showed them to the caller.
  * @param {string} id - The auth record ID (student ID or 'default')
  * @param {any} authRecord - The auth record data to save
+ * @param {string} callerPid - Participant ID of the admin making the request.
  * @returns {Promise<void>} Resolves when the record is saved
- * @throws {Error} If the database operation fails or table name is not configured.
+ * @throws {Error} AUTH_RESTRICTED_HOST_SYS_ADMIN_ONLY if a non-sys-admin tries to grant a restricted host.
  */
-export async function putAuthItem(id: string, authRecord: any, oidcToken?: string): Promise<void> {
+export async function putAuthItem(id: string, authRecord: any, callerPid: string, oidcToken?: string): Promise<void> {
     const tableCfg = tableGetConfig('auth');
+
+    const restrictedHosts = getRestrictedHosts();
+    if (restrictedHosts.length > 0 && !isSysAdmin(callerPid)) {
+        const stored = await getOne(tableCfg.tableName, tableCfg.pk, id, process.env.AUTH_ROLE_ARN!, oidcToken) || {};
+        const storedHosts: string[] = stored['permitted-hosts'] || [];
+        const requestedHosts: string[] = authRecord['permitted-hosts'] || [];
+
+        if (requestedHosts.some((h) => restrictedHosts.includes(h) && !storedHosts.includes(h))) {
+            throw new Error('AUTH_RESTRICTED_HOST_SYS_ADMIN_ONLY');
+        }
+
+        const storedRestricted = storedHosts.filter((h) => restrictedHosts.includes(h));
+        const storedRestrictedConfig = Object.entries(stored.config || {}).filter(([h]) => restrictedHosts.includes(h));
+        const allowed = withoutRestrictedHosts(authRecord, restrictedHosts);
+        authRecord = {
+            ...allowed,
+            'permitted-hosts': [...(allowed['permitted-hosts'] || []), ...storedRestricted],
+            ...((allowed.config || storedRestrictedConfig.length > 0)
+                ? { config: { ...(allowed.config || {}), ...Object.fromEntries(storedRestrictedConfig) } }
+                : {}),
+        };
+    }
+
     await putOne(tableCfg.tableName, authRecord, process.env.AUTH_ROLE_ARN!, oidcToken);
 }
 
