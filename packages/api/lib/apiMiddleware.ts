@@ -12,6 +12,7 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import csurf from 'csurf';
 import { checkAccess } from './authUtils';
+import { resolveDeviceId, deviceFingerprintFor, deviceCookie, appendSetCookie } from './device';
 
 // Parse allowed origins from environment
 let allowedOrigins: string[] = [];
@@ -73,6 +74,14 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
     try {
       // CORS middleware will automatically respond to OPTIONS preflight.
       if (req.method !== 'OPTIONS') {
+        // The device fingerprint comes from the server-issued device cookie, never from the client.
+        // Overwriting the header means every downstream reader gets the server value.
+        const { deviceId, isNew } = resolveDeviceId(req.cookies);
+        req.headers['x-device-fingerprint'] = deviceFingerprintFor(deviceId);
+        if (isNew) {
+          appendSetCookie(res, deviceCookie(deviceId));
+        }
+
         // Each operation is made up of an HTTP method, a susbsystem, and a resource/action
         let oidcToken = req.headers['x-vercel-oidc-token'] as string;
         if (!oidcToken && process.env.NODE_ENV === 'development') {
@@ -103,7 +112,7 @@ export const apiMiddleware = nextConnect<NextApiRequest, NextApiResponse>()
             path: '/',
             // Session cookie - no maxAge means it expires when browser closes
           });
-          res.setHeader('Set-Cookie', cookieStr);
+          appendSetCookie(res, cookieStr);
         }
         if (checkResult.status === 'already-authenticated') {
           res.status(204).json({});
