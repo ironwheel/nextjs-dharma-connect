@@ -113,8 +113,9 @@ async function apiFetch(
       console.log("Failed to parse 401 response as JSON:", parseError);
     }
 
-    // Default 401 handling - redirect to login
-    Router.replace(`/login?pid=${pid}&hash=${hash}`);
+    // Default 401 handling - redirect to login, keeping a passkey invite if this page has one
+    const invite = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('invite') : null;
+    Router.replace(`/login?pid=${pid}&hash=${hash}${invite ? `&invite=${encodeURIComponent(invite)}` : ''}`);
     return Promise.resolve({ redirected: true });
   }
   if (!res.ok) {
