@@ -120,7 +120,7 @@ Deploy notes:
   `MONOREPO_PARENT_DOMAIN` without its leading dot (`localhost` in development; `WEBAUTHN_RP_ID` overrides).
   Allowed origins come from `CORS_ORIGIN_LIST`.
 - **Invites:** `POST/auth/passkeyInviteSend` (body: `targetUserPid`, `linkHost`) emails a single-use link:
-  `https://<linkHost>/?pid=…&hash=…&invite=<token>`. Only a SHA-256 hash of the token is stored. Invites expire
+  `https://<linkHost>/login?pid=…&hash=…&invite=<token>`. Only a SHA-256 hash of the token is stored. Invites expire
   after `PASSKEY_INVITE_DURATION` seconds (default 72 hours). Invites are refused when:
   - `linkHost` doesn't have passkeys turned on
   - the participant is at `maxPasskeys`
@@ -200,16 +200,23 @@ Deploy notes:
 - Add the `auditors-auth` resource, the shared permission lookup, the restricted-app rule, sys-admin actions,
   and auditor filtering of activity.
 
-### Phase 2: shared frontend
+### Phase 2: shared frontend (done in this change)
 
-Replace the code-entry flow in `AuthVerification` with:
-- passkey sign-in
-- the enroll-from-invite page
-- the device-limit-reached and passkey-limit-reached screens
-- the email-fallback path
+`AuthVerification` (used by every app's `/login`) now asks `verificationCheck` what to offer, then shows one of:
+- **Enroll** (the URL has `invite`): "Create passkey". Passkey problems ("already used", "already have a
+  passkey", "already on this device") offer "Sign in with my passkey" instead.
+- **Passkey sign-in** (the participant has a passkey): "Sign in with passkey", with a hint about using a phone,
+  and "Email me a code instead" only when emailed codes are allowed.
+- **Needs an invite** (`passkey-required`, no passkey, no fallback): explains that an admin must send an invitation.
+- **Device limit reached**: explains that an admin must remove a device or allow another.
+- **Emailed code** (unchanged UI): for `email` apps, for fallback users, or when the check can't load. A code
+  refused for the device limit, or because emailed codes are off, switches to the matching screen.
 
-This needs new multilingual prompts. Invite links open the app root (`/?pid=…&hash=…&invite=…`), so each
-app's redirect to `/login` must carry the `invite` parameter through. Pilot on auth-test.
+Browser and API errors are mapped to plain messages in `passkeyClient.ts`. `@simplewebauthn/browser` (13.3.x)
+is loaded only when needed. Invite links now open `/login` directly, so an invite works even while the participant
+is signed in with an emailed code. The shared client's redirect to `/login` keeps the `invite` parameter.
+
+The text is English, like the existing screen. Translations can move to prompts later.
 
 ### Phase 3: admin UI
 

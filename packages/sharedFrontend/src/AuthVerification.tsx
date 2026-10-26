@@ -2,11 +2,13 @@
  * @file packages/sharedFrontend/src/AuthVerification.tsx
  * @copyright Robert E. Taylor, Extropic Systems, 2025
  * @license MIT
- * @description Defines the AuthVerification component for handling email verification.
+ * @description Defines the AuthVerification component: passkey sign-in, passkey enrollment from an invite,
+ *              and emailed-code sign-in, as each app allows (see docs/passkey-auth-plan.md).
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { api } from './httpClient';
+import { checkSignIn, signInWithPasskey, enrollPasskey, passkeysSupported, passkeyProblem, PasskeyProblem, SignInOptions } from './passkeyClient';
 
 const getPublicIp = async (): Promise<string | null> => {
     try {
@@ -35,6 +37,64 @@ type VerificationSendOutcome =
     | { status: 'expired'; retried: boolean }
     | { status: 'error'; retried: boolean; error: unknown };
 
+// Which screen the login page shows
+type LoginMode = 'checking' | 'email' | 'passkey' | 'enroll' | 'needInvite' | 'deviceLimit';
+
+const PROBLEM_TEXT: Record<PasskeyProblem, string> = {
+    'cancelled': 'The passkey prompt was closed before it finished. Please try again.',
+    'unsupported': "This browser can't use passkeys. Please try an up-to-date Chrome, Safari or Edge, or use your phone.",
+    'already-on-device': 'This device already has your passkey. Please sign in with it instead.',
+    'device-limit': 'This device has reached the device limit for this app.',
+    'invite-used': "This invitation has already been used. If you didn't set up the passkey yourself, please contact an admin right away.",
+    'invite-expired': 'This invitation has expired. Please ask an admin for a new one.',
+    'invite-invalid': "This invitation link isn't valid for your account. Please ask an admin for a new one.",
+    'passkey-limit': 'You already have a passkey. Please sign in with it, or ask an admin if you need another one.',
+    'not-enabled': "Passkeys aren't turned on for this app yet.",
+    'no-passkey': "We couldn't find your passkey. If you no longer have it, please ask an admin for a new invitation.",
+    'verification-failed': "Your passkey couldn't be verified. Please try again, and confirm with Face ID, your fingerprint or your device PIN when asked.",
+    'email-disabled': 'This app now signs you in with a passkey instead of an emailed code.',
+    'other': 'Something went wrong. Please try again later.',
+};
+
+// Problems after which the participant should simply sign in with the passkey they already have
+const USE_EXISTING_PASSKEY: PasskeyProblem[] = ['invite-used', 'passkey-limit', 'already-on-device'];
+
+const primaryButtonStyle = (disabled: boolean): React.CSSProperties => ({
+    width: '100%',
+    padding: '0.75rem 1.5rem',
+    borderRadius: '0.5rem',
+    color: '#ffffff',
+    fontWeight: '600',
+    fontSize: '1.125rem',
+    transition: 'all 0.3s ease-in-out',
+    backgroundColor: disabled ? '#a5b4fc' : '#4f46e5',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    border: 'none',
+    outline: 'none'
+});
+
+const linkButtonStyle = (disabled: boolean): React.CSSProperties => ({
+    width: '100%',
+    marginTop: '1rem',
+    padding: '0.5rem 1.5rem',
+    color: '#4f46e5',
+    fontWeight: '500',
+    backgroundColor: 'transparent',
+    border: 'none',
+    outline: 'none',
+    cursor: disabled ? 'not-allowed' : 'pointer'
+});
+
+const noticeStyle = (tone: 'warning' | 'error' | 'info'): React.CSSProperties => ({
+    marginTop: '1.5rem',
+    padding: '1rem',
+    backgroundColor: tone === 'error' ? '#fee2e2' : tone === 'warning' ? '#fef3c7' : '#dbeafe',
+    color: tone === 'error' ? '#b91c1c' : tone === 'warning' ? '#a16207' : '#1d4ed8',
+    borderRadius: '0.5rem',
+    boxShadow: 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.06)',
+    textAlign: 'left'
+});
+
 interface AuthVerificationProps {
     pid: string | null;
     hash: string | null;
@@ -59,6 +119,14 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash, eventCod
     const [expiredAuthFlow, setExpiredAuthFlow] = useState(false);
     const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
+    // Passkey sign-in and enrollment
+    const [mode, setMode] = useState<LoginMode>('checking');
+    const [signInOptions, setSignInOptions] = useState<SignInOptions | null>(null);
+    const [invite, setInvite] = useState<string | null>(null);
+    const [supported, setSupported] = useState(true);
+    const [passkeyBusy, setPasskeyBusy] = useState(false);
+    const [problem, setProblem] = useState<PasskeyProblem | null>(null);
+
     const redirectToDashboard = useCallback(() => {
         if (!pid || !hash) {
             return;
@@ -70,6 +138,92 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash, eventCod
         }
         window.location.href = redirectUrl;
     }, [pid, hash, eventCode]);
+
+    // Decide which screen to show: enrollment when the page was opened from an invite, otherwise whatever
+    // the app and this participant's account allow.
+    useEffect(() => {
+        if (!pid || !hash) {
+            // The router fills in the query after the first render; only a URL without them is really missing them.
+            const params = new URLSearchParams(window.location.search);
+            if (!params.get('pid') || !params.get('hash')) setMode('email');
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            setSupported(await passkeysSupported());
+            const inviteParam = new URLSearchParams(window.location.search).get('invite');
+            if (inviteParam) {
+                if (!cancelled) {
+                    setInvite(inviteParam);
+                    setMode('enroll');
+                }
+                return;
+            }
+            const options = await checkSignIn(pid, hash);
+            if (cancelled) return;
+            setSignInOptions(options);
+            if (!options) {
+                setMode('email');
+            } else if (options.status === 'authenticated') {
+                redirectToDashboard();
+            } else if (options.status === 'device-limit-reached') {
+                setMode('deviceLimit');
+            } else if (options.hasPasskey) {
+                setMode('passkey');
+            } else if (options.emailSignIn === false) {
+                setMode('needInvite');
+            } else {
+                setMode('email');
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [pid, hash, redirectToDashboard]);
+
+    const showProblem = useCallback((err: unknown) => {
+        const kind = passkeyProblem(err);
+        console.warn('[AuthVerification] passkey problem:', kind, err);
+        if (kind === 'device-limit') {
+            setMode('deviceLimit');
+            return;
+        }
+        setProblem(kind);
+    }, []);
+
+    /**
+     * @function handlePasskeySignIn
+     * @description Signs in with the participant's passkey.
+     */
+    const handlePasskeySignIn = async () => {
+        if (!pid || !hash || passkeyBusy) return;
+        setPasskeyBusy(true);
+        setProblem(null);
+        try {
+            await signInWithPasskey(pid, hash);
+            redirectToDashboard();
+        } catch (err) {
+            showProblem(err);
+        } finally {
+            setPasskeyBusy(false);
+        }
+    };
+
+    /**
+     * @function handleEnroll
+     * @description Creates a passkey from the invite and signs in with it.
+     */
+    const handleEnroll = async () => {
+        if (!pid || !hash || !invite || passkeyBusy) return;
+        setPasskeyBusy(true);
+        setProblem(null);
+        try {
+            await enrollPasskey(pid, hash, invite);
+            redirectToDashboard();
+        } catch (err) {
+            showProblem(err);
+        } finally {
+            setPasskeyBusy(false);
+        }
+    };
 
     const deriveErrorMessage = useCallback((err: unknown, fallback: string) => {
         if (err instanceof Error && err.message) {
@@ -237,6 +391,10 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash, eventCod
             }
 
             const message = deriveErrorMessage(outcome.error, 'An unexpected error occurred while sending the email.');
+            if (message.includes('AUTH_EMAIL_SIGNIN_DISABLED')) {
+                setMode(signInOptions?.hasPasskey ? 'passkey' : 'needInvite');
+                return;
+            }
             setError(message);
             console.error('Verification email send error:', outcome.error);
         } finally {
@@ -363,7 +521,11 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash, eventCod
                 setAttempts(attempts + 1);
             }
         } catch (err: any) {
-            if (err.message?.includes('expired') || err.message?.includes('not found')) {
+            if (err.message?.includes('AUTH_DEVICE_LIMIT_REACHED')) {
+                setMode('deviceLimit');
+            } else if (err.message?.includes('AUTH_EMAIL_SIGNIN_DISABLED')) {
+                setMode(signInOptions?.hasPasskey ? 'passkey' : 'needInvite');
+            } else if (err.message?.includes('expired') || err.message?.includes('not found')) {
                 setError('The verification code has expired. Please request a new one.');
                 setIsSent(false); // Show the send button again
             } else if (err.message?.includes('RATE_LIMIT_EXCEEDED')) {
@@ -410,7 +572,11 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash, eventCod
                 setAttempts(attempts + 1);
             }
         } catch (err: any) {
-            if (err.message?.includes('expired') || err.message?.includes('not found')) {
+            if (err.message?.includes('AUTH_DEVICE_LIMIT_REACHED')) {
+                setMode('deviceLimit');
+            } else if (err.message?.includes('AUTH_EMAIL_SIGNIN_DISABLED')) {
+                setMode(signInOptions?.hasPasskey ? 'passkey' : 'needInvite');
+            } else if (err.message?.includes('expired') || err.message?.includes('not found')) {
                 setError('The verification code has expired. Please request a new one.');
                 setIsSent(false); // Show the send button again
             } else if (err.message?.includes('RATE_LIMIT_EXCEEDED')) {
@@ -542,7 +708,78 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash, eventCod
             >
                 <h1 className="text-3xl font-bold text-gray-800 mb-6" style={{ color: '#1f2937', fontWeight: 'bold' }}>Identity Verification</h1>
 
-                {!isSent && !isRedirecting && (
+                {(mode === 'checking' || (isRedirecting && mode !== 'email')) && (
+                    <p style={{ color: '#4b5563' }}>{isRedirecting ? 'Signed in. Redirecting...' : 'Checking how you can sign in...'}</p>
+                )}
+
+                {mode === 'enroll' && !isRedirecting && (
+                    <>
+                        <h2 style={{ color: '#1f2937', fontWeight: 600, fontSize: '1.25rem', marginBottom: '0.75rem' }}>Set up your passkey</h2>
+                        <p style={{ color: '#4b5563', marginBottom: '1.5rem' }}>
+                            A passkey lets you sign in with Face ID, Touch ID, your fingerprint or your device PIN instead of an emailed code.
+                            Set it up on the device you normally use for this app.
+                        </p>
+                        <button onClick={handleEnroll} disabled={passkeyBusy || !supported} style={primaryButtonStyle(passkeyBusy || !supported)}>
+                            {passkeyBusy ? 'Waiting for your device...' : 'Create passkey'}
+                        </button>
+                        {problem && USE_EXISTING_PASSKEY.includes(problem) && (
+                            <button onClick={() => { setProblem(null); setMode('passkey'); }} style={linkButtonStyle(false)}>
+                                Sign in with my passkey
+                            </button>
+                        )}
+                    </>
+                )}
+
+                {mode === 'passkey' && !isRedirecting && (
+                    <>
+                        <p style={{ color: '#4b5563', marginBottom: '1.5rem' }}>
+                            Sign in with your passkey. Your device will ask for Face ID, your fingerprint or your device PIN.
+                        </p>
+                        <button onClick={handlePasskeySignIn} disabled={passkeyBusy || !supported} style={primaryButtonStyle(passkeyBusy || !supported)}>
+                            {passkeyBusy ? 'Waiting for your device...' : 'Sign in with passkey'}
+                        </button>
+                        <p style={{ color: '#6b7280', fontSize: '0.875rem', marginTop: '1rem' }}>
+                            Is your passkey on your phone? Choose the option to use a phone or tablet when your browser asks, and scan the code with your phone.
+                        </p>
+                        {signInOptions?.emailSignIn && (
+                            <button onClick={() => { setProblem(null); setMode('email'); }} disabled={passkeyBusy} style={linkButtonStyle(passkeyBusy)}>
+                                Email me a code instead
+                            </button>
+                        )}
+                    </>
+                )}
+
+                {mode === 'needInvite' && (
+                    <div style={noticeStyle('info')}>
+                        <p style={{ fontWeight: 600 }}>This app signs you in with a passkey.</p>
+                        <p style={{ fontSize: '0.875rem', marginTop: '0.25rem' }}>
+                            To set one up you need an invitation. Please ask an admin to send you one, then open the link in the invitation email on the device you want to use.
+                        </p>
+                    </div>
+                )}
+
+                {mode === 'deviceLimit' && (
+                    <div style={noticeStyle('warning')}>
+                        <p style={{ fontWeight: 600 }}>This device can't be used for this app.</p>
+                        <p style={{ fontSize: '0.875rem', marginTop: '0.25rem' }}>
+                            Your account has reached its device limit for this app. To use this device, please ask an admin to remove one of your other devices or to allow another one.
+                        </p>
+                    </div>
+                )}
+
+                {(mode === 'enroll' || mode === 'passkey') && !supported && (
+                    <div style={noticeStyle('error')}>
+                        <p style={{ fontSize: '0.875rem' }}>{PROBLEM_TEXT['unsupported']}</p>
+                    </div>
+                )}
+
+                {(mode === 'enroll' || mode === 'passkey') && problem && (
+                    <div style={noticeStyle(problem === 'cancelled' ? 'warning' : 'error')}>
+                        <p style={{ fontSize: '0.875rem' }}>{PROBLEM_TEXT[problem]}</p>
+                    </div>
+                )}
+
+                {mode === 'email' && !isSent && !isRedirecting && (
                     <>
                         {expiredAuthFlow && (
                             <div
@@ -597,7 +834,7 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash, eventCod
                     </>
                 )}
 
-                {isSent && (
+                {mode === 'email' && isSent && (
                     <>
                         {!isRedirecting && (
                             <div
@@ -797,7 +1034,7 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash, eventCod
                     </div>
                 )}
 
-                {(!pid || !hash) && !isSent && !isSending && (
+                {mode === 'email' && (!pid || !hash) && !isSent && !isSending && (
                     <div
                         className="mt-6 p-4 bg-yellow-100 text-yellow-700 rounded-lg shadow-inner"
                         style={{

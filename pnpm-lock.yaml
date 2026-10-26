@@ -1039,6 +1039,9 @@ importers:
       '@fortawesome/react-fontawesome':
         specifier: ^0.2.3
         version: 0.2.6(@fortawesome/fontawesome-svg-core@7.0.0)(react@18.3.1)
+      '@simplewebauthn/browser':
+        specifier: 13.3.0
+        version: 13.3.0
       next:
         specifier: '>=16.1.5'
         version: 16.2.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -2341,6 +2344,9 @@ packages:
 
   '@rtsao/scc@1.1.0':
     resolution: {integrity: sha512-zt6OdqaDoOnJ1ZYsCYGt9YmWzDXl4vQdKTyJev62gFhRGKdx7mcT54V9KIjg+d2wi9EXsPvAPKe7i7WjfVWB8g==}
+
+  '@simplewebauthn/browser@13.3.0':
+    resolution: {integrity: sha512-BE/UWv6FOToAdVk0EokzkqQQDOWtNydYlY6+OrmiZ5SCNmb41VehttboTetUM3T/fr6EAFYVXjz4My2wg230rQ==}
 
   '@simplewebauthn/server@13.3.3':
     resolution: {integrity: sha512-LelX/lcy5cjc15A86i/aNxHhB5eU7dd20QsbP0VLAf9e38+SLlsnqCCyecx3xqfGofhmX05h1J9fKRYWxw+luA==}
@@ -7841,6 +7847,8 @@ snapshots:
       warning: 4.0.3
 
   '@rtsao/scc@1.1.0': {}
+
+  '@simplewebauthn/browser@13.3.0': {}
 
   '@simplewebauthn/server@13.3.3':
     dependencies:

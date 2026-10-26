@@ -260,8 +260,9 @@ export async function passkeyInviteSend(callerPid: string, targetPid: string, li
     const [passkeys, maxPasskeys] = await Promise.all([listPasskeys(targetPid, oidcToken), maxPasskeysFor(targetPid, oidcToken)]);
     if (passkeys.length >= maxPasskeys) throw new Error('AUTH_PASSKEY_LIMIT_REACHED');
 
-    // Throws if the participant isn't permitted on linkHost
-    const appLink = await authGetLink(targetPid, linkHost, oidcToken);
+    // Throws if the participant isn't permitted on linkHost. The invite opens the login page directly, so it
+    // works even when the participant is already signed in to the app.
+    const appLink = (await authGetLink(targetPid, linkHost, oidcToken)).replace(`https://${linkHost}/?`, `https://${linkHost}/login?`);
 
     const token = crypto.randomBytes(32).toString('base64url');
     const createdAt = Date.now();
