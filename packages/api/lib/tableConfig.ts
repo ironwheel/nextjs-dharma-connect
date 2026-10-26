@@ -27,8 +27,14 @@ export const tables: TableConfig[] = [
   { resource: 'config', envVar: 'DYNAMODB_TABLE_CONFIG', pk: 'key', sk: '', ops: ['get', 'list'] },
   { resource: 'auth', envVar: 'DYNAMODB_TABLE_AUTH', pk: 'id', sk: '', ops: ['get', 'put'] },
   { resource: 'actions-profile', envVar: 'DYNAMODB_TABLE_ACTIONS_PROFILES', pk: 'profile', sk: '', ops: ['get', 'list'] },
-  { resource: 'sessions', envVar: 'DYNAMODB_TABLE_SESSIONS', pk: 'id', sk: 'fingerprint', ops: ['get', 'put'] },
+  { resource: 'sessions', envVar: 'DYNAMODB_TABLE_SESSIONS', pk: 'id', sk: 'fingerprint', ops: ['get', 'put', 'query', 'delete'] },
   { resource: 'verification-tokens', envVar: 'DYNAMODB_TABLE_VERIFICATION_TOKENS', pk: 'verificationTokenId', sk: '', ops: ['get', 'put'] },
+  /** passkeys: one item per registered WebAuthn credential. Only touched for apps with passkeys turned on. */
+  { resource: 'passkeys', envVar: 'DYNAMODB_TABLE_PASSKEYS', pk: 'pid', sk: 'credentialId', ops: ['get', 'put', 'query', 'delete'] },
+  /** webauthn-challenges: single-use ceremony challenges, expired by DynamoDB TTL on `ttl`. */
+  { resource: 'webauthn-challenges', envVar: 'DYNAMODB_TABLE_WEBAUTHN_CHALLENGES', pk: 'challengeId', sk: '', ops: ['get', 'put'] },
+  /** passkey-invites: admin-issued enrollment invites, keyed by a hash of the emailed token; TTL on `ttl`. */
+  { resource: 'passkey-invites', envVar: 'DYNAMODB_TABLE_PASSKEY_INVITES', pk: 'inviteHash', sk: '', ops: ['get', 'put'] },
   { resource: 'pools', envVar: 'DYNAMODB_TABLE_POOLS', pk: 'name', sk: '', ops: ['get', 'list', 'count', 'put', 'delete'] },
   { resource: 'scripts', envVar: 'DYNAMODB_TABLE_SCRIPTS', pk: 'name', sk: '', ops: ['get', 'list', 'count', 'put', 'delete'] },
   { resource: 'offering-config', envVar: 'DYNAMODB_TABLE_OFFERING_CONFIG', pk: 'oid', sk: '', ops: ['get', 'list', 'count', 'put', 'delete'] },

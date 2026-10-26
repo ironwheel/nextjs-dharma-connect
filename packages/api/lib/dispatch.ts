@@ -19,6 +19,7 @@ import { putOfferingTransaction, completeOffering, updateOfferingTransactionRefu
 import { translatePromptFromEnglish } from './translate';
 import { resolveAudioEntitlement, signAudioUrl } from './audio';
 import { recordRegistration } from './activity';
+import { passkeyInviteSend, passkeyRegisterOptions, passkeyRegisterVerify, passkeyAuthOptions, passkeyAuthVerify, passkeyList, passkeyRevoke } from './passkeys';
 import { getUnsubscribeStatus, setUnsubscribe } from './unsubscribe';
 
 /**
@@ -452,6 +453,65 @@ async function dispatchAuth(
 
           const link = await authGetLink(targetUserPid, linkHost, oidcToken);
           return res.status(200).json({ link });
+        }
+      case 'passkeyInviteSend':
+        {
+          const { targetUserPid, linkHost } = req.body;
+          if (!targetUserPid || !linkHost) {
+            return res.status(400).json({ error: 'Missing required parameters: targetUserPid, linkHost' });
+          }
+          const result = await passkeyInviteSend(pid, targetUserPid, linkHost, oidcToken);
+          return res.status(200).json(result);
+        }
+      case 'passkeyRegisterOptions':
+        {
+          const { invite } = req.body;
+          if (!invite) {
+            return res.status(400).json({ error: 'Missing required parameter: invite' });
+          }
+          const result = await passkeyRegisterOptions(pid, hash, host, deviceFingerprint, invite, oidcToken);
+          return res.status(200).json(result);
+        }
+      case 'passkeyRegisterVerify':
+        {
+          const { invite, challengeId, response } = req.body;
+          if (!invite || !challengeId || !response) {
+            return res.status(400).json({ error: 'Missing required parameters: invite, challengeId, response' });
+          }
+          const result = await passkeyRegisterVerify(pid, hash, host, deviceFingerprint, challengeId, invite, response, clientIp, oidcToken);
+          return res.status(200).json(result);
+        }
+      case 'passkeyAuthOptions':
+        {
+          const result = await passkeyAuthOptions(pid, hash, host, deviceFingerprint, oidcToken);
+          return res.status(200).json(result);
+        }
+      case 'passkeyAuthVerify':
+        {
+          const { challengeId, response } = req.body;
+          if (!challengeId || !response) {
+            return res.status(400).json({ error: 'Missing required parameters: challengeId, response' });
+          }
+          const result = await passkeyAuthVerify(pid, hash, host, deviceFingerprint, challengeId, response, oidcToken);
+          return res.status(200).json(result);
+        }
+      case 'passkeyList':
+        {
+          const { targetUserPid } = req.body;
+          if (!targetUserPid) {
+            return res.status(400).json({ error: 'Missing required parameter: targetUserPid' });
+          }
+          const passkeys = await passkeyList(pid, targetUserPid, oidcToken);
+          return res.status(200).json({ passkeys });
+        }
+      case 'passkeyRevoke':
+        {
+          const { targetUserPid, credentialId } = req.body;
+          if (!targetUserPid || !credentialId) {
+            return res.status(400).json({ error: 'Missing required parameters: targetUserPid, credentialId' });
+          }
+          const result = await passkeyRevoke(pid, targetUserPid, credentialId, oidcToken);
+          return res.status(200).json(result);
         }
       default:
         return res.status(404).json({ error: `Unknown auth action: ${action}` });

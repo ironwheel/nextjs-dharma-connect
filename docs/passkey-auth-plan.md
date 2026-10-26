@@ -114,16 +114,67 @@ Deploy notes:
 - Add `"restricted": true` to the offering-dashboard entry in `APP_ACCESS_JSON` and set `SYS_ADMIN_PIDS`.
   Do this in production and in any local env used to manage auditors. Without the flag, the guard does nothing.
 
-### Phase 1: backend
+### Phase 1a: passkey core (done in this change)
 
-- Add `@simplewebauthn/server`.
-- Add tables: `passkeys`, `webauthn-challenges` (TTL about 5 minutes), `passkey-invites`, `devices`, and the
-  `auditors-auth` resource. Role policies are edited by hand.
-- Add `/api/auth/passkey*` endpoints: registration and authentication options/verify, list, revoke, and
-  invite redeem.
-- Add trust levels, per-app minimums, and device-limit checks wherever tokens are created.
-- Add `authMode: email | passkey-optional | passkey-required`, defaulting to `email` so the deploy changes nothing.
-- Add the shared permission lookup, the restricted-app rule, sys-admin actions, and auditor filtering of activity.
+- `@simplewebauthn/server` (pinned 13.3.x), in `packages/api/lib/passkeys.ts`. The relying party ID is
+  `MONOREPO_PARENT_DOMAIN` without its leading dot (`localhost` in development; `WEBAUTHN_RP_ID` overrides).
+  Allowed origins come from `CORS_ORIGIN_LIST`.
+- **Invites:** `POST/auth/passkeyInviteSend` (body: `targetUserPid`, `linkHost`) emails a single-use link:
+  `https://<linkHost>/?pid=…&hash=…&invite=<token>`. Only a SHA-256 hash of the token is stored. Invites expire
+  after `PASSKEY_INVITE_DURATION` seconds (default 72 hours). Invites are refused when:
+  - `linkHost` doesn't have passkeys turned on
+  - the participant is at `maxPasskeys`
+  - the target is an auditor or `linkHost` is restricted and the caller isn't a sys admin
+- **Enrollment:** `POST/auth/passkeyRegisterOptions` (`invite`) and `POST/auth/passkeyRegisterVerify`
+  (`invite`, `challengeId`, `response`).
+  - Enrollment always requires user verification. The invite is used up with a conditional write.
+  - The user is signed in on that device, and a "passkey added" email goes out after the response is sent.
+  - Both actions are open to anyone with access to the host, like the email-code actions. They also run
+    while the user is already signed in.
+- **Sign-in:** `POST/auth/passkeyAuthOptions` and `POST/auth/passkeyAuthVerify` (`challengeId`, `response`).
+  The session gets `passkey-uv` or `passkey` and records the credential used. A non-UV sign-in never lowers a
+  valid `passkey-uv` session on the same device.
+- **Challenges** are single-use and bound to participant, device, host and ceremony. They expire after 5 minutes.
+- **Admin:** `POST/auth/passkeyList` (`targetUserPid`; public keys are never returned) and `POST/auth/passkeyRevoke`
+  (`targetUserPid`, `credentialId`). Revoking deletes the passkey and ends every session opened with it. Access
+  tokens already issued stay valid until they expire (`ACCESS_TOKEN_DURATION`). Auditors are invisible to
+  non-sys-admins here too.
+- **Trust levels** in `checkAccess` and `verificationCheck`, per app, from `APP_ACCESS_JSON`:
+  - `authMode`: `email` (default) | `passkey-optional` | `passkey-required`
+  - `userVerification`: `preferred` (default) | `required`
+  - `allowEmailFallback`
+  On `passkey-required` apps, emailed codes are refused (`AUTH_EMAIL_SIGNIN_DISABLED`) unless the app allows a
+  fallback and the participant's own record has `config[host].emailFallback: true`.
+- **`verificationCheck`** also returns `authMode`, `userVerification`, `emailSignIn` and `hasPasskey` for the
+  login page. Apps on `email` never touch the passkey tables.
+- **Fix:** a silent app no longer revives an expired verified session as verified. Any session it creates is `silent`.
+- **`putAuthItem`:**
+  - keeps stored fields the caller didn't send (e.g. `maxPasskeys`)
+  - stops non-sys-admins changing their own `maxPasskeys`, `config[host].maxDevices` or `config[host].emailFallback`
+
+Deploy notes:
+- Safe to deploy before the tables exist. Until an app's `authMode` changes, only the silent-session fix
+  changes behavior.
+- Create the tables below and set their env vars. Give the auth role (`AUTH_ROLE_ARN`) read/write on them.
+  - `passkeys` (`DYNAMODB_TABLE_PASSKEYS`): pk `pid`, sk `credentialId`
+  - `webauthn-challenges` (`DYNAMODB_TABLE_WEBAUTHN_CHALLENGES`): pk `challengeId`, TTL `ttl`
+  - `passkey-invites` (`DYNAMODB_TABLE_PASSKEY_INVITES`): pk `inviteHash`, TTL `ttl`
+- The auth role also needs Query and DeleteItem on the sessions table (for revoke).
+- Add `POST/auth/passkeyInviteSend`, `POST/auth/passkeyList` and `POST/auth/passkeyRevoke` to the student-manager
+  actions profile at least one `ACCESS_TOKEN_DURATION` before the admin UI that calls them ships.
+- Email text uses `passkey`-aid prompts (`passkey-inviteSubject`, `passkey-inviteEmail` with `||name||`,
+  `||link||`, `||expires||`; `passkey-addedSubject`, `passkey-addedEmail` with `||name||`, `||time||`,
+  `||location||`). Built-in English text is used until those prompt records exist.
+- Optional: `PASSKEY_INVITE_DURATION`, `WEBAUTHN_RP_NAME` (shown in passkey prompts), `WEBAUTHN_RP_ID`.
+
+### Phase 1b: device registry
+
+- Add the `devices` table and `maxDevices` checks wherever tokens are created.
+
+### Phase 1c: auditors
+
+- Add the `auditors-auth` resource, the shared permission lookup, the restricted-app rule, sys-admin actions,
+  and auditor filtering of activity.
 
 ### Phase 2: shared frontend
 
@@ -133,7 +184,8 @@ Replace the code-entry flow in `AuthVerification` with:
 - the device-limit-reached and passkey-limit-reached screens
 - the email-fallback path
 
-This needs new multilingual prompts. Pilot on auth-test.
+This needs new multilingual prompts. Invite links open the app root (`/?pid=…&hash=…&invite=…`), so each
+app's redirect to `/login` must carry the `invite` parameter through. Pilot on auth-test.
 
 ### Phase 3: admin UI
 

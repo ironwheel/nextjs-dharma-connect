@@ -19,6 +19,7 @@
     "@aws-sdk/credential-provider-cognito-identity": "^3.0.0",
     "@aws-sdk/credential-provider-web-identity": "^3.965.0",
     "@aws-sdk/lib-dynamodb": "^3.0.0",
+    "@simplewebauthn/server": "13.3.3",
     "@types/uuid": "^10.0.0",
     "@vercel/functions": "3.9.9",
     "axios": "^1.10.0",

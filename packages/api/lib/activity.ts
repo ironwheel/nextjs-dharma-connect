@@ -145,7 +145,7 @@ const SIGNIN_WINDOW_MS = 10 * 60 * 1000;
 const DEDUPE_PARTITION = '_dedupe';
 const recentSignIns = new Map<string, number>();
 
-export type SignInMethod = 'email-verification' | 'session' | 'silent-session';
+export type SignInMethod = 'email-verification' | 'passkey' | 'session' | 'silent-session';
 
 /**
  * @function noteSignIn
@@ -225,7 +225,7 @@ async function recordSignIn(
       source: 'api',
       studentId: pid,
       studentName,
-      summary: `Signed in to ${app}${method === 'email-verification' ? ' after email verification' : ''}`,
+      summary: `Signed in to ${app}${method === 'email-verification' ? ' after email verification' : method === 'passkey' ? ' with a passkey' : ''}`,
       details: { app, method },
     },
     at,

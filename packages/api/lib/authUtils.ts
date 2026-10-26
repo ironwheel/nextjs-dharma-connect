@@ -8,13 +8,22 @@ import jwt from 'jsonwebtoken';
 import axios from 'axios';
 import nodemailer from 'nodemailer';
 import { tableGetConfig } from './tableConfig';
-import { listAllFiltered, listAll, getOne, putOne, getOneWithSort, deleteOne, deleteOneWithSort } from './dynamoClient';
+import { listAllFiltered, listAll, getOne, putOne, getOneWithSort, deleteOne, deleteOneWithSort, queryByPartition } from './dynamoClient';
 import { noteSignIn } from './activity';
 import crypto from 'crypto';
 
 // Add this type at the top of the file, after imports
 type PermittedHost = string; // Now just a string representing the host
-type SessionTrustLevel = 'silent' | 'email-verified';
+export type SessionTrustLevel = 'silent' | 'email-verified' | 'passkey' | 'passkey-uv';
+
+// Higher rank = stronger proof of who is at the keyboard. A session satisfies an app when its rank
+// is at least the app's required rank.
+const TRUST_RANK: Record<SessionTrustLevel, number> = {
+    'silent': 0,
+    'email-verified': 1,
+    'passkey': 2,
+    'passkey-uv': 3,
+};
 
 // Verification result enumeration
 export enum VerifyResult {
@@ -182,7 +191,7 @@ function emailLogLabel(email: string, pid: string, auditor: boolean): string {
  * @returns {any[]} The per-host access entries.
  * @throws {Error} If APP_ACCESS_JSON is missing or invalid.
  */
-function parseAccessList(): any[] {
+export function parseAccessList(): any[] {
     const accessJson = process.env.APP_ACCESS_JSON;
     if (!accessJson) throw new Error('APP_ACCESS_JSON environment variable not set');
     try {
@@ -212,6 +221,194 @@ export function isSysAdmin(pid: string): boolean {
     if (!pid) return false;
     const sysAdmins = (process.env.SYS_ADMIN_PIDS || '').split(',').map((p) => p.trim()).filter(Boolean);
     return sysAdmins.includes(pid);
+}
+
+/**
+ * @function sessionTrustLevel
+ * @description The trust level a session record carries. Sessions from before trust levels existed count as email-verified.
+ * @param {any} session - The session record.
+ * @returns {SessionTrustLevel} The session's trust level.
+ */
+function sessionTrustLevel(session: any): SessionTrustLevel {
+    const level = session?.trustLevel as SessionTrustLevel | undefined;
+    return level && level in TRUST_RANK ? level : 'email-verified';
+}
+
+/**
+ * @function requiredTrustLevel
+ * @description The lowest session trust level an app accepts, from its APP_ACCESS_JSON entry:
+ *              `authMode` ('email' default | 'passkey-optional' | 'passkey-required'), `userVerification`
+ *              ('preferred' default | 'required') and `allowEmailFallback`. A participant with an admin-granted
+ *              `emailFallback` in their own auth record config for the host may still use emailed codes.
+ * @param {any} entry - The host's APP_ACCESS_JSON entry.
+ * @param {any} authData - The auth record used for the participant (their own or 'default').
+ * @param {string} pid - The participant ID.
+ * @param {string} host - The host.
+ * @returns {SessionTrustLevel} The required trust level.
+ */
+function requiredTrustLevel(entry: any, authData: any, pid: string, host: string): SessionTrustLevel {
+    if (entry.authMode !== 'passkey-required') return 'email-verified';
+    if (emailFallbackGranted(entry, authData, pid, host)) return 'email-verified';
+    return entry.userVerification === 'required' ? 'passkey-uv' : 'passkey';
+}
+
+/**
+ * @function emailFallbackGranted
+ * @description Whether a participant may keep using emailed codes on a passkey-required app. Needs both
+ *              the app's `allowEmailFallback` and the participant's own record (never 'default').
+ */
+function emailFallbackGranted(entry: any, authData: any, pid: string, host: string): boolean {
+    return entry.allowEmailFallback === true && authData?.id === pid && authData?.config?.[host]?.emailFallback === true;
+}
+
+/**
+ * @function emailSignInAllowed
+ * @description Whether emailed sign-in codes may be used on this app by this participant.
+ */
+function emailSignInAllowed(entry: any, authData: any, pid: string, host: string): boolean {
+    return requiredTrustLevel(entry, authData, pid, host) === 'email-verified';
+}
+
+/**
+ * @function meetsTrust
+ * @description Whether a session satisfies an app's required trust level.
+ */
+function meetsTrust(session: any, required: SessionTrustLevel): boolean {
+    return TRUST_RANK[sessionTrustLevel(session)] >= TRUST_RANK[required];
+}
+
+/**
+ * @function passkeysEnabled
+ * @description Whether an app has passkeys turned on. Apps on 'email' never touch the passkey tables.
+ */
+export function passkeysEnabled(entry: any): boolean {
+    return entry.authMode === 'passkey-optional' || entry.authMode === 'passkey-required';
+}
+
+/**
+ * @async
+ * @function assertHostAccess
+ * @description Checks that a participant may use a host: the host is known, the hash matches (when the host
+ *              has a secret) and the host is in the participant's permitted hosts.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The app-specific hash.
+ * @param {string} host - The host.
+ * @returns {Promise<{ entry: any, authData: any }>} The host's APP_ACCESS_JSON entry and the auth record used.
+ * @throws {Error} UNKNOWN_HOST, AUTHUSER_ACCESS_NOT_ALLOWED_BAD_HASH, AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED
+ */
+export async function assertHostAccess(pid: string, hash: string, host: string, oidcToken?: string): Promise<{ entry: any, authData: any }> {
+    const entry = parseAccessList().find((e: any) => e.host === host);
+    if (!entry) throw new Error('UNKNOWN_HOST');
+
+    if (entry.secret !== 'none') {
+        const expectedHash = generateAuthHash(pid, entry.secret);
+        if (expectedHash !== hash) throw new Error('AUTHUSER_ACCESS_NOT_ALLOWED_BAD_HASH');
+    }
+
+    const tableCfg = tableGetConfig('auth');
+    let authData = await getOne(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN!, oidcToken);
+    if (!authData) {
+        authData = await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN!, oidcToken);
+        if (!authData) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
+    }
+
+    const permittedHosts: string[] = authData['permitted-hosts'] || [];
+    if (!permittedHosts.includes(host)) throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
+
+    return { entry, authData };
+}
+
+/**
+ * @async
+ * @function createSession
+ * @description Creates (or replaces) the session for a participant on a device.
+ * @param {string} pid - The participant ID.
+ * @param {string} deviceFingerprint - The device fingerprint.
+ * @param {SessionTrustLevel} trustLevel - How the participant proved who they are.
+ * @param {Record<string, any>} extra - Extra session attributes (e.g. the passkey credential used).
+ */
+export async function createSession(pid: string, deviceFingerprint: string, trustLevel: SessionTrustLevel, extra: Record<string, any>, oidcToken?: string): Promise<void> {
+    const tableCfg = tableGetConfig('sessions');
+    const createdAt = Date.now();
+    await putOne(tableCfg.tableName, {
+        ...extra,
+        id: pid,
+        fingerprint: deviceFingerprint,
+        createdAt,
+        ttl: Math.floor((createdAt + SESSION_DURATION_MS) / 1000), // TTL in seconds for DynamoDB
+        trustLevel,
+    }, process.env.AUTH_ROLE_ARN!, oidcToken);
+}
+
+/**
+ * @async
+ * @function hasPasskeys
+ * @description Whether a participant has registered at least one passkey.
+ */
+async function hasPasskeys(pid: string, oidcToken?: string): Promise<boolean> {
+    const tableCfg = tableGetConfig('passkeys');
+    const passkeys = await queryByPartition(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN!, oidcToken);
+    return passkeys.length > 0;
+}
+
+/**
+ * @async
+ * @function lookupLocation
+ * @description Best-effort "City, Region (Country)" for an IP address, for notification emails.
+ * @param {string | null} clientIp - The client's IP address.
+ * @returns {Promise<string>} The location, or 'an unknown location'.
+ */
+export async function lookupLocation(clientIp: string | null): Promise<string> {
+    let location = 'an unknown location';
+    if (clientIp) {
+        try {
+            const geoOptions = {
+                method: 'GET',
+                url: `https://${TELIZE_API_HOST}/location/${clientIp}`,
+                headers: {
+                    'X-RapidAPI-Key': TELIZE_RAPIDAPI_KEY,
+                    'X-RapidAPI-Host': TELIZE_API_HOST
+                }
+            };
+            const geoResponse = await axios.request(geoOptions);
+            if (geoResponse.data) {
+                location = `${geoResponse.data.city || ''}, ${geoResponse.data.region || ''} (${geoResponse.data.country || 'N/A'})`.replace(/^, |, $/g, '');
+            }
+        } catch (geoError: any) {
+            console.warn(`auth-logic: Could not fetch geolocation for IP ${clientIp}:`, geoError.message);
+        }
+    }
+    return location;
+}
+
+/**
+ * @async
+ * @function sendAuthEmail
+ * @description Sends an auth email to a participant with the matching sender (auditor or default).
+ * @param {any} participant - The participant record (needs `email`).
+ * @param {string} pid - The participant ID (for logs).
+ * @param {boolean} auditor - Whether the participant is an auditor.
+ * @param {string} subject - The subject.
+ * @param {string} html - The HTML body.
+ * @throws {Error} If sender configuration is missing or sending fails.
+ */
+export async function sendAuthEmail(participant: any, pid: string, auditor: boolean, subject: string, html: string): Promise<void> {
+    const smtpUser = auditor ? AUDITORS_SMTP_USERNAME : SMTP_USERNAME;
+    const smtpPass = auditor ? AUDITORS_SMTP_PASSWORD : SMTP_PASSWORD;
+    const emailFrom = auditor ? AUDITORS_EMAIL_FROM : EMAIL_FROM;
+    const emailReplyTo = auditor ? AUDITORS_EMAIL_REPLY_TO : EMAIL_REPLY_TO;
+
+    if (!smtpUser || !smtpPass) throw new Error("SMTP credentials not configured for email sending.");
+    if (!emailFrom || !emailReplyTo) throw new Error("Sender email addresses not configured for email sending.");
+
+    const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: { user: smtpUser, pass: smtpPass },
+        // Ensure proper encoding to avoid quoted-printable encoding issues
+        encoding: 'utf8'
+    });
+    const info = await transporter.sendMail({ from: emailFrom, replyTo: emailReplyTo, to: participant.email, subject, html });
+    console.log(`auth-logic: Email "${subject}" sent to: ${emailLogLabel(participant.email, pid, auditor)}, Info: ${info.messageId}`);
 }
 
 /**
@@ -257,7 +454,7 @@ async function getActionsProfileForHost(host: string, oidcToken?: string): Promi
  * @returns {Promise<{ actions: string[], role: string }>} Actions and role for the app
  * @throws {Error} If host's actions profile is not found
  */
-async function getAppActions(host: string, oidcToken?: string): Promise<{ actions: string[], role: string, profile: string }> {
+export async function getAppActions(host: string, oidcToken?: string): Promise<{ actions: string[], role: string, profile: string }> {
     const actionsProfile = await getActionsProfileForHost(host, oidcToken);
 
     // Lookup the actions list for this profile
@@ -299,7 +496,7 @@ async function getAppActions(host: string, oidcToken?: string): Promise<{ action
  * @returns {Promise<Array<object>>} A promise that resolves to an array of prompt items.
  * @throws {Error} If the database scan fails or table name is not configured.
  */
-async function getPromptsForAid(aid: string, oidcToken?: string): Promise<Array<any>> {
+export async function getPromptsForAid(aid: string, oidcToken?: string): Promise<Array<any>> {
     const tableCfg = tableGetConfig('prompts');
     return await listAllFiltered(tableCfg.tableName, 'aid', aid, process.env.AUTH_ROLE_ARN!, oidcToken);
 }
@@ -312,7 +509,7 @@ async function getPromptsForAid(aid: string, oidcToken?: string): Promise<Array<
  * @returns {Promise<object>} A promise that resolves to the participant's data (specific fields for auth).
  * @throws {Error} If participant not found or database query fails or table name not configured.
  */
-async function findParticipantForAuth(id: string, oidcToken?: string): Promise<{ participant: any, auditor: boolean } | null> {
+export async function findParticipantForAuth(id: string, oidcToken?: string): Promise<{ participant: any, auditor: boolean } | null> {
     const tableCfg = tableGetConfig('students');
     const student = await getOne(tableCfg.tableName, tableCfg.pk, id, process.env.AUTH_ROLE_ARN!, oidcToken);
 
@@ -776,6 +973,9 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
     const hasPermission = permittedHosts.includes(host);
     if (!hasPermission) throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
 
+    // Passkey-required apps don't accept emailed codes unless an admin granted a fallback
+    if (!emailSignInAllowed(entry, data, pid, host)) throw new Error('AUTH_EMAIL_SIGNIN_DISABLED');
+
     // Check for rate limiting - look for recent verification emails sent.
     // Limited per participant, not per device: a client can always drop its device cookie.
     tableCfg = tableGetConfig('verification-tokens');
@@ -819,25 +1019,7 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
         return englishFallback ? englishFallback.text : `confirm-${promptId}-${lang}-unknown`;
     };
 
-    let location = 'an unknown location';
-    if (clientIp) {
-        try {
-            const geoOptions = {
-                method: 'GET',
-                url: `https://${TELIZE_API_HOST}/location/${clientIp}`,
-                headers: {
-                    'X-RapidAPI-Key': TELIZE_RAPIDAPI_KEY,
-                    'X-RapidAPI-Host': TELIZE_API_HOST
-                }
-            };
-            const geoResponse = await axios.request(geoOptions);
-            if (geoResponse.data) {
-                location = `${geoResponse.data.city || ''}, ${geoResponse.data.region || ''} (${geoResponse.data.country || 'N/A'})`.replace(/^, |, $/g, '');
-            }
-        } catch (geoError: any) {
-            console.warn(`auth-logic: Could not fetch geolocation for IP ${clientIp}:`, geoError.message);
-        }
-    }
+    const location = await lookupLocation(clientIp);
 
     const verificationCode = crypto.randomInt(100000, 1000000).toString();
     const verificationTokenId = verificationTokenKey(pid, verificationCode);
@@ -954,6 +1136,7 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
     if (!hasPermission) {
         throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
     }
+    if (!emailSignInAllowed(entry, data, pid, host)) throw new Error('AUTH_EMAIL_SIGNIN_DISABLED');
     const actionsProfile = await getActionsProfileForHost(host, oidcToken);
 
     // Check for rate limiting - look for recent failed attempts.
@@ -1101,6 +1284,22 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
 
 /**
  * @async
+ * @function signInOptions
+ * @description What the login page should offer on this app: passkey and/or emailed code.
+ *              Apps on 'email' never touch the passkey tables.
+ */
+async function signInOptions(entry: any, authData: any, pid: string, host: string, oidcToken?: string): Promise<{ authMode: string, userVerification: string, emailSignIn: boolean, hasPasskey: boolean }> {
+    const authMode = entry.authMode || 'email';
+    return {
+        authMode,
+        userVerification: entry.userVerification === 'required' ? 'required' : 'preferred',
+        emailSignIn: emailSignInAllowed(entry, authData, pid, host),
+        hasPasskey: passkeysEnabled(entry) ? await hasPasskeys(pid, oidcToken) : false,
+    };
+}
+
+/**
+ * @async
  * @function verificationCheck
  * @description Checks if a device has an active session (used for preflight verification flows)
  * @param {string} pid - Participant ID
@@ -1203,8 +1402,6 @@ export async function verificationCheck(pid: string, hash: string, host: string,
     if (session) {
         const currentTimeSeconds = Math.floor(Date.now() / 1000);
         const sessionTTL = session.ttl;
-        const trustLevel = (session as any).trustLevel as SessionTrustLevel | undefined;
-        const isEmailVerifiedSession = trustLevel === 'email-verified' || typeof trustLevel === 'undefined';
 
         if (sessionTTL <= currentTimeSeconds) {
             console.log(`VERIFICATION CHECK [pid=${pid}]: Session expired, deleting and returning pending state`);
@@ -1216,14 +1413,13 @@ export async function verificationCheck(pid: string, hash: string, host: string,
                 deviceFingerprint,
                 process.env.AUTH_ROLE_ARN!
             );
-            return await determineVerificationStatusResponse();
+            return { ...(await determineVerificationStatusResponse()), ...(await signInOptions(entry, data, pid, host)) };
         }
 
-        // For apps that require email verification, only accept sessions that are explicitly
-        // email-verified (or legacy sessions with no trust level set).
-        if (!usesSilentSessions && !isEmailVerifiedSession) {
-            console.log(`VERIFICATION CHECK [pid=${pid}]: Session present but not email-verified for host requiring verification, treating as unauthenticated`);
-            return await determineVerificationStatusResponse();
+        // Only accept sessions whose trust level meets what this app requires.
+        if (!usesSilentSessions && !meetsTrust(session, requiredTrustLevel(entry, data, pid, host))) {
+            console.log(`VERIFICATION CHECK [pid=${pid}]: Session trust level below what this host requires, treating as unauthenticated`);
+            return { ...(await determineVerificationStatusResponse()), ...(await signInOptions(entry, data, pid, host)) };
         }
 
 
@@ -1239,7 +1435,7 @@ export async function verificationCheck(pid: string, hash: string, host: string,
     }
 
     console.log(`VERIFICATION CHECK [pid=${pid}]: No session found, pending verification`);
-    return await determineVerificationStatusResponse();
+    return { ...(await determineVerificationStatusResponse()), ...(await signInOptions(entry, data, pid, host)) };
 }
 
 /**
@@ -1261,6 +1457,13 @@ export function getPermissionsLogic(pid: string): any {
     }
 }
 
+// Passkey enrollment actions. Like the verification actions they are open to any participant with access
+// to the host (the invite token is what authorizes them), but they also run while already signed in.
+const passkeyEnrollActionList = [
+    'POST/auth/passkeyRegisterOptions',
+    'POST/auth/passkeyRegisterVerify',
+];
+
 /**
  * @async
  * @function checkAccess
@@ -1281,6 +1484,9 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
         'POST/auth/verificationEmailSend',
         'POST/auth/verificationEmailCallback',
         'POST/auth/verificationCheck',
+        'POST/auth/passkeyAuthOptions',
+        'POST/auth/passkeyAuthVerify',
+        ...passkeyEnrollActionList,
     ];
 
     // Validate inputs
@@ -1361,7 +1567,8 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     // Check if token is valid but operation not found, and if it's a verification operation
     const status = typeof tokenVerificationResult === 'object' ? tokenVerificationResult.status : tokenVerificationResult;
 
-    if (status === VerifyResult.VERIFY_ERR_OPERATION_NOT_FOUND && verificationActionList.includes(operation)) {
+    // Enrolling a passkey from an invite is allowed while already signed in (e.g. with an emailed code).
+    if (status === VerifyResult.VERIFY_ERR_OPERATION_NOT_FOUND && verificationActionList.includes(operation) && !passkeyEnrollActionList.includes(operation)) {
         // Token is valid but operation not found, and this is a verification operation
         // This means the user is already authenticated and trying to perform verification
         return {
@@ -1388,6 +1595,9 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     if (!hasPermission) {
         throw new Error('AUTH_USER_ACCESS_NOT_ALLOWED_HOST_NOT_PERMITTED');
     }
+
+    // The trust level a session needs for this app
+    const requiredTrust = requiredTrustLevel(entry, data, pid, host);
 
     // Get app actions and role for this host
     const { actions: allActionsList, role: newRole } = await getAppActions(host, oidcToken);
@@ -1439,8 +1649,9 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
             if (!activeSession) {
                 const sessionCreatedAt = Date.now();
                 const newSessionTTL = Math.floor((sessionCreatedAt + SESSION_DURATION_MS) / 1000);
-                const existingTrustLevel = existingSession && (existingSession as any).trustLevel as SessionTrustLevel | undefined;
-                const newTrustLevel: SessionTrustLevel = existingTrustLevel === 'email-verified' ? 'email-verified' : 'silent';
+                // A session created silently proves nothing about who is at the keyboard, so it is always
+                // 'silent', even when it replaces an expired verified session.
+                const newTrustLevel: SessionTrustLevel = 'silent';
 
                 console.log(`SILENT SESSION [pid=${pid}]: Creating new session`);
                 await putOne(
@@ -1471,10 +1682,8 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
         // Force user into verification flow for no-token requests.
         if (existingSession) {
             const sessionTTL = existingSession.ttl;
-            const trustLevel = (existingSession as any).trustLevel as SessionTrustLevel | undefined;
-            const isEmailVerifiedSession = trustLevel === 'email-verified' || typeof trustLevel === 'undefined';
 
-            if (sessionTTL > currentTimeSeconds && isEmailVerifiedSession) {
+            if (sessionTTL > currentTimeSeconds && meetsTrust(existingSession, requiredTrust)) {
                 console.log(`SECURITY CHECK [pid=${pid}]: Valid global session found for SSO - minting new token for ${host}`);
                 const { actions: appActions, role: appRole, profile: appProfile } = await getAppActions(host, oidcToken);
                 const accessToken = createToken(pid, deviceFingerprint, appActions, appRole, host);
@@ -1489,7 +1698,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
                 console.log(`SECURITY CHECK [pid=${pid}]: Expired session found - removing and forcing verification`);
                 await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, deviceFingerprint, process.env.AUTH_ROLE_ARN!, oidcToken);
             } else {
-                console.log(`SECURITY CHECK [pid=${pid}]: Session present but not email-verified for host requiring verification, forcing verification flow`);
+                console.log(`SECURITY CHECK [pid=${pid}]: Session trust level below what this host requires, forcing verification flow`);
             }
         } else {
             console.log(`SECURITY CHECK [pid=${pid}]: No existing session found - proceeding to verification flow`);
@@ -1518,8 +1727,6 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
         const sessionCreatedAt = session.createdAt || 0;
         const sessionAgeSeconds = currentTimeSeconds - Math.floor(sessionCreatedAt / 1000);
         const timeUntilExpirySeconds = sessionTTL - currentTimeSeconds;
-        const trustLevel = (session as any).trustLevel as SessionTrustLevel | undefined;
-        const isEmailVerifiedSession = trustLevel === 'email-verified' || typeof trustLevel === 'undefined';
 
         console.log(`SESSION CHECK [pid=${pid}]:`);
         console.log(`  - Session found: YES`);
@@ -1543,8 +1750,8 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
                 // Automatically create a new session and mint a fresh access token instead of requiring verification.
                 const sessionCreatedAtNew = Date.now();
                 const sessionTTLNew = Math.floor((sessionCreatedAtNew + SESSION_DURATION_MS) / 1000);
-                 // Preserve email-verified trust if it was previously set; otherwise, remain silent.
-                const newTrustLevel: SessionTrustLevel = trustLevel === 'email-verified' ? 'email-verified' : 'silent';
+                // The expired session's trust level does not carry over.
+                const newTrustLevel: SessionTrustLevel = 'silent';
 
                 console.log(`SILENT SESSION [pid=${pid}]: Creating new session after expiry`);
                 await putOne(
@@ -1569,8 +1776,8 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
             }
         } else {
             // Session is valid
-            if (!usesSilentSessions && !isEmailVerifiedSession) {
-                console.log(`SESSION CHECK [pid=${pid}]: Session valid but not email-verified for host requiring verification, falling back to verification flow`);
+            if (!usesSilentSessions && !meetsTrust(session, requiredTrust)) {
+                console.log(`SESSION CHECK [pid=${pid}]: Session valid but trust level below what this host requires, falling back to verification flow`);
                 // Fall through to verification token creation below
             } else {
                 // Session is valid and acceptable, generate fresh access token with all actions
@@ -1732,21 +1939,31 @@ export async function getAuthList(callerPid: string, oidcToken?: string): Promis
 /**
  * @async
  * @function putAuthItem
- * @description Updates or creates an auth record in the auth table. Only sys admins may grant or change
- *              restricted hosts. For anyone else, the stored restricted grants and settings are kept as they
- *              are, since getAuthList never showed them to the caller.
+ * @description Updates or creates an auth record in the auth table. Stored fields the caller didn't send
+ *              (e.g. maxPasskeys; the student-manager UI only sends id, config and permitted-hosts) are kept.
+ *              Only sys admins may grant or change restricted hosts; for anyone else the stored restricted
+ *              grants and settings are kept as they are, since getAuthList never showed them to the caller.
+ *              Admins other than sys admins can't change their own sign-in limits or exceptions.
  * @param {string} id - The auth record ID (student ID or 'default')
  * @param {any} authRecord - The auth record data to save
  * @param {string} callerPid - Participant ID of the admin making the request.
  * @returns {Promise<void>} Resolves when the record is saved
- * @throws {Error} AUTH_RESTRICTED_HOST_SYS_ADMIN_ONLY if a non-sys-admin tries to grant a restricted host.
+ * @throws {Error} AUTH_RESTRICTED_HOST_SYS_ADMIN_ONLY if a non-sys-admin tries to grant a restricted host,
+ *                 AUTH_CANT_CHANGE_OWN_LIMITS if a non-sys-admin changes their own limits.
  */
 export async function putAuthItem(id: string, authRecord: any, callerPid: string, oidcToken?: string): Promise<void> {
     const tableCfg = tableGetConfig('auth');
+    const stored = await getOne(tableCfg.tableName, tableCfg.pk, id, process.env.AUTH_ROLE_ARN!, oidcToken) || {};
+    const sysAdmin = isSysAdmin(callerPid);
+
+    authRecord = { ...stored, ...authRecord };
+
+    if (!sysAdmin && id === callerPid && !sameSignInLimits(stored, authRecord)) {
+        throw new Error('AUTH_CANT_CHANGE_OWN_LIMITS');
+    }
 
     const restrictedHosts = getRestrictedHosts();
-    if (restrictedHosts.length > 0 && !isSysAdmin(callerPid)) {
-        const stored = await getOne(tableCfg.tableName, tableCfg.pk, id, process.env.AUTH_ROLE_ARN!, oidcToken) || {};
+    if (restrictedHosts.length > 0 && !sysAdmin) {
         const storedHosts: string[] = stored['permitted-hosts'] || [];
         const requestedHosts: string[] = authRecord['permitted-hosts'] || [];
 
@@ -1767,6 +1984,23 @@ export async function putAuthItem(id: string, authRecord: any, callerPid: string
     }
 
     await putOne(tableCfg.tableName, authRecord, process.env.AUTH_ROLE_ARN!, oidcToken);
+}
+
+// Sign-in limits and exceptions an admin can't change on their own record.
+const SIGN_IN_LIMIT_FIELDS = ['maxPasskeys'];
+const SIGN_IN_LIMIT_HOST_FIELDS = ['maxDevices', 'emailFallback'];
+
+/**
+ * @function sameSignInLimits
+ * @description Whether two auth records carry the same sign-in limits and exceptions.
+ */
+function sameSignInLimits(a: any, b: any): boolean {
+    if (SIGN_IN_LIMIT_FIELDS.some((f) => a?.[f] !== b?.[f])) return false;
+    const hosts = [...Object.keys(a?.config || {}), ...Object.keys(b?.config || {})];
+    for (const h of hosts) {
+        if (SIGN_IN_LIMIT_HOST_FIELDS.some((f) => a?.config?.[h]?.[f] !== b?.config?.[h]?.[f])) return false;
+    }
+    return true;
 }
 
 /**
