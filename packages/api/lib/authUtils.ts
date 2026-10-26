@@ -8,7 +8,7 @@ import jwt from 'jsonwebtoken';
 import axios from 'axios';
 import nodemailer from 'nodemailer';
 import { tableGetConfig } from './tableConfig';
-import { listAllFiltered, listAll, getOne, putOne, getOneWithSort, deleteOne, deleteOneWithSort, queryByPartition } from './dynamoClient';
+import { listAllFiltered, listAll, getOne, putOne, putOneWithCondition, updateItem, getOneWithSort, deleteOne, deleteOneWithSort, queryByPartition } from './dynamoClient';
 import { noteSignIn } from './activity';
 import crypto from 'crypto';
 
@@ -338,6 +338,98 @@ export async function createSession(pid: string, deviceFingerprint: string, trus
         ttl: Math.floor((createdAt + SESSION_DURATION_MS) / 1000), // TTL in seconds for DynamoDB
         trustLevel,
     }, process.env.AUTH_ROLE_ARN!, oidcToken);
+}
+
+// How often a device's lastSeenAt is refreshed, to keep writes down on token refreshes.
+const DEVICE_SEEN_REFRESH_MS = 60 * 60 * 1000;
+
+/**
+ * @function deviceLimit
+ * @description How many devices a participant may use on an app, or undefined when the app doesn't limit
+ *              devices. The app's `maxDevices` in APP_ACCESS_JSON turns limits on; `config[host].maxDevices`
+ *              on the participant's own auth record overrides it.
+ */
+export function deviceLimit(entry: any, authData: any, pid: string, host: string): number | undefined {
+    if (entry.sessionMode === 'silent' || typeof entry.maxDevices !== 'number') return undefined;
+    const override = authData?.id === pid ? authData?.config?.[host]?.maxDevices : undefined;
+    return typeof override === 'number' && override >= 0 ? override : entry.maxDevices;
+}
+
+/**
+ * @async
+ * @function claimDeviceSlot
+ * @description Checks a device against an app's device limit. A device keeps its slot for an app from the
+ *              first time it signs in there until an admin removes it. A device without a slot gets one if
+ *              the participant is under the limit.
+ * @param {any} entry - The host's APP_ACCESS_JSON entry.
+ * @param {any} authData - The auth record used for the participant.
+ * @param {string} pid - The participant ID.
+ * @param {string} host - The host.
+ * @param {string} deviceFingerprint - The device fingerprint.
+ * @param {string} userAgent - The device's user agent, shown to admins.
+ * @param {boolean} checkOnly - Only report whether the device would fit; don't record anything.
+ * @returns {Promise<boolean>} True if the device may use the app.
+ */
+export async function claimDeviceSlot(entry: any, authData: any, pid: string, host: string, deviceFingerprint: string, userAgent: string | undefined, oidcToken?: string, checkOnly = false): Promise<boolean> {
+    const limit = deviceLimit(entry, authData, pid, host);
+    if (limit === undefined) return true;
+
+    const tableCfg = tableGetConfig('devices');
+    const devices = await queryByPartition(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN!, oidcToken);
+    const now = Date.now();
+    const device = devices.find((d: any) => d.fingerprint === deviceFingerprint);
+
+    if (device?.apps?.[host]) {
+        if (!checkOnly && now - (device.apps[host].lastSeenAt || 0) > DEVICE_SEEN_REFRESH_MS) {
+            await updateItem(tableCfg.tableName, { pid, fingerprint: deviceFingerprint },
+                'SET apps.#h.lastSeenAt = :now, lastSeenAt = :now', { ':now': now }, { '#h': host },
+                process.env.AUTH_ROLE_ARN!, oidcToken);
+        }
+        return true;
+    }
+
+    const holding = devices.filter((d: any) => d.apps?.[host]).length;
+    if (holding >= limit) {
+        console.log(`DEVICE LIMIT [pid=${pid}]: ${holding}/${limit} devices already hold ${host}; refusing new device`);
+        return false;
+    }
+    if (checkOnly) return true;
+
+    const slot = { firstSeenAt: now, lastSeenAt: now };
+    if (!device) {
+        try {
+            await putOneWithCondition(tableCfg.tableName, {
+                pid,
+                fingerprint: deviceFingerprint,
+                userAgent: (userAgent || '').slice(0, 512),
+                firstSeenAt: now,
+                lastSeenAt: now,
+                apps: { [host]: slot },
+            }, 'attribute_not_exists(fingerprint)', undefined, process.env.AUTH_ROLE_ARN!, oidcToken);
+            console.log(`DEVICE LIMIT [pid=${pid}]: new device holds ${host} (${holding + 1}/${limit})`);
+            return true;
+        } catch (err) {
+            // Another request created the device first; add the slot to it below.
+            if (!(err instanceof Error && err.message.startsWith('Condition check failed'))) throw err;
+        }
+    }
+    await updateItem(tableCfg.tableName, { pid, fingerprint: deviceFingerprint },
+        'SET apps.#h = if_not_exists(apps.#h, :slot), lastSeenAt = :now', { ':slot': slot, ':now': now }, { '#h': host },
+        process.env.AUTH_ROLE_ARN!, oidcToken);
+    console.log(`DEVICE LIMIT [pid=${pid}]: device now holds ${host} (${holding + 1}/${limit})`);
+    return true;
+}
+
+/**
+ * @async
+ * @function assertCanManageParticipant
+ * @description Admin actions on a participant's passkeys and devices. Auditors are managed by sys admins
+ *              only; to anyone else they don't exist.
+ * @throws {Error} AUTH_PID_NOT_FOUND
+ */
+export async function assertCanManageParticipant(callerPid: string, targetPid: string, oidcToken?: string): Promise<void> {
+    const result = await findParticipantForAuth(targetPid, oidcToken);
+    if (!result || (result.auditor && !isSysAdmin(callerPid))) throw new Error('AUTH_PID_NOT_FOUND');
 }
 
 /**
@@ -1085,7 +1177,7 @@ export async function verificationEmailSend(pid: string, hash: string, host: str
  * @returns {Promise<any>} Resolves with the authentication status and access token on success.
  * @throws {Error} If configuration is missing or verification fails.
  */
-export async function verificationEmailCallback(pid: string, hash: string, host: string, deviceFingerprint: string, verificationTokenId: string, oidcToken?: string): Promise<any> {
+export async function verificationEmailCallback(pid: string, hash: string, host: string, deviceFingerprint: string, verificationTokenId: string, oidcToken?: string, userAgent?: string): Promise<any> {
 
     // Validate inputs
     if (!pid || !hash || !host || !deviceFingerprint) {
@@ -1235,6 +1327,12 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
         throw new Error('AUTH_VERIFICATION_TOKEN_DEVICE_FINGERPRINT_MISMATCH');
     }
 
+    // The code is good; the device still has to fit the app's device limit. The code stays usable until it
+    // expires, in case an admin frees a slot.
+    if (!(await claimDeviceSlot(entry, data, pid, host, deviceFingerprint, userAgent, oidcToken))) {
+        throw new Error('AUTH_DEVICE_LIMIT_REACHED');
+    }
+
     // Get app actions and role for this host
     console.log("verificationEmailCallback: getting app actions and role for user on host", host);
     const { actions: allActionsList, role } = await getAppActions(host, oidcToken);
@@ -1307,7 +1405,7 @@ async function signInOptions(entry: any, authData: any, pid: string, host: strin
  * @param {string} host - Host of the calling app
  * @param {string} deviceFingerprint - Device fingerprint (from headers)
  */
-export async function verificationCheck(pid: string, hash: string, host: string, deviceFingerprint: string): Promise<any> {
+export async function verificationCheck(pid: string, hash: string, host: string, deviceFingerprint: string, oidcToken?: string, userAgent?: string): Promise<any> {
     const determineVerificationStatusResponse = async (): Promise<{ status: 'pending-verification' | 'needs-verification' }> => {
         const verificationTokensCfg = tableGetConfig('verification-tokens');
         const verificationTokens = await listAllFiltered(
@@ -1423,6 +1521,11 @@ export async function verificationCheck(pid: string, hash: string, host: string,
         }
 
 
+        if (!(await claimDeviceSlot(entry, data, pid, host, deviceFingerprint, userAgent, oidcToken))) {
+            console.log(`VERIFICATION CHECK [pid=${pid}]: Active session found, but this device is over the device limit`);
+            return { status: 'device-limit-reached', ...(await signInOptions(entry, data, pid, host)) };
+        }
+
         console.log(`VERIFICATION CHECK [pid=${pid}]: Active session found, returning authenticated state`);
         const { actions: allActionsList, role } = await getAppActions(host);
 
@@ -1477,7 +1580,7 @@ const passkeyEnrollActionList = [
  * @returns {Promise<object>} Empty object if authorized
  * @throws {Error} Various errors as described
  */
-export async function checkAccess(pid: string, hash: string, host: string, deviceFingerprint: string, operation: string, token?: string, oidcToken?: string): Promise<any> {
+export async function checkAccess(pid: string, hash: string, host: string, deviceFingerprint: string, operation: string, token?: string, oidcToken?: string, userAgent?: string): Promise<any> {
 
     // Verification action list
     const verificationActionList = [
@@ -1599,6 +1702,12 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
     // The trust level a session needs for this app
     const requiredTrust = requiredTrustLevel(entry, data, pid, host);
 
+    // A valid session on a device over the app's device limit gets no app token. The login page's own
+    // calls still get a verification token, so it can ask verificationCheck why.
+    const refuseDevice = () => verificationActionList.includes(operation)
+        ? { status: 'expired-auth-flow', accessToken: createToken(pid, deviceFingerprint, verificationActionList, undefined, host) }
+        : { status: 'device-limit-reached' };
+
     // Get app actions and role for this host
     const { actions: allActionsList, role: newRole } = await getAppActions(host, oidcToken);
     role = newRole;
@@ -1685,6 +1794,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
 
             if (sessionTTL > currentTimeSeconds && meetsTrust(existingSession, requiredTrust)) {
                 console.log(`SECURITY CHECK [pid=${pid}]: Valid global session found for SSO - minting new token for ${host}`);
+                if (!(await claimDeviceSlot(entry, data, pid, host, deviceFingerprint, userAgent, oidcToken))) return refuseDevice();
                 const { actions: appActions, role: appRole, profile: appProfile } = await getAppActions(host, oidcToken);
                 const accessToken = createToken(pid, deviceFingerprint, appActions, appRole, host);
                 noteSignIn(pid, deviceFingerprint, appProfile, 'session', appRole, oidcToken);
@@ -1783,6 +1893,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
                 // Session is valid and acceptable, generate fresh access token with all actions
                 console.log(`SESSION VALID [pid=${pid}]: Refreshing access token`);
                 console.log(`  - ${timeUntilExpirySeconds} seconds remaining on session`);
+                if (!(await claimDeviceSlot(entry, data, pid, host, deviceFingerprint, userAgent, oidcToken))) return refuseDevice();
                 const { actions: allActionsList, role: refreshRole } = await getAppActions(host, oidcToken);
                 return {
                     status: 'authenticated',

@@ -32,6 +32,8 @@ import {
     getRestrictedHosts,
     isSysAdmin,
     parseAccessList,
+    claimDeviceSlot,
+    assertCanManageParticipant,
 } from './authUtils';
 
 const CHALLENGE_DURATION_MS = 5 * 60 * 1000;
@@ -298,11 +300,14 @@ export async function passkeyInviteSend(callerPid: string, targetPid: string, li
  * @description Starts enrolling a passkey from an invite. Returns the WebAuthn creation options and the challenge ID.
  * @throws {Error} AUTH_PASSKEYS_NOT_ENABLED, AUTH_INVITE_*, AUTH_PASSKEY_LIMIT_REACHED, AUTH_PID_NOT_FOUND
  */
-export async function passkeyRegisterOptions(pid: string, hash: string, host: string, deviceFingerprint: string, inviteToken: string, oidcToken?: string): Promise<{ challengeId: string, options: any }> {
-    const { entry } = await assertHostAccess(pid, hash, host, oidcToken);
+export async function passkeyRegisterOptions(pid: string, hash: string, host: string, deviceFingerprint: string, inviteToken: string, oidcToken?: string, userAgent?: string): Promise<{ challengeId: string, options: any }> {
+    const { entry, authData } = await assertHostAccess(pid, hash, host, oidcToken);
     if (!passkeysEnabled(entry)) throw new Error('AUTH_PASSKEYS_NOT_ENABLED');
 
     const invite = await loadInvite(inviteToken, pid, oidcToken);
+    // Enrolling signs the participant in on this device, so it has to fit the device limit. The slot is
+    // taken in passkeyRegisterVerify.
+    if (!(await claimDeviceSlot(entry, authData, pid, host, deviceFingerprint, userAgent, oidcToken, true))) throw new Error('AUTH_DEVICE_LIMIT_REACHED');
     const [passkeys, maxPasskeys, result] = await Promise.all([
         listPasskeys(pid, oidcToken),
         maxPasskeysFor(pid, oidcToken),
@@ -340,8 +345,8 @@ export async function passkeyRegisterOptions(pid: string, hash: string, host: st
  * @throws {Error} AUTH_PASSKEYS_NOT_ENABLED, AUTH_INVITE_*, AUTH_CHALLENGE_INVALID, AUTH_PASSKEY_VERIFICATION_FAILED,
  *                 AUTH_PASSKEY_LIMIT_REACHED
  */
-export async function passkeyRegisterVerify(pid: string, hash: string, host: string, deviceFingerprint: string, challengeId: string, inviteToken: string, response: any, clientIp: string | null, oidcToken?: string): Promise<{ status: string, accessToken: string }> {
-    const { entry } = await assertHostAccess(pid, hash, host, oidcToken);
+export async function passkeyRegisterVerify(pid: string, hash: string, host: string, deviceFingerprint: string, challengeId: string, inviteToken: string, response: any, clientIp: string | null, oidcToken?: string, userAgent?: string): Promise<{ status: string, accessToken: string }> {
+    const { entry, authData } = await assertHostAccess(pid, hash, host, oidcToken);
     if (!passkeysEnabled(entry)) throw new Error('AUTH_PASSKEYS_NOT_ENABLED');
 
     const invite = await loadInvite(inviteToken, pid, oidcToken);
@@ -367,6 +372,8 @@ export async function passkeyRegisterVerify(pid: string, hash: string, host: str
 
     const [passkeys, maxPasskeys] = await Promise.all([listPasskeys(pid, oidcToken), maxPasskeysFor(pid, oidcToken)]);
     if (passkeys.length >= maxPasskeys) throw new Error('AUTH_PASSKEY_LIMIT_REACHED');
+    // Checked before the invite is used up, so a refused device leaves the invite usable.
+    if (!(await claimDeviceSlot(entry, authData, pid, host, deviceFingerprint, userAgent, oidcToken))) throw new Error('AUTH_DEVICE_LIMIT_REACHED');
 
     // Use up the invite. The condition makes this single-use even with concurrent requests.
     const invitesCfg = tableGetConfig('passkey-invites');
@@ -433,8 +440,8 @@ export async function passkeyAuthOptions(pid: string, hash: string, host: string
  *              the trust level of a still-valid session on the same device.
  * @throws {Error} AUTH_PASSKEYS_NOT_ENABLED, AUTH_CHALLENGE_INVALID, AUTH_PASSKEY_NOT_FOUND, AUTH_PASSKEY_VERIFICATION_FAILED
  */
-export async function passkeyAuthVerify(pid: string, hash: string, host: string, deviceFingerprint: string, challengeId: string, response: any, oidcToken?: string): Promise<{ status: string, accessToken: string }> {
-    const { entry } = await assertHostAccess(pid, hash, host, oidcToken);
+export async function passkeyAuthVerify(pid: string, hash: string, host: string, deviceFingerprint: string, challengeId: string, response: any, oidcToken?: string, userAgent?: string): Promise<{ status: string, accessToken: string }> {
+    const { entry, authData } = await assertHostAccess(pid, hash, host, oidcToken);
     if (!passkeysEnabled(entry)) throw new Error('AUTH_PASSKEYS_NOT_ENABLED');
 
     const challenge = await consumeChallenge(challengeId, 'authentication', pid, deviceFingerprint, host, oidcToken);
@@ -469,6 +476,8 @@ export async function passkeyAuthVerify(pid: string, hash: string, host: string,
     if (!verification.verified) throw new Error('AUTH_PASSKEY_VERIFICATION_FAILED');
     const info = verification.authenticationInfo;
 
+    if (!(await claimDeviceSlot(entry, authData, pid, host, deviceFingerprint, userAgent, oidcToken))) throw new Error('AUTH_DEVICE_LIMIT_REACHED');
+
     await putOne(passkeysCfg.tableName, {
         ...passkey,
         counter: info.newCounter,
@@ -489,19 +498,13 @@ export async function passkeyAuthVerify(pid: string, hash: string, host: string,
 
 // --- Admin: list and revoke ---
 
-async function assertCanManage(callerPid: string, targetPid: string, oidcToken?: string): Promise<void> {
-    const result = await findParticipantForAuth(targetPid, oidcToken);
-    // Auditors are managed by sys admins only; to anyone else they don't exist.
-    if (!result || (result.auditor && !isSysAdmin(callerPid))) throw new Error('AUTH_PID_NOT_FOUND');
-}
-
 /**
  * @async
  * @function passkeyList
  * @description Lists a participant's passkeys for admins. Public keys are never returned.
  */
 export async function passkeyList(callerPid: string, targetPid: string, oidcToken?: string): Promise<any[]> {
-    await assertCanManage(callerPid, targetPid, oidcToken);
+    await assertCanManageParticipant(callerPid, targetPid, oidcToken);
     const passkeys = await listPasskeys(targetPid, oidcToken);
     return passkeys.map((p: any) => ({
         credentialId: p.credentialId,
@@ -522,7 +525,7 @@ export async function passkeyList(callerPid: string, targetPid: string, oidcToke
  * @description Deletes a participant's passkey and signs out every session that was opened with it.
  */
 export async function passkeyRevoke(callerPid: string, targetPid: string, credentialId: string, oidcToken?: string): Promise<{ success: boolean, sessionsEnded: number }> {
-    await assertCanManage(callerPid, targetPid, oidcToken);
+    await assertCanManageParticipant(callerPid, targetPid, oidcToken);
     const passkeysCfg = tableGetConfig('passkeys');
     const passkey = await getOneWithSort(passkeysCfg.tableName, passkeysCfg.pk, targetPid, passkeysCfg.sk, credentialId, process.env.AUTH_ROLE_ARN!, oidcToken);
     if (!passkey) throw new Error('AUTH_PASSKEY_NOT_FOUND');

@@ -167,9 +167,33 @@ Deploy notes:
   `||location||`). Built-in English text is used until those prompt records exist.
 - Optional: `PASSKEY_INVITE_DURATION`, `WEBAUTHN_RP_NAME` (shown in passkey prompts), `WEBAUTHN_RP_ID`.
 
-### Phase 1b: device registry
+### Phase 1b: device registry (done in this change)
 
-- Add the `devices` table and `maxDevices` checks wherever tokens are created.
+- **Turning limits on:** `maxDevices` on an app's `APP_ACCESS_JSON` entry turns on its limit. A per-user
+  `config[host].maxDevices` on the participant's own auth record overrides it. Apps without `maxDevices`, and
+  silent apps, never touch the `devices` table, so recording starts when a limit is turned on.
+- **`claimDeviceSlot`** (authUtils) runs wherever an app token would be issued: `checkAccess` (sign-in from an
+  existing session and token refresh), `verificationCheck`, emailed-code sign-in, passkey sign-in, and enrollment.
+  - A device that holds a slot for the app keeps it; `lastSeenAt` refreshes at most hourly.
+  - Otherwise the device takes a slot if the participant is under the limit.
+  - Over the limit, no app token is issued: `checkAccess` returns `device-limit-reached` (401). The login page's
+    own calls still get a verification token, so `verificationCheck` can return `device-limit-reached`.
+  - Emailed-code and passkey sign-in refuse with `AUTH_DEVICE_LIMIT_REACHED` before creating a session, and an
+    emailed code stays usable until it expires.
+  - Enrollment checks without taking a slot at the options step, and takes it at verify, before the invite is
+    used up.
+- **Admin:** `POST/auth/deviceList` (`targetUserPid`) returns devices (fingerprint digest, user agent, first and
+  last seen, apps) and the participant's limit for each limited app. `POST/auth/deviceRemove` (`targetUserPid`,
+  `fingerprint`) removes the device from every app and ends its session. Auditors are invisible to non-sys-admins.
+- **Self-limits:** admins can't raise their own `maxDevices` (from Phase 1a).
+
+Deploy notes:
+- Table `devices` (`DYNAMODB_TABLE_DEVICES`): pk `pid`, sk `fingerprint`, no TTL.
+- The auth role needs Get/Put/Delete/Query on it, plus UpdateItem (a separate `DevicesUpdate` statement).
+- Add `POST/auth/deviceList` and `POST/auth/deviceRemove` to the student-manager actions profile ahead of the admin UI.
+- Turn limits on at rollout by adding `"maxDevices": 1` to each coordinator app entry and `"maxDevices": 2` to
+  student-dashboard. The first device to sign in to an app after that takes the slot.
+- Two new devices signing in at the same moment can both get in when one slot is left.
 
 ### Phase 1c: auditors
 
