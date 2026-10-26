@@ -1072,6 +1072,74 @@ export async function authGetActionsProfiles(
 
 /**
  * @async
+ * @function authSignInAdminPost
+ * @description POSTs one of the admin sign-in actions (passkeys, devices, limits). Errors keep the API's code
+ *              (e.g. AUTH_CANT_CHANGE_OWN_LIMITS) in the message.
+ */
+async function authSignInAdminPost(action: string, body: any, pid: string, hash: string): Promise<any | RedirectedResponse> {
+    try {
+        const response = await api.post(`${API_BASE_URL}/auth/${action}`, pid, hash, body);
+        if (response && response.redirected) {
+            console.log(`[API] ${action} redirected - authentication required`);
+            return { redirected: true };
+        }
+        return response;
+    } catch (error: any) {
+        console.error(`[API] ${action} failed:`, error);
+        throw new Error(error.message || `${action} failed`);
+    }
+}
+
+/**
+ * @async
+ * @function authSignInSummary
+ * @description A participant's passkeys, devices, and per-app passkey mode, device limit and email fallback.
+ * @param {string} targetUserPid - The participant.
+ */
+export async function authSignInSummary(targetUserPid: string, pid: string, hash: string): Promise<any | RedirectedResponse> {
+    return authSignInAdminPost('signInSummary', { targetUserPid }, pid, hash);
+}
+
+/**
+ * @async
+ * @function authSetSignInLimits
+ * @description Sets or clears (null) a participant's maxPasskeys, per-app maxDevices and per-app emailFallback.
+ * @param {string} targetUserPid - The participant.
+ * @param {object} changes - { maxPasskeys?, maxDevices?: { [host]: number | null }, emailFallback?: { [host]: boolean | null } }
+ */
+export async function authSetSignInLimits(targetUserPid: string, changes: any, pid: string, hash: string): Promise<any | RedirectedResponse> {
+    return authSignInAdminPost('setSignInLimits', { targetUserPid, changes }, pid, hash);
+}
+
+/**
+ * @async
+ * @function authPasskeyInviteSend
+ * @description Emails a participant a single-use passkey enrollment invite that opens linkHost.
+ */
+export async function authPasskeyInviteSend(targetUserPid: string, linkHost: string, pid: string, hash: string): Promise<any | RedirectedResponse> {
+    return authSignInAdminPost('passkeyInviteSend', { targetUserPid, linkHost }, pid, hash);
+}
+
+/**
+ * @async
+ * @function authPasskeyRevoke
+ * @description Deletes a participant's passkey and signs out the sessions opened with it.
+ */
+export async function authPasskeyRevoke(targetUserPid: string, credentialId: string, pid: string, hash: string): Promise<any | RedirectedResponse> {
+    return authSignInAdminPost('passkeyRevoke', { targetUserPid, credentialId }, pid, hash);
+}
+
+/**
+ * @async
+ * @function authDeviceRemove
+ * @description Removes a participant's device from every app and signs it out.
+ */
+export async function authDeviceRemove(targetUserPid: string, fingerprint: string, pid: string, hash: string): Promise<any | RedirectedResponse> {
+    return authSignInAdminPost('deviceRemove', { targetUserPid, fingerprint }, pid, hash);
+}
+
+/**
+ * @async
  * @function authGetViews
  * @description Get the views for a participant.
  * @param {string} pid - The participant ID.

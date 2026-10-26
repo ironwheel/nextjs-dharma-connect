@@ -151,6 +151,7 @@ Deploy notes:
 - **`putAuthItem`:**
   - keeps stored fields the caller didn't send (e.g. `maxPasskeys`)
   - stops non-sys-admins changing their own `maxPasskeys`, `config[host].maxDevices` or `config[host].emailFallback`
+    (superseded in Phase 3: `putAuthItem` never changes these; `setSignInLimits` does, with the self-guard)
 
 Deploy notes:
 - Safe to deploy before the tables exist. Until an app's `authMode` changes, only the silent-session fix
@@ -218,16 +219,31 @@ is signed in with an emailed code. The shared client's redirect to `/login` keep
 
 The text is English, like the existing screen. Translations can move to prompts later.
 
-### Phase 3: admin UI
+### Phase 3: admin UI (done in this change, except batch invites and the sys-admin console)
 
-- **Student-manager:**
-  - issue invites (single and batch)
-  - list and revoke passkeys
-  - list and remove devices
-  - per-user `maxDevices` / `maxPasskeys` overrides and the email-fallback grant
-- **Sys-admin console deployment:** auditor records, restricted grants, auditor invites (auditor SMTP
-  sender), and auditor passkey and device management.
-- **One-off sys-admin invite script.**
+- **Fix to `putAuthItem`:** the student-manager form only round-trips the config keys in the `default` record,
+  so saving a student would have dropped their `maxDevices` / `emailFallback` overrides. `putAuthItem` now
+  always keeps the stored `maxPasskeys`, `config[host].maxDevices` and `config[host].emailFallback`, and ignores
+  any values sent for them.
+- **New actions:**
+  - `POST/auth/signInSummary` (`targetUserPid`): passkeys, devices, and for each app the person may use, its
+    sign-in mode, device limit (default, override, effective) and email fallback. Silent apps are left out, and
+    restricted apps are shown only to sys admins.
+  - `POST/auth/setSignInLimits` (`targetUserPid`, `changes`): sets or clears (`null`) `maxPasskeys` and per-app
+    `maxDevices` / `emailFallback`. Values are whole numbers from 0 to 20. Admins other than sys admins can't
+    change their own. A person on the `default` record gets their own record copied from it first.
+- **Student-manager edit dialog, "Sign-in" section** (`components/SignInPanel.tsx`). Its changes save on their own:
+  - passkeys, with provider (from a short list of well-known AAGUIDs), synced or this-device-only, and added and
+    last-used dates; revoke
+  - "Email passkey invitation" for any of the person's apps that has passkeys on
+  - devices (e.g. "iPhone · Safari"), with their apps and first and last seen; remove
+  - per-app device limit override (the default is shown as a placeholder), the email-fallback checkbox where the
+    app allows it, and max passkeys
+  - on the admin's own record, every control is disabled
+- **`utils/issue_passkey_invite.py`:** writes an invite straight to DynamoDB and prints the link, for the first sys
+  admin. It reads `APP_ACCESS_JSON` and table names from the API env file.
+- **Still to do:** batch invites, and the sys-admin console deployment (auditor records, restricted grants,
+  auditor invites with the auditor SMTP sender, and auditor passkey and device management).
 
 ### Phase 4: rollout
 

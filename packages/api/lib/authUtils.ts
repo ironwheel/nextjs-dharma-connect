@@ -2050,28 +2050,24 @@ export async function getAuthList(callerPid: string, oidcToken?: string): Promis
 /**
  * @async
  * @function putAuthItem
- * @description Updates or creates an auth record in the auth table. Stored fields the caller didn't send
- *              (e.g. maxPasskeys; the student-manager UI only sends id, config and permitted-hosts) are kept.
- *              Only sys admins may grant or change restricted hosts; for anyone else the stored restricted
- *              grants and settings are kept as they are, since getAuthList never showed them to the caller.
- *              Admins other than sys admins can't change their own sign-in limits or exceptions.
+ * @description Updates or creates an auth record in the auth table. Stored fields the caller didn't send are
+ *              kept (the student-manager UI only sends id, config and permitted-hosts). Sign-in limits and
+ *              exceptions (maxPasskeys, config[host].maxDevices, config[host].emailFallback) always keep their
+ *              stored values here; they change only through setSignInLimits. Only sys admins may grant or change
+ *              restricted hosts; for anyone else the stored restricted grants and settings are kept as they are,
+ *              since getAuthList never showed them to the caller.
  * @param {string} id - The auth record ID (student ID or 'default')
  * @param {any} authRecord - The auth record data to save
  * @param {string} callerPid - Participant ID of the admin making the request.
  * @returns {Promise<void>} Resolves when the record is saved
- * @throws {Error} AUTH_RESTRICTED_HOST_SYS_ADMIN_ONLY if a non-sys-admin tries to grant a restricted host,
- *                 AUTH_CANT_CHANGE_OWN_LIMITS if a non-sys-admin changes their own limits.
+ * @throws {Error} AUTH_RESTRICTED_HOST_SYS_ADMIN_ONLY if a non-sys-admin tries to grant a restricted host.
  */
 export async function putAuthItem(id: string, authRecord: any, callerPid: string, oidcToken?: string): Promise<void> {
     const tableCfg = tableGetConfig('auth');
     const stored = await getOne(tableCfg.tableName, tableCfg.pk, id, process.env.AUTH_ROLE_ARN!, oidcToken) || {};
     const sysAdmin = isSysAdmin(callerPid);
 
-    authRecord = { ...stored, ...authRecord };
-
-    if (!sysAdmin && id === callerPid && !sameSignInLimits(stored, authRecord)) {
-        throw new Error('AUTH_CANT_CHANGE_OWN_LIMITS');
-    }
+    authRecord = withStoredSignInLimits({ ...stored, ...authRecord }, stored);
 
     const restrictedHosts = getRestrictedHosts();
     if (restrictedHosts.length > 0 && !sysAdmin) {
@@ -2097,21 +2093,33 @@ export async function putAuthItem(id: string, authRecord: any, callerPid: string
     await putOne(tableCfg.tableName, authRecord, process.env.AUTH_ROLE_ARN!, oidcToken);
 }
 
-// Sign-in limits and exceptions an admin can't change on their own record.
-const SIGN_IN_LIMIT_FIELDS = ['maxPasskeys'];
-const SIGN_IN_LIMIT_HOST_FIELDS = ['maxDevices', 'emailFallback'];
+// Sign-in limits and exceptions. They are set only through setSignInLimits, never by putAuthItem.
+export const SIGN_IN_LIMIT_FIELDS = ['maxPasskeys'];
+export const SIGN_IN_LIMIT_HOST_FIELDS = ['maxDevices', 'emailFallback'];
 
 /**
- * @function sameSignInLimits
- * @description Whether two auth records carry the same sign-in limits and exceptions.
+ * @function withStoredSignInLimits
+ * @description Returns the record with its sign-in limits and exceptions replaced by the stored ones.
  */
-function sameSignInLimits(a: any, b: any): boolean {
-    if (SIGN_IN_LIMIT_FIELDS.some((f) => a?.[f] !== b?.[f])) return false;
-    const hosts = [...Object.keys(a?.config || {}), ...Object.keys(b?.config || {})];
-    for (const h of hosts) {
-        if (SIGN_IN_LIMIT_HOST_FIELDS.some((f) => a?.config?.[h]?.[f] !== b?.config?.[h]?.[f])) return false;
+function withStoredSignInLimits(record: any, stored: any): any {
+    const result = { ...record };
+    for (const f of SIGN_IN_LIMIT_FIELDS) {
+        if (stored?.[f] !== undefined) result[f] = stored[f];
+        else delete result[f];
     }
-    return true;
+    const hosts = [...Object.keys(record.config || {}), ...Object.keys(stored?.config || {})];
+    if (hosts.length === 0) return result;
+    const config: Record<string, any> = {};
+    for (const [h, v] of Object.entries(record.config || {})) config[h] = { ...(v as any) };
+    for (const h of hosts) {
+        for (const f of SIGN_IN_LIMIT_HOST_FIELDS) {
+            const keep = stored?.config?.[h]?.[f];
+            if (keep !== undefined) config[h] = { ...(config[h] || {}), [f]: keep };
+            else if (config[h]) delete config[h][f];
+        }
+    }
+    result.config = config;
+    return result;
 }
 
 /**
