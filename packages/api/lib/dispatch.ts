@@ -20,6 +20,7 @@ import { translatePromptFromEnglish } from './translate';
 import { resolveAudioEntitlement, signAudioUrl } from './audio';
 import { recordRegistration } from './activity';
 import { deviceList, deviceRemove } from './devices';
+import { signInSummary, setSignInLimits } from './signInSettings';
 import { passkeyInviteSend, passkeyRegisterOptions, passkeyRegisterVerify, passkeyAuthOptions, passkeyAuthVerify, passkeyList, passkeyRevoke } from './passkeys';
 import { getUnsubscribeStatus, setUnsubscribe } from './unsubscribe';
 
@@ -531,6 +532,24 @@ async function dispatchAuth(
             return res.status(400).json({ error: 'Missing required parameters: targetUserPid, fingerprint' });
           }
           const result = await deviceRemove(pid, targetUserPid, fingerprint, oidcToken);
+          return res.status(200).json(result);
+        }
+      case 'signInSummary':
+        {
+          const { targetUserPid } = req.body;
+          if (!targetUserPid) {
+            return res.status(400).json({ error: 'Missing required parameter: targetUserPid' });
+          }
+          const result = await signInSummary(pid, targetUserPid, oidcToken);
+          return res.status(200).json(result);
+        }
+      case 'setSignInLimits':
+        {
+          const { targetUserPid, changes } = req.body;
+          if (!targetUserPid || !changes) {
+            return res.status(400).json({ error: 'Missing required parameters: targetUserPid, changes' });
+          }
+          const result = await setSignInLimits(pid, targetUserPid, changes, oidcToken);
           return res.status(200).json(result);
         }
       default:

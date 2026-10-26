@@ -26,6 +26,7 @@ import {
 
 // Import custom DataTable component
 import { DataTable, Column } from '../components/DataTable';
+import { SignInPanel } from '../components/SignInPanel';
 
 // Types
 interface Student {
@@ -1989,6 +1990,11 @@ const Home = () => {
                                 ))}
                             </Row>
                         </div>
+
+                        {/* Passkeys, devices and sign-in limits (saved on their own) */}
+                        {formData.studentId && formData.studentId !== 'default' && (
+                            <SignInPanel studentId={formData.studentId} pid={pid as string} hash={hash as string} />
+                        )}
 
                         {/* Dynamic App Configuration Sections */}
                         {availableHosts.map(host => {
