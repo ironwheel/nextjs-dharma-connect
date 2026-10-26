@@ -768,6 +768,53 @@ async function listAllQueryBeginsWithSortKey(
 
 /**
  * @async
+ * @function queryByPartition
+ * @description Query every item in one partition.
+ * @param {string} tableName - The name of the table to query.
+ * @param {string} primaryKeyName - The name of the partition key.
+ * @param {string} primaryKeyValue - The value of the partition key.
+ * @param {string} appSpecificRoleArn - Required role ARN to assume.
+ * @returns {Promise<any[]>} A promise that resolves to an array of items.
+ * @throws {Error} When AWS operation fails or table cannot be queried.
+ */
+export async function queryByPartition(
+  tableName: string,
+  primaryKeyName: string,
+  primaryKeyValue: string,
+  appSpecificRoleArn: string,
+  oidcToken?: string
+) {
+  const client = await getDocClient(appSpecificRoleArn, oidcToken);
+  const items: any[] = [];
+  let ExclusiveStartKey;
+
+  try {
+    do {
+      const response = await client.send(
+        new QueryCommand({
+          TableName: tableName,
+          KeyConditionExpression: '#pk = :pk',
+          ExpressionAttributeNames: { '#pk': primaryKeyName },
+          ExpressionAttributeValues: { ':pk': primaryKeyValue },
+          ExclusiveStartKey,
+        })
+      );
+      if (response.Items) items.push(...response.Items);
+      ExclusiveStartKey = response.LastEvaluatedKey;
+    } while (ExclusiveStartKey);
+
+    return items;
+  } catch (error) {
+    console.error(`Failed to query table ${tableName}:`, error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to query table ${tableName}: ${error.message}`);
+    }
+    throw new Error(`Failed to query table ${tableName}: Unknown error occurred`);
+  }
+}
+
+/**
+ * @async
  * @function listAllQueryBeginsWithSortKeyMultiple
  * @description Query items by multiple partition keys with a begins_with condition on the sort key.
  * @param {string} tableName - The name of the table to query.
