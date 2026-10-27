@@ -190,7 +190,7 @@ async function signInWithSession(pid: string, deviceFingerprint: string, host: s
 
 const DEFAULT_PROMPTS: Record<string, string> = {
     'passkey-inviteSubject': 'Set up your passkey',
-    'passkey-inviteEmail': '<p>Dear ||name||,</p><p>You have been invited to set up a passkey. A passkey lets you sign in with Face ID, Touch ID, your fingerprint, or your device PIN instead of an emailed code.</p><p><a href="||link||">Set up your passkey</a></p><p>This link is personal and works once. It expires ||expires||. Please do not forward it.</p>',
+    'passkey-inviteEmail': '<p>Dear ||name||,</p><p>You have been invited to set up a passkey. A passkey lets you sign in with Face ID, Touch ID, your fingerprint, or your device PIN instead of an emailed code.</p><p>Please open the link in the browser you use for this app. Your sign-in will work in that browser only, so if you use more than one browser, or more than one Chrome or Edge profile, copy the link into the right one.</p><p><a href="||link||">Set up your passkey</a></p><p>This link is personal and works once. It expires ||expires||. Please do not forward it.</p>',
     'passkey-addedSubject': 'A passkey was added to your account',
     'passkey-addedEmail': '<p>Dear ||name||,</p><p>A passkey was added to your account on ||time|| from ||location||.</p><p>If this was not you, please contact us right away.</p>',
 };

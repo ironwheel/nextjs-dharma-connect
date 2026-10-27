@@ -2,8 +2,9 @@
  * @file apps/student-manager/components/SignInPanel.tsx
  * @copyright Robert E. Taylor, Extropic Systems, 2025
  * @license MIT
- * @description Admin panel for a student's sign-in setup: passkeys (invite, revoke), devices (remove), and
- *              per-user limits and exceptions (max passkeys, per-app device limit, email fallback).
+ * @description Admin panel for a student's sign-in setup: passkeys (invite, revoke), browsers (remove), browsers
+ *              recently refused by a browser limit, and per-user limits and exceptions (max passkeys, per-app
+ *              browser limit, email fallback). The API and its records call browsers "devices".
  *              See docs/passkey-auth-plan.md.
  */
 import React, { useCallback, useEffect, useState } from 'react';
@@ -31,7 +32,8 @@ interface SignInApp {
 
 interface SignInSummary {
     passkeys: Array<{ credentialId: string, aaguid?: string, deviceType?: string, backedUp?: boolean, createdAt?: number, createdHost?: string, lastUsedAt?: number, lastUsedHost?: string }>;
-    devices: Array<{ fingerprint: string, userAgent?: string, firstSeenAt?: number, lastSeenAt?: number, apps: Record<string, { firstSeenAt: number, lastSeenAt: number }> }>;
+    devices: Array<{ fingerprint: string, browserCode: string, userAgent?: string, firstSeenAt?: number, lastSeenAt?: number, apps: Record<string, { firstSeenAt: number, lastSeenAt: number }> }>;
+    refusedBrowsers?: Array<{ fingerprint: string, browserCode: string, userAgent?: string, host: string, firstRefusedAt?: number, lastRefusedAt: number, attempts: number }>;
     apps: SignInApp[];
     maxPasskeys: number;
     maxPasskeysOverride: number | null;
@@ -89,6 +91,21 @@ const describeDevice = (userAgent?: string) => {
         : /CriOS|Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '';
     return browser ? `${os} · ${browser}` : os;
 };
+
+/**
+ * @function refusalHint
+ * @description Why a browser was probably refused. Two profiles of one browser, a private window, or the same
+ *              browser after its cookies were cleared look like different browsers of the same kind.
+ */
+const refusalHint = (userAgent: string | undefined, devices: SignInSummary['devices']) => {
+    const kind = describeDevice(userAgent);
+    const same = devices.filter(d => describeDevice(d.userAgent) === kind).map(d => d.browserCode);
+    return same.length
+        ? `Same kind of browser as ${same.join(', ')}: probably another profile of that browser, a private window, or cleared cookies.`
+        : 'A different browser or device from the ones above.';
+};
+
+const browserCodeStyle: React.CSSProperties = { fontFamily: 'monospace', letterSpacing: '0.1em', marginRight: '8px' };
 
 const signInLabel = (app: SignInApp) => {
     if (app.authMode === 'email') return 'Emailed code';
@@ -158,9 +175,11 @@ export const SignInPanel: React.FC<SignInPanelProps> = ({ studentId, pid, hash }
     };
 
     const removeDevice = (fingerprint: string) => {
-        if (!window.confirm('Remove this device? It will be signed out and lose its place in every app. It can take a place again only by signing in while the student is under the limit.')) return;
-        run(() => authDeviceRemove(studentId, fingerprint, pid, hash), 'Device removed');
+        if (!window.confirm('Remove this browser? It will be signed out and lose its place in every app. It can take a place again only by signing in while the student is under the limit.')) return;
+        run(() => authDeviceRemove(studentId, fingerprint, pid, hash), 'Browser removed');
     };
+
+    const dismissRefusal = (fingerprint: string) => run(() => authDeviceRemove(studentId, fingerprint, pid, hash), 'Refused browser dismissed');
 
     const saveLimits = () => {
         if (!summary) return;
@@ -194,7 +213,7 @@ export const SignInPanel: React.FC<SignInPanelProps> = ({ studentId, pid, hash }
         return (
             <div style={sectionStyle}>
                 <h5>Sign-in</h5>
-                <Spinner animation="border" size="sm" /> Loading passkeys and devices...
+                <Spinner animation="border" size="sm" /> Loading passkeys and browsers...
             </div>
         );
     }
@@ -206,7 +225,7 @@ export const SignInPanel: React.FC<SignInPanelProps> = ({ studentId, pid, hash }
         <div style={sectionStyle}>
             <h5 style={{ marginBottom: '20px' }}>Sign-in</h5>
             {!summary.canEditLimits && (
-                <p style={{ color: '#aaa', fontSize: '0.9em' }}>This is your own account: another admin has to change your limits or remove your passkeys and devices.</p>
+                <p style={{ color: '#aaa', fontSize: '0.9em' }}>This is your own account: another admin has to change your limits or remove your passkeys and browsers.</p>
             )}
 
             <h6>Passkeys ({summary.passkeys.length} of {summary.maxPasskeys} allowed)</h6>
@@ -241,16 +260,20 @@ export const SignInPanel: React.FC<SignInPanelProps> = ({ studentId, pid, hash }
                 </div>
             )}
 
-            <h6>Devices</h6>
+            <h6>Browsers</h6>
+            <p style={{ color: '#aaa', fontSize: '0.85em' }}>
+                Each browser on each computer or phone counts separately, and so does each Chrome or Edge profile and each private window.
+                The code matches the one the student sees when a browser is refused.
+            </p>
             {summary.devices.length === 0 ? (
-                <p style={{ color: '#aaa' }}>No devices recorded. Devices are recorded for apps with a device limit.</p>
+                <p style={{ color: '#aaa' }}>No browsers recorded. Browsers are recorded for apps with a browser limit.</p>
             ) : (
                 <Table size="sm" variant="dark" responsive>
-                    <thead><tr><th>Device</th><th>Apps</th><th>First seen</th><th>Last seen</th><th /></tr></thead>
+                    <thead><tr><th>Browser</th><th>Apps</th><th>First seen</th><th>Last seen</th><th /></tr></thead>
                     <tbody>
                         {summary.devices.map(d => (
                             <tr key={d.fingerprint}>
-                                <td title={d.userAgent}>{describeDevice(d.userAgent)}</td>
+                                <td title={d.userAgent}><span style={browserCodeStyle}>{d.browserCode}</span>{describeDevice(d.userAgent)}</td>
                                 <td>{Object.keys(d.apps).map(appName).join(', ')}</td>
                                 <td>{formatDate(d.firstSeenAt)}</td>
                                 <td>{formatDate(d.lastSeenAt)}</td>
@@ -261,9 +284,29 @@ export const SignInPanel: React.FC<SignInPanelProps> = ({ studentId, pid, hash }
                 </Table>
             )}
 
+            {!!summary.refusedBrowsers?.length && (
+                <>
+                    <h6 style={{ marginTop: '10px' }}>Recently refused</h6>
+                    <Table size="sm" variant="dark" responsive>
+                        <thead><tr><th>Browser</th><th>App</th><th>Last refused</th><th>Likely reason</th><th /></tr></thead>
+                        <tbody>
+                            {summary.refusedBrowsers.map(r => (
+                                <tr key={r.fingerprint}>
+                                    <td title={r.userAgent}><span style={browserCodeStyle}>{r.browserCode}</span>{describeDevice(r.userAgent)}</td>
+                                    <td>{appName(r.host)}</td>
+                                    <td>{formatDate(r.lastRefusedAt)}{r.attempts > 1 ? ` (${r.attempts} tries)` : ''}</td>
+                                    <td style={{ fontSize: '0.9em' }}>{refusalHint(r.userAgent, summary.devices)}</td>
+                                    <td><Button size="sm" variant="outline-light" disabled={!editable} onClick={() => dismissRefusal(r.fingerprint)}>Dismiss</Button></td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </Table>
+                </>
+            )}
+
             <h6 style={{ marginTop: '10px' }}>Limits and exceptions</h6>
             <Table size="sm" variant="dark" responsive>
-                <thead><tr><th>App</th><th>Sign-in</th><th>Device limit</th><th>Email fallback</th></tr></thead>
+                <thead><tr><th>App</th><th>Sign-in</th><th>Browser limit</th><th>Email fallback</th></tr></thead>
                 <tbody>
                     {summary.apps.map(app => (
                         <tr key={app.host}>
@@ -282,7 +325,7 @@ export const SignInPanel: React.FC<SignInPanelProps> = ({ studentId, pid, hash }
                                         placeholder={app.deviceLimitDefault === null ? '' : `${app.deviceLimitDefault}`}
                                         value={deviceLimitInputs[app.host] || ''}
                                         disabled={!editable}
-                                        aria-label={`Device limit override for ${appName(app.host)}`}
+                                        aria-label={`Browser limit override for ${appName(app.host)}`}
                                         onChange={e => setDeviceLimitInputs(prev => ({ ...prev, [app.host]: e.target.value }))}
                                     />
                                 )}

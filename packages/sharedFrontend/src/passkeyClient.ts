@@ -14,6 +14,8 @@ export interface SignInOptions {
     userVerification?: 'required' | 'preferred';
     emailSignIn?: boolean;
     hasPasskey?: boolean;
+    /** Short code naming this browser, matched against the admin sign-in panel. */
+    browserCode?: string;
 }
 
 /** Why a sign-in or enrollment attempt didn't work, as the login page explains it. */

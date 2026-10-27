@@ -32,8 +32,9 @@ async function authRecords(targetPid: string, oidcToken?: string): Promise<{ own
 /**
  * @async
  * @function signInSummary
- * @description Everything the admin sign-in panel shows for a participant: passkeys, devices, and for each app
- *              they may use, its passkey mode, device limit (default and override) and email fallback.
+ * @description Everything the admin sign-in panel shows for a participant: passkeys, devices, browsers recently
+ *              refused by a device limit, and for each app they may use, its passkey mode, device limit (default
+ *              and override) and email fallback.
  * @param {string} callerPid - The admin making the request.
  * @param {string} targetPid - The participant.
  */
@@ -66,6 +67,7 @@ export async function signInSummary(callerPid: string, targetPid: string, oidcTo
     return {
         passkeys,
         devices: devices.devices,
+        refusedBrowsers: devices.refused,
         apps,
         maxPasskeys: typeof own?.maxPasskeys === 'number' ? own.maxPasskeys : DEFAULT_MAX_PASSKEYS,
         maxPasskeysOverride: typeof own?.maxPasskeys === 'number' ? own.maxPasskeys : null,

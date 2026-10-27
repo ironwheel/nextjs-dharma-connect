@@ -44,7 +44,7 @@ const PROBLEM_TEXT: Record<PasskeyProblem, string> = {
     'cancelled': 'The passkey prompt was closed before it finished. Please try again.',
     'unsupported': "This browser can't use passkeys. Please try an up-to-date Chrome, Safari or Edge, or use your phone.",
     'already-on-device': 'This device already has your passkey. Please sign in with it instead.',
-    'device-limit': 'This device has reached the device limit for this app.',
+    'device-limit': 'This browser has reached the browser limit for this app.',
     'invite-used': "This invitation has already been used. If you didn't set up the passkey yourself, please contact an admin right away.",
     'invite-expired': 'This invitation has expired. Please ask an admin for a new one.',
     'invite-invalid': "This invitation link isn't valid for your account. Please ask an admin for a new one.",
@@ -178,6 +178,16 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash, eventCod
         })();
         return () => { cancelled = true; };
     }, [pid, hash, redirectToDashboard]);
+
+    // The device-limit screen shows this browser's code. Pages opened from an invite haven't asked for it yet.
+    useEffect(() => {
+        if (mode !== 'deviceLimit' || signInOptions?.browserCode || !pid || !hash) return;
+        let cancelled = false;
+        checkSignIn(pid, hash).then(options => {
+            if (!cancelled && options?.browserCode) setSignInOptions(prev => ({ ...(prev || options), browserCode: options.browserCode }));
+        });
+        return () => { cancelled = true; };
+    }, [mode, signInOptions, pid, hash]);
 
     const showProblem = useCallback((err: unknown) => {
         const kind = passkeyProblem(err);
@@ -717,7 +727,8 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash, eventCod
                         <h2 style={{ color: '#1f2937', fontWeight: 600, fontSize: '1.25rem', marginBottom: '0.75rem' }}>Set up your passkey</h2>
                         <p style={{ color: '#4b5563', marginBottom: '1.5rem' }}>
                             A passkey lets you sign in with Face ID, Touch ID, your fingerprint or your device PIN instead of an emailed code.
-                            Set it up on the device you normally use for this app.
+                            Set it up in the browser you normally use for this app: your sign-in will work in this browser only.
+                            If you use this app in a different browser, or a different Chrome or Edge profile, copy this link into that one first.
                         </p>
                         <button onClick={handleEnroll} disabled={passkeyBusy || !supported} style={primaryButtonStyle(passkeyBusy || !supported)}>
                             {passkeyBusy ? 'Waiting for your device...' : 'Create passkey'}
@@ -753,16 +764,21 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash, eventCod
                     <div style={noticeStyle('info')}>
                         <p style={{ fontWeight: 600 }}>This app signs you in with a passkey.</p>
                         <p style={{ fontSize: '0.875rem', marginTop: '0.25rem' }}>
-                            To set one up you need an invitation. Please ask an admin to send you one, then open the link in the invitation email on the device you want to use.
+                            To set one up you need an invitation. Please ask an admin to send you one, then open the link in the invitation email in the browser you use for this app.
                         </p>
                     </div>
                 )}
 
                 {mode === 'deviceLimit' && (
                     <div style={noticeStyle('warning')}>
-                        <p style={{ fontWeight: 600 }}>This device can't be used for this app.</p>
+                        <p style={{ fontWeight: 600 }}>This browser can't be used for this app.</p>
                         <p style={{ fontSize: '0.875rem', marginTop: '0.25rem' }}>
-                            Your account has reached its device limit for this app. To use this device, please ask an admin to remove one of your other devices or to allow another one.
+                            You're set up for this app in a different browser. Please open this page there instead.
+                            Each Chrome or Edge profile counts as a separate browser, and so does a private window.
+                        </p>
+                        <p style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>
+                            If you need to use this browser, please ask an admin to allow another one
+                            {signInOptions?.browserCode ? <>, and tell them this browser's code: <strong style={{ fontFamily: 'monospace', fontSize: '1rem', letterSpacing: '0.1em' }}>{signInOptions.browserCode}</strong></> : null}.
                         </p>
                     </div>
                 )}
