@@ -41,6 +41,28 @@ export function deviceFingerprintFor(deviceId: string): string {
     return crypto.createHash('sha256').update(deviceId).digest('hex');
 }
 
+// Readable characters only: no 0/O, 1/I/L.
+const BROWSER_CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+const BROWSER_CODE_LENGTH = 4;
+
+/**
+ * @function browserCode
+ * @description A short code naming a browser, shown on the login page's device-limit screen and next to each
+ *              device in the admin sign-in panel so the two can be matched. Derived from the device fingerprint;
+ *              not secret, and only meant to tell one participant's browsers apart.
+ * @param {string} deviceFingerprint - The device fingerprint (hex).
+ * @returns {string} Four readable characters, e.g. 'K7Q2'.
+ */
+export function browserCode(deviceFingerprint: string): string {
+    let n = parseInt((deviceFingerprint || '').slice(0, 8), 16) || 0;
+    let code = '';
+    for (let i = 0; i < BROWSER_CODE_LENGTH; i++) {
+        code += BROWSER_CODE_ALPHABET[n % BROWSER_CODE_ALPHABET.length];
+        n = Math.floor(n / BROWSER_CODE_ALPHABET.length);
+    }
+    return code;
+}
+
 /**
  * @function deviceCookie
  * @description Serializes the device ID cookie. Same SameSite/Secure policy as the token cookie, but

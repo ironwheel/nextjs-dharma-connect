@@ -11,6 +11,7 @@ import { tableGetConfig } from './tableConfig';
 import { listAllFiltered, listAll, getOne, putOne, putOneWithCondition, updateItem, getOneWithSort, deleteOne, deleteOneWithSort, queryByPartition } from './dynamoClient';
 import { noteSignIn } from './activity';
 import crypto from 'crypto';
+import { browserCode } from './device';
 
 // Add this type at the top of the file, after imports
 type PermittedHost = string; // Now just a string representing the host
@@ -343,6 +344,28 @@ export async function createSession(pid: string, deviceFingerprint: string, trus
 // How often a device's lastSeenAt is refreshed, to keep writes down on token refreshes.
 const DEVICE_SEEN_REFRESH_MS = 60 * 60 * 1000;
 
+// Browsers refused by a device limit are recorded, for the admin sign-in panel, in the devices table under
+// 'refused#<fingerprint>'. They hold no slots. The panel shows them for a week.
+export const REFUSED_DEVICE_PREFIX = 'refused#';
+export const REFUSED_DEVICE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * @async
+ * @function recordRefusedDevice
+ * @description Records that a browser was refused by an app's device limit. Never fails the sign-in.
+ */
+async function recordRefusedDevice(pid: string, host: string, deviceFingerprint: string, userAgent: string | undefined, now: number, oidcToken?: string): Promise<void> {
+    const tableCfg = tableGetConfig('devices');
+    try {
+        await updateItem(tableCfg.tableName, { pid, fingerprint: REFUSED_DEVICE_PREFIX + deviceFingerprint },
+            'SET userAgent = :ua, lastRefusedAt = :now, lastRefusedHost = :host, firstRefusedAt = if_not_exists(firstRefusedAt, :now), #ttl = :ttl ADD attempts :one',
+            { ':ua': (userAgent || '').slice(0, 512), ':now': now, ':host': host, ':ttl': Math.floor((now + REFUSED_DEVICE_RETENTION_MS) / 1000), ':one': 1 },
+            { '#ttl': 'ttl' }, process.env.AUTH_ROLE_ARN!, oidcToken);
+    } catch (err) {
+        console.error(`DEVICE LIMIT [pid=${pid}]: couldn't record refused device:`, err);
+    }
+}
+
 /**
  * @function deviceLimit
  * @description How many devices a participant may use on an app, or undefined when the app doesn't limit
@@ -367,7 +390,8 @@ export function deviceLimit(entry: any, authData: any, pid: string, host: string
  * @param {string} host - The host.
  * @param {string} deviceFingerprint - The device fingerprint.
  * @param {string} userAgent - The device's user agent, shown to admins.
- * @param {boolean} checkOnly - Only report whether the device would fit; don't record anything.
+ * @param {boolean} checkOnly - Only report whether the device would fit; don't claim a slot. A refusal is
+ *                              still recorded for the admin sign-in panel.
  * @returns {Promise<boolean>} True if the device may use the app.
  */
 export async function claimDeviceSlot(entry: any, authData: any, pid: string, host: string, deviceFingerprint: string, userAgent: string | undefined, oidcToken?: string, checkOnly = false): Promise<boolean> {
@@ -391,9 +415,18 @@ export async function claimDeviceSlot(entry: any, authData: any, pid: string, ho
     const holding = devices.filter((d: any) => d.apps?.[host]).length;
     if (holding >= limit) {
         console.log(`DEVICE LIMIT [pid=${pid}]: ${holding}/${limit} devices already hold ${host}; refusing new device`);
+        await recordRefusedDevice(pid, host, deviceFingerprint, userAgent, now, oidcToken);
         return false;
     }
     if (checkOnly) return true;
+
+    // Once the browser holds the app it was refused for, its refusal is no longer news.
+    const refusal = devices.find((d: any) => d.fingerprint === REFUSED_DEVICE_PREFIX + deviceFingerprint);
+    const clearRefusal = async () => {
+        if (refusal?.lastRefusedHost !== host) return;
+        await deleteOneWithSort(tableCfg.tableName, tableCfg.pk, pid, tableCfg.sk, refusal.fingerprint, process.env.AUTH_ROLE_ARN!, oidcToken)
+            .catch((err: unknown) => console.error(`DEVICE LIMIT [pid=${pid}]: couldn't clear refused device:`, err));
+    };
 
     const slot = { firstSeenAt: now, lastSeenAt: now };
     if (!device) {
@@ -407,6 +440,7 @@ export async function claimDeviceSlot(entry: any, authData: any, pid: string, ho
                 apps: { [host]: slot },
             }, 'attribute_not_exists(fingerprint)', undefined, process.env.AUTH_ROLE_ARN!, oidcToken);
             console.log(`DEVICE LIMIT [pid=${pid}]: new device holds ${host} (${holding + 1}/${limit})`);
+            await clearRefusal();
             return true;
         } catch (err) {
             // Another request created the device first; add the slot to it below.
@@ -417,6 +451,7 @@ export async function claimDeviceSlot(entry: any, authData: any, pid: string, ho
         'SET apps.#h = if_not_exists(apps.#h, :slot), lastSeenAt = :now', { ':slot': slot, ':now': now }, { '#h': host },
         process.env.AUTH_ROLE_ARN!, oidcToken);
     console.log(`DEVICE LIMIT [pid=${pid}]: device now holds ${host} (${holding + 1}/${limit})`);
+    await clearRefusal();
     return true;
 }
 
@@ -1383,16 +1418,17 @@ export async function verificationEmailCallback(pid: string, hash: string, host:
 /**
  * @async
  * @function signInOptions
- * @description What the login page should offer on this app: passkey and/or emailed code.
- *              Apps on 'email' never touch the passkey tables.
+ * @description What the login page should offer on this app: passkey and/or emailed code, plus this browser's
+ *              code for the device-limit screen. Apps on 'email' never touch the passkey tables.
  */
-async function signInOptions(entry: any, authData: any, pid: string, host: string, oidcToken?: string): Promise<{ authMode: string, userVerification: string, emailSignIn: boolean, hasPasskey: boolean }> {
+async function signInOptions(entry: any, authData: any, pid: string, host: string, deviceFingerprint: string, oidcToken?: string): Promise<{ authMode: string, userVerification: string, emailSignIn: boolean, hasPasskey: boolean, browserCode: string }> {
     const authMode = entry.authMode || 'email';
     return {
         authMode,
         userVerification: entry.userVerification === 'required' ? 'required' : 'preferred',
         emailSignIn: emailSignInAllowed(entry, authData, pid, host),
         hasPasskey: passkeysEnabled(entry) ? await hasPasskeys(pid, oidcToken) : false,
+        browserCode: browserCode(deviceFingerprint),
     };
 }
 
@@ -1511,19 +1547,19 @@ export async function verificationCheck(pid: string, hash: string, host: string,
                 deviceFingerprint,
                 process.env.AUTH_ROLE_ARN!
             );
-            return { ...(await determineVerificationStatusResponse()), ...(await signInOptions(entry, data, pid, host)) };
+            return { ...(await determineVerificationStatusResponse()), ...(await signInOptions(entry, data, pid, host, deviceFingerprint)) };
         }
 
         // Only accept sessions whose trust level meets what this app requires.
         if (!usesSilentSessions && !meetsTrust(session, requiredTrustLevel(entry, data, pid, host))) {
             console.log(`VERIFICATION CHECK [pid=${pid}]: Session trust level below what this host requires, treating as unauthenticated`);
-            return { ...(await determineVerificationStatusResponse()), ...(await signInOptions(entry, data, pid, host)) };
+            return { ...(await determineVerificationStatusResponse()), ...(await signInOptions(entry, data, pid, host, deviceFingerprint)) };
         }
 
 
         if (!(await claimDeviceSlot(entry, data, pid, host, deviceFingerprint, userAgent, oidcToken))) {
             console.log(`VERIFICATION CHECK [pid=${pid}]: Active session found, but this device is over the device limit`);
-            return { status: 'device-limit-reached', ...(await signInOptions(entry, data, pid, host)) };
+            return { status: 'device-limit-reached', ...(await signInOptions(entry, data, pid, host, deviceFingerprint)) };
         }
 
         console.log(`VERIFICATION CHECK [pid=${pid}]: Active session found, returning authenticated state`);
@@ -1538,7 +1574,7 @@ export async function verificationCheck(pid: string, hash: string, host: string,
     }
 
     console.log(`VERIFICATION CHECK [pid=${pid}]: No session found, pending verification`);
-    return { ...(await determineVerificationStatusResponse()), ...(await signInOptions(entry, data, pid, host)) };
+    return { ...(await determineVerificationStatusResponse()), ...(await signInOptions(entry, data, pid, host, deviceFingerprint)) };
 }
 
 /**

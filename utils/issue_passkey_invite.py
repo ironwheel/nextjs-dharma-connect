@@ -3,7 +3,7 @@
 Issue a single-use passkey enrollment invite directly in DynamoDB and print its link.
 
 For bootstrapping: the first sys admin uses this to enroll before student-manager (which issues invites
-normally) requires a passkey. The link is printed, not emailed; open it on the device you want to enroll.
+normally) requires a passkey. The link is printed, not emailed; open it in the browser you want to enroll.
 
 Reads APP_ACCESS_JSON and table names from the API's env file. The invite matches what the API's
 passkeyInviteSend writes: only a SHA-256 hash of the token is stored, and it expires after --hours.
@@ -117,7 +117,7 @@ def main():
     secret = entry.get("secret", "none")
     app_hash = "none" if secret == "none" else hmac.new(bytes.fromhex(secret), args.pid.encode("utf-8"), hashlib.sha256).hexdigest()
     print(f"Invite for {args.pid} on {host}, expires {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(expires_ms / 1000))}")
-    print("Open this link once, on the device you want to enroll. It works only once; don't share it.")
+    print("Open this link once, in the browser (and browser profile) the participant will use for the app. It works only once; don't share it.")
     print(f"https://{host}/login?pid={args.pid}&hash={app_hash}&invite={token}")
 
 

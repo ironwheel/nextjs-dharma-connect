@@ -189,7 +189,7 @@ Deploy notes:
 - **Self-limits:** admins can't raise their own `maxDevices` (from Phase 1a).
 
 Deploy notes:
-- Table `devices` (`DYNAMODB_TABLE_DEVICES`): pk `pid`, sk `fingerprint`, no TTL.
+- Table `devices` (`DYNAMODB_TABLE_DEVICES`): pk `pid`, sk `fingerprint`. TTL on `ttl`, used only by refusal records; see "Browser codes" below.
 - The auth role needs Get/Put/Delete/Query on it, plus UpdateItem (a separate `DevicesUpdate` statement).
 - Add `POST/auth/deviceList` and `POST/auth/deviceRemove` to the student-manager actions profile ahead of the admin UI.
 - Turn limits on at rollout by adding `"maxDevices": 1` to each coordinator app entry and `"maxDevices": 2` to
@@ -209,7 +209,7 @@ Deploy notes:
 - **Passkey sign-in** (the participant has a passkey): "Sign in with passkey", with a hint about using a phone,
   and "Email me a code instead" only when emailed codes are allowed.
 - **Needs an invite** (`passkey-required`, no passkey, no fallback): explains that an admin must send an invitation.
-- **Device limit reached**: explains that an admin must remove a device or allow another.
+- **Device limit reached**: says this browser isn't the one set up for the app, and shows its browser code.
 - **Emailed code** (unchanged UI): for `email` apps, for fallback users, or when the check can't load. A code
   refused for the device limit, or because emailed codes are off, switches to the matching screen.
 
@@ -244,6 +244,29 @@ The text is English, like the existing screen. Translations can move to prompts 
   admin. It reads `APP_ACCESS_JSON` and table names from the API env file.
 - **Still to do:** batch invites, and the sys-admin console deployment (auditor records, restricted grants,
   auditor invites with the auditor SMTP sender, and auditor passkey and device management).
+
+### Browser codes and refused browsers (done in this change)
+
+The first enrollments showed that people don't think of a second Chrome profile, or a link opening in their
+default browser, as a "different device". Web pages can't see the browser profile, so the system names
+browsers instead:
+- **Browser code:** four readable characters derived from the device fingerprint (`browserCode` in `device.ts`).
+  `verificationCheck` returns it, and the login page's device-limit screen shows it. `deviceList` returns it for
+  each device, and the Sign-in panel shows it next to each browser, so an admin can match what the person sees.
+- **Refused browsers:** when `claimDeviceSlot` refuses a browser (including enrollment's check-only step), it
+  records the refusal in the `devices` table under `refused#<fingerprint>`, with user agent, app, first and last
+  time, and attempt count. These records hold no slots. `deviceList` returns refusals from the last 7 days as
+  `refused`, and `signInSummary` returns them as `refusedBrowsers`. The panel's "Recently refused" table says
+  when a refused browser is the same kind as one that holds a slot (probably another profile, a private window or
+  cleared cookies). The refusal record is deleted when that browser takes the slot it was refused for, or when
+  the browser is removed. `deviceRemove` with a `refused#` fingerprint dismisses just the refusal.
+- **Wording:** the login page, the invite email and the panel say "browser", and tell people that each Chrome or
+  Edge profile and each private window counts separately.
+
+Deploy notes:
+- No new permissions: the auth role already has UpdateItem, Query and DeleteItem on `devices`.
+- TTL on the `devices` table, attribute `ttl` (turned on). Refusal records set it to 7 days ahead; device
+  records have none and are unaffected. Without TTL, old refusals would stay in the table but not be shown.
 
 ### Phase 4: rollout
 
