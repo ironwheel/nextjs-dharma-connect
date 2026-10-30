@@ -9,7 +9,7 @@ import axios from 'axios';
 import nodemailer from 'nodemailer';
 import { tableGetConfig } from './tableConfig';
 import { listAllFiltered, listAll, getOne, putOne, putOneWithCondition, updateItem, getOneWithSort, deleteOne, deleteOneWithSort, queryByPartition } from './dynamoClient';
-import { noteSignIn } from './activity';
+import { accessChanges, noteAdminAction, noteSignIn } from './activity';
 import crypto from 'crypto';
 import { browserCode } from './device';
 
@@ -2091,14 +2091,15 @@ export async function getAuthList(callerPid: string, oidcToken?: string): Promis
  *              exceptions (maxPasskeys, config[host].maxDevices, config[host].emailFallback) always keep their
  *              stored values here; they change only through setSignInLimits. Only sys admins may grant or change
  *              restricted hosts; for anyone else the stored restricted grants and settings are kept as they are,
- *              since getAuthList never showed them to the caller.
+ *              since getAuthList never showed them to the caller. Changes are logged to the activity log.
  * @param {string} id - The auth record ID (student ID or 'default')
  * @param {any} authRecord - The auth record data to save
  * @param {string} callerPid - Participant ID of the admin making the request.
+ * @param {string} host - The host of the calling app.
  * @returns {Promise<void>} Resolves when the record is saved
  * @throws {Error} AUTH_RESTRICTED_HOST_SYS_ADMIN_ONLY if a non-sys-admin tries to grant a restricted host.
  */
-export async function putAuthItem(id: string, authRecord: any, callerPid: string, oidcToken?: string): Promise<void> {
+export async function putAuthItem(id: string, authRecord: any, callerPid: string, host: string, oidcToken?: string): Promise<void> {
     const tableCfg = tableGetConfig('auth');
     const stored = await getOne(tableCfg.tableName, tableCfg.pk, id, process.env.AUTH_ROLE_ARN!, oidcToken) || {};
     const sysAdmin = isSysAdmin(callerPid);
@@ -2127,6 +2128,15 @@ export async function putAuthItem(id: string, authRecord: any, callerPid: string
     }
 
     await putOne(tableCfg.tableName, authRecord, process.env.AUTH_ROLE_ARN!, oidcToken);
+
+    noteAdminAction(callerPid, id, host, async () => {
+        // A student without their own record was using the default record, so that's what changed.
+        const before = Object.keys(stored).length > 0
+            ? stored
+            : await getOne(tableCfg.tableName, tableCfg.pk, 'default', process.env.AUTH_ROLE_ARN!, oidcToken);
+        const changes = accessChanges(before, authRecord, restrictedHosts, SIGN_IN_LIMIT_HOST_FIELDS);
+        return changes && { type: 'auth.accessChanged', summary: 'changed app access', details: changes };
+    }, oidcToken);
 }
 
 // Sign-in limits and exceptions. They are set only through setSignInLimits, never by putAuthItem.

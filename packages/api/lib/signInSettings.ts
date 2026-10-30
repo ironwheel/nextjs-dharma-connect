@@ -8,6 +8,7 @@
  */
 import { tableGetConfig } from './tableConfig';
 import { getOne, putOne } from './dynamoClient';
+import { noteAdminAction } from './activity';
 import {
     assertCanManageParticipant,
     deviceLimit,
@@ -81,26 +82,49 @@ function validLimit(value: unknown): value is number {
 }
 
 /**
+ * @function limitChanges
+ * @description What changed between two auth records, in words, for the activity log. Compares the values that
+ *              apply, so clearing an override reads as a change to the default. Restricted apps are left out.
+ */
+function limitChanges(before: any, after: any): string[] {
+    const changes: string[] = [];
+    const passkeys = (r: any) => r.maxPasskeys ?? DEFAULT_MAX_PASSKEYS;
+    if (passkeys(before) !== passkeys(after)) changes.push(`max passkeys from ${passkeys(before)} to ${passkeys(after)}`);
+
+    const restricted = getRestrictedHosts();
+    for (const entry of parseAccessList().filter((e: any) => !restricted.includes(e.host))) {
+        const app = entry.host.split('.')[0];
+        const browsers = (r: any) => r.config?.[entry.host]?.maxDevices ?? entry.maxDevices ?? 'no limit';
+        const fallback = (r: any) => r.config?.[entry.host]?.emailFallback === true;
+        if (browsers(before) !== browsers(after)) changes.push(`${app} browsers from ${browsers(before)} to ${browsers(after)}`);
+        if (fallback(before) !== fallback(after)) changes.push(`${app} email fallback ${fallback(after) ? 'on' : 'off'}`);
+    }
+    return changes;
+}
+
+/**
  * @async
  * @function setSignInLimits
  * @description Sets or clears a participant's sign-in limits and exceptions. `null` clears an override.
  *              Admins other than sys admins can't change their own. A participant without their own auth
  *              record gets one copied from 'default' first, so their app access doesn't change.
+ *              Changes are logged to the activity log.
  * @param {string} callerPid - The admin making the request.
  * @param {string} targetPid - The participant.
  * @param {object} changes - { maxPasskeys?: number | null, maxDevices?: { [host]: number | null },
  *                           emailFallback?: { [host]: boolean | null } }
+ * @param {string} host - The host of the calling app.
  * @throws {Error} AUTH_CANT_CHANGE_OWN_LIMITS, AUTH_INVALID_LIMIT, UNKNOWN_HOST, AUTH_RESTRICTED_HOST_SYS_ADMIN_ONLY
  */
-export async function setSignInLimits(callerPid: string, targetPid: string, changes: any, oidcToken?: string): Promise<{ success: boolean }> {
+export async function setSignInLimits(callerPid: string, targetPid: string, changes: any, host: string, oidcToken?: string): Promise<{ success: boolean }> {
     await assertCanManageParticipant(callerPid, targetPid, oidcToken);
     if (callerPid === targetPid && !isSysAdmin(callerPid)) throw new Error('AUTH_CANT_CHANGE_OWN_LIMITS');
 
     const knownHosts: string[] = parseAccessList().map((e: any) => e.host);
     const restricted = getRestrictedHosts();
-    const checkHost = (host: string) => {
-        if (!knownHosts.includes(host)) throw new Error('UNKNOWN_HOST');
-        if (restricted.includes(host) && !isSysAdmin(callerPid)) throw new Error('AUTH_RESTRICTED_HOST_SYS_ADMIN_ONLY');
+    const checkHost = (limitHost: string) => {
+        if (!knownHosts.includes(limitHost)) throw new Error('UNKNOWN_HOST');
+        if (restricted.includes(limitHost) && !isSysAdmin(callerPid)) throw new Error('AUTH_RESTRICTED_HOST_SYS_ADMIN_ONLY');
     };
 
     const { own } = await authRecords(targetPid, oidcToken);
@@ -113,30 +137,35 @@ export async function setSignInLimits(callerPid: string, targetPid: string, chan
         if (!fallback) throw new Error('AUTH_CANT_FIND_DEFAULT_PERMITTED_HOSTS');
         record = { id: targetPid, 'permitted-hosts': [...(fallback['permitted-hosts'] || [])], config: JSON.parse(JSON.stringify(fallback.config || {})) };
     }
+    const before = JSON.parse(JSON.stringify(record));
 
     if ('maxPasskeys' in (changes || {})) {
         if (changes.maxPasskeys === null) delete record.maxPasskeys;
         else if (validLimit(changes.maxPasskeys)) record.maxPasskeys = changes.maxPasskeys;
         else throw new Error('AUTH_INVALID_LIMIT');
     }
-    for (const [host, value] of Object.entries(changes?.maxDevices || {})) {
-        checkHost(host);
+    for (const [limitHost, value] of Object.entries(changes?.maxDevices || {})) {
+        checkHost(limitHost);
         if (value === null) {
-            if (record.config[host]) delete record.config[host].maxDevices;
+            if (record.config[limitHost]) delete record.config[limitHost].maxDevices;
         } else if (validLimit(value)) {
-            record.config[host] = { ...(record.config[host] || {}), maxDevices: value };
+            record.config[limitHost] = { ...(record.config[limitHost] || {}), maxDevices: value };
         } else {
             throw new Error('AUTH_INVALID_LIMIT');
         }
     }
-    for (const [host, value] of Object.entries(changes?.emailFallback || {})) {
-        checkHost(host);
-        if (value === true) record.config[host] = { ...(record.config[host] || {}), emailFallback: true };
-        else if (record.config[host]) delete record.config[host].emailFallback;
+    for (const [limitHost, value] of Object.entries(changes?.emailFallback || {})) {
+        checkHost(limitHost);
+        if (value === true) record.config[limitHost] = { ...(record.config[limitHost] || {}), emailFallback: true };
+        else if (record.config[limitHost]) delete record.config[limitHost].emailFallback;
     }
 
     const authCfg = tableGetConfig('auth');
     await putOne(authCfg.tableName, record, process.env.AUTH_ROLE_ARN!, oidcToken);
     console.log(`setSignInLimits: ${targetPid} updated by ${callerPid}: ${JSON.stringify(changes)}`);
+    noteAdminAction(callerPid, targetPid, host, () => {
+        const described = limitChanges(before, record);
+        return described.length ? { type: 'auth.signInLimitsChanged', summary: `changed ${described.join(', ')}` } : null;
+    }, oidcToken);
     return { success: true };
 }

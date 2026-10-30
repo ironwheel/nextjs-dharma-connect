@@ -408,7 +408,7 @@ async function dispatchAuth(
         if (!authRecord || !authRecord.id) {
           return res.status(400).json({ error: 'Missing required parameters: authRecord with id' });
         }
-        await putAuthItem(authRecord.id, authRecord, pid, oidcToken);
+        await putAuthItem(authRecord.id, authRecord, pid, host, oidcToken);
         return res.status(200).json({ success: true });
       case 'linkEmailSend':
         const { linkHost, targetUserPid } = req.body;
@@ -463,7 +463,7 @@ async function dispatchAuth(
           if (!targetUserPid || !linkHost) {
             return res.status(400).json({ error: 'Missing required parameters: targetUserPid, linkHost' });
           }
-          const result = await passkeyInviteSend(pid, targetUserPid, linkHost, oidcToken);
+          const result = await passkeyInviteSend(pid, targetUserPid, linkHost, host, oidcToken);
           return res.status(200).json(result);
         }
       case 'passkeyRegisterOptions':
@@ -549,7 +549,7 @@ async function dispatchAuth(
           if (!targetUserPid || !changes) {
             return res.status(400).json({ error: 'Missing required parameters: targetUserPid, changes' });
           }
-          const result = await setSignInLimits(pid, targetUserPid, changes, oidcToken);
+          const result = await setSignInLimits(pid, targetUserPid, changes, host, oidcToken);
           return res.status(200).json(result);
         }
       default:

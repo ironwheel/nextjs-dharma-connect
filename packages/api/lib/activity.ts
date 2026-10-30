@@ -8,7 +8,7 @@
 import { createHash } from 'crypto';
 import { waitUntil } from '@vercel/functions';
 import { tableGetConfig } from './tableConfig';
-import { getOne, putOneWithCondition } from './dynamoClient';
+import { getOne, putOne, putOneWithCondition } from './dynamoClient';
 
 const RETENTION_DAYS = 365;
 /** Detail keys holding email addresses: excluded from searchText, masked in the UI. */
@@ -232,4 +232,137 @@ async function recordSignIn(
     `signin|${markerKey}`
   );
   await putOneWithCondition(activity.tableName, item, 'attribute_not_exists(id)', undefined, authRole, oidcToken);
+}
+
+/** Only this app (actions profile) logs admin actions. The sys-admin console has its own, so it logs nothing. */
+const ADMIN_ACTION_APP = 'student-manager';
+
+export interface AdminAction {
+  type: string;
+  /** Follows the admin's name, e.g. `sent a passkey invite`. Must not contain email addresses. */
+  summary: string;
+  details?: Record<string, unknown>;
+}
+
+/**
+ * @function noteAdminAction
+ * @description Logs an admin's change to a student, naming the admin in the summary. Returns immediately:
+ * the write runs after the response is sent (waitUntil) and failures are only logged. `getAction` runs
+ * there too, and returns null if nothing worth logging changed. Nothing is written for the sys-admin
+ * console, for auditors, or under the local auditor table swap, so auditors never reach the log.
+ * Other admins can read the log, so `getAction` must leave out restricted apps.
+ */
+export function noteAdminAction(
+  callerPid: string,
+  targetPid: string,
+  host: string,
+  getAction: () => AdminAction | null | Promise<AdminAction | null>,
+  oidcToken?: string
+): void {
+  const at = new Date();
+  waitUntil(
+    recordAdminAction(callerPid, targetPid, host, getAction, at, oidcToken).catch((err) =>
+      console.warn(`noteAdminAction: failed to log an action for ${targetPid}:`, err)
+    )
+  );
+}
+
+async function recordAdminAction(
+  callerPid: string,
+  targetPid: string,
+  host: string,
+  getAction: () => AdminAction | null | Promise<AdminAction | null>,
+  at: Date,
+  oidcToken?: string
+): Promise<void> {
+  const action = await getAction();
+  if (!action) return;
+
+  const students = tableGetConfig('students');
+  // The table swap points students at the auditors table, so auditors would look like students below.
+  if (students.tableName === tableGetConfig('auditors').tableName) return;
+
+  const authRole = process.env.AUTH_ROLE_ARN!;
+  const appActions = tableGetConfig('app.actions');
+  const app = await getOne(appActions.tableName, appActions.pk, host, authRole, oidcToken);
+  if (app?.actionsProfile !== ADMIN_ACTION_APP) return;
+
+  // Auditors aren't in the students table, so requiring both here keeps them out of the log.
+  const [target, caller] = await Promise.all(
+    [targetPid, callerPid].map((pid) => getOne(students.tableName, students.pk, pid, authRole, oidcToken))
+  );
+  if (!target || !caller) return;
+
+  const fullName = (s: any) => [s.first, s.last].filter(Boolean).join(' ').trim();
+  const item = activityRecord(
+    {
+      type: action.type,
+      source: ADMIN_ACTION_APP,
+      studentId: targetPid,
+      studentName: fullName(target) || undefined,
+      summary: `${fullName(caller) || callerPid} ${action.summary}`,
+      details: { ...action.details, byId: callerPid },
+    },
+    at,
+    `admin|${action.type}|${targetPid}|${at.toISOString()}|${action.summary}`
+  );
+  const activity = tableGetConfig('activity-log');
+  await putOne(activity.tableName, item, authRole, oidcToken);
+}
+
+function isUnset(value: unknown): boolean {
+  return value === undefined || value === null || value === false || value === '' || (Array.isArray(value) && value.length === 0);
+}
+
+function sameSetting(a: unknown, b: unknown): boolean {
+  if (isUnset(a) || isUnset(b)) return isUnset(a) && isUnset(b);
+  const canonical = (v: unknown) => JSON.stringify(Array.isArray(v) ? [...v].sort() : v);
+  return canonical(a) === canonical(b);
+}
+
+/** Lists can hold long or private values, so only simple settings show their values. */
+function describeSetting(name: string, before: unknown, after: unknown): string {
+  const isSimple = (v: unknown) => typeof v !== 'object' || v === null;
+  return isSimple(before) && isSimple(after)
+    ? `${name}: ${before ?? 'unset'} → ${after ?? 'unset'}`
+    : `${name} changed`;
+}
+
+/**
+ * @function accessChanges
+ * @description The difference between two auth records, for the activity log: apps added and removed, and
+ * per-app settings changed. Apps show as the host's first label. Restricted hosts and `ignoredSettings` are
+ * left out. Returns null if nothing else changed.
+ */
+export function accessChanges(
+  before: any,
+  after: any,
+  restrictedHosts: string[],
+  ignoredSettings: string[]
+): { added?: string[]; removed?: string[]; settings?: string[] } | null {
+  const appName = (host: string) => host.split('.')[0];
+  const visible = (host: string) => !restrictedHosts.includes(host);
+  const beforeHosts: string[] = (before?.['permitted-hosts'] || []).filter(visible);
+  const afterHosts: string[] = (after?.['permitted-hosts'] || []).filter(visible);
+  const added = afterHosts.filter((h) => !beforeHosts.includes(h)).map(appName).sort();
+  const removed = beforeHosts.filter((h) => !afterHosts.includes(h)).map(appName).sort();
+
+  const settings: string[] = [];
+  const hosts = new Set([...Object.keys(before?.config || {}), ...Object.keys(after?.config || {})]);
+  for (const host of Array.from(hosts).filter(visible).sort()) {
+    const was = before?.config?.[host] || {};
+    const now = after?.config?.[host] || {};
+    const keys = new Set([...Object.keys(was), ...Object.keys(now)]);
+    for (const key of Array.from(keys).sort()) {
+      if (ignoredSettings.includes(key) || sameSetting(was[key], now[key])) continue;
+      settings.push(describeSetting(`${appName(host)}.${key}`, was[key], now[key]));
+    }
+  }
+
+  if (!added.length && !removed.length && !settings.length) return null;
+  return {
+    ...(added.length ? { added } : {}),
+    ...(removed.length ? { removed } : {}),
+    ...(settings.length ? { settings } : {}),
+  };
 }
