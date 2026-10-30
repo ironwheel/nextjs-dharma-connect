@@ -72,6 +72,7 @@ export async function signInSummary(callerPid: string, targetPid: string, oidcTo
         maxPasskeys: typeof own?.maxPasskeys === 'number' ? own.maxPasskeys : DEFAULT_MAX_PASSKEYS,
         maxPasskeysOverride: typeof own?.maxPasskeys === 'number' ? own.maxPasskeys : null,
         canEditLimits: sysAdmin || callerPid !== targetPid,
+        callerIsSysAdmin: sysAdmin,
     };
 }
 

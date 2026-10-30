@@ -268,6 +268,25 @@ Deploy notes:
 - TTL on the `devices` table, attribute `ttl` (turned on). Refusal records set it to 7 days ahead; device
   records have none and are unaffected. Without TTL, old refusals would stay in the table but not be shown.
 
+### App access pools (done in this change)
+
+Sharing a name made it easy to give an app to the wrong student, so the student-manager modal now checks a pool
+before an app can be added. This is a guard against mistakes, not a security boundary: it runs only in
+student-manager, when access is granted, and neither the API nor sign-in checks it.
+
+- **Rules:** the `appAccessPools` config item is a map of app name (the host's first label) to pool name, with a
+  `default` entry for apps not listed. An app every student gets should use a pool that matches everyone.
+- **Check:** `appAccessCheck` in student-manager evaluates the pool with `checkEligibility` against the full student
+  record. An app the student already holds is not checked, so it can be removed but not added back once saved.
+- **In the modal:** apps the student doesn't qualify for have a disabled checkbox, under the note "Does not meet
+  restricted app access rules". If the rules, the pool or the full student record can't be loaded, the note is
+  "Couldn't check access rules" and new grants stay disabled.
+- **Sys admins:** `signInSummary` returns `callerIsSysAdmin`, and for sys admins the checkboxes stay enabled with the
+  note still shown. Auditors have no program history, so they would otherwise fail any pool under the table swap.
+- The modal also shows the student's city, state and country next to their name.
+
+Not to be confused with `"restricted": true` in `APP_ACCESS_JSON`, which marks sys-admin-only apps.
+
 ### Phase 4: rollout
 
 1. The sys admin enrolls with the script and invites the other student-manager admins. Staff apps move to

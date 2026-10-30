@@ -19,6 +19,7 @@ import {
     authGetViewsProfiles,
     authPutAuthItem,
     authGetConfigValue,
+    checkEligibility,
     Pool,
     VersionBadge,
     ActivityLog
@@ -138,9 +139,24 @@ const buildEventAccessOptions = (events: Event[]): { codes: string[]; names: Rec
 let allStudents: Student[] = [];
 let allAuthRecords: AuthRecord[] = [];
 let allPools: Pool[] = [];
+let appAccessPools: Record<string, string> | null = null;
 let eligibleStudents: Student[] = [];
 
 let allViewsProfiles: ViewsProfile[] = [];
+
+type AppAccessCheck = 'allowed' | 'blocked' | 'unknown';
+
+/**
+ * Whether a student meets the pool for an app, from the appAccessPools config entry: the app's own pool,
+ * else the default pool. 'unknown' means the check couldn't be made.
+ */
+const appAccessCheck = (host: string, student: Student | null, studentLoaded: boolean): AppAccessCheck => {
+    if (!appAccessPools || !student || !studentLoaded) return 'unknown';
+    const pool = appAccessPools[host.split('.')[0]] ?? appAccessPools.default;
+    if (!pool) return 'allowed';
+    if (!allPools.some(p => p.name === pool)) return 'unknown';
+    return checkEligibility(pool, student, pool, allPools) ? 'allowed' : 'blocked';
+};
 
 
 // Language options for the dropdown
@@ -172,6 +188,8 @@ const Home = () => {
     const [currentUserName, setCurrentUserName] = useState<string>("Unknown");
     const [canWriteViews, setCanWriteViews] = useState<boolean>(true);
     const [emailDisplayPermission, setEmailDisplayPermission] = useState<boolean>(false);
+    const [callerIsSysAdmin, setCallerIsSysAdmin] = useState<boolean>(false);
+    const [studentRecordLoaded, setStudentRecordLoaded] = useState<boolean>(false);
 
     // Dynamic config schema state
     const [configSchema, setConfigSchema] = useState<{
@@ -616,10 +634,12 @@ const Home = () => {
 
                 // Fetch full student record to get faf field
                 let fullStudent = student;
+                let recordLoaded = false;
                 try {
                     const fullRecord = await getTableItemOrNull('students', rowData.studentId, pid as string, hash as string);
                     if (fullRecord && !('redirected' in fullRecord)) {
                         fullStudent = { ...student, ...fullRecord };
+                        recordLoaded = true;
                     }
                 } catch (error) {
                     console.error('Error fetching full student record:', error);
@@ -627,6 +647,7 @@ const Home = () => {
                 }
 
                 setSelectedStudent(fullStudent);
+                setStudentRecordLoaded(recordLoaded);
                 setOriginalStudent({ ...fullStudent }); // Store a copy of the original state
                 setSelectedAuthRecord(rowData.authRecord);
                 const permittedHosts = Array.isArray(rowData.authRecord?.['permitted-hosts'])
@@ -898,10 +919,12 @@ const Home = () => {
 
             // Fetch full student record to get faf field
             let fullStudent = student;
+            let recordLoaded = false;
             try {
                 const fullRecord = await getTableItemOrNull('students', authRecord.id, pid as string, hash as string);
                 if (fullRecord && !('redirected' in fullRecord)) {
                     fullStudent = { ...student, ...fullRecord };
+                    recordLoaded = true;
                 }
             } catch (error) {
                 console.error('Error fetching full student record:', error);
@@ -919,6 +942,7 @@ const Home = () => {
             setFafSearchResults([]);
 
             setSelectedStudent(fullStudent);
+            setStudentRecordLoaded(recordLoaded);
             setOriginalStudent({ ...fullStudent }); // Store a copy of the original state
             setSelectedAuthRecord(authRecord);
             setFormData({
@@ -1424,11 +1448,12 @@ const Home = () => {
                 setLoadingProgress({ current: 0, total: 1, message: 'Starting data load...' });
 
                 // Fetch all data in parallel
-                const [students, authRecordsResult, pools, viewsProfiles] = await Promise.all([
+                const [students, authRecordsResult, pools, viewsProfiles, accessPools] = await Promise.all([
                     fetchStudents(),
                     fetchAuthRecords(),
                     fetchPools(),
-                    fetchViewsProfiles()
+                    fetchViewsProfiles(),
+                    fetchConfig('appAccessPools')
                 ]);
 
                 // Defensive coding: ensure we have arrays before processing
@@ -1448,6 +1473,7 @@ const Home = () => {
                 allStudents = studentsArray;
                 allAuthRecords = authRecordsArray;
                 allPools = poolsArray;
+                appAccessPools = accessPools?.value ?? null;
                 allViewsProfiles = viewsProfilesArray;
 
                 console.log('Data loaded - Students:', studentsArray.length, 'Auth Records:', authRecordsArray.length);
@@ -1573,6 +1599,22 @@ const Home = () => {
     }
 
     // Main render
+
+    const studentLocation = [selectedStudent?.city, selectedStudent?.stateProvince, selectedStudent?.country].filter(Boolean).join(', ');
+
+    // Apps the student already holds stay editable, so a grant from before the rules can still be removed
+    const storedHosts = selectedAuthRecord?.['permitted-hosts'] || [];
+    const appAccessChecks: Record<string, AppAccessCheck> = Object.fromEntries(
+        (showEditModal ? availableHosts : []).map(host => [
+            host,
+            storedHosts.includes(host) ? 'allowed' : appAccessCheck(host, selectedStudent, studentRecordLoaded),
+        ])
+    );
+    const appAccessNotes = [
+        ...(Object.values(appAccessChecks).includes('blocked') ? ['Does not meet restricted app access rules'] : []),
+        ...(Object.values(appAccessChecks).includes('unknown') ? ["Couldn't check access rules"] : []),
+    ];
+
     return (
         <>
             <ToastContainer />
@@ -1647,6 +1689,18 @@ const Home = () => {
                                     <Form.Control
                                         type="text"
                                         value={selectedStudent ? `${selectedStudent.first} ${selectedStudent.last}` : ''}
+                                        readOnly
+                                        style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
+                                    />
+                                </Form.Group>
+                            </Col>
+                            <Col md={6}>
+                                <Form.Group className="mb-3">
+                                    <Form.Control
+                                        type="text"
+                                        aria-label="Location"
+                                        value={studentLocation}
+                                        placeholder="No location on file"
                                         readOnly
                                         style={{ backgroundColor: '#2b2b2b', color: 'white', border: '1px solid #555' }}
                                     />
@@ -1977,6 +2031,9 @@ const Home = () => {
                             backgroundColor: '#1a1a1a'
                         }}>
                             <h5 style={{ marginBottom: '20px' }}>Permitted Apps</h5>
+                            {appAccessNotes.map(note => (
+                                <p key={note} style={{ color: '#ffc107', marginBottom: '12px' }}>{note}</p>
+                            ))}
                             <Row>
                                 {availableHosts.map(host => (
                                     <Col md={6} key={host} className="mb-2">
@@ -1984,6 +2041,7 @@ const Home = () => {
                                             type="checkbox"
                                             label={formatDomainForDisplay(host)}
                                             checked={formData.permittedHosts.includes(host)}
+                                            disabled={!callerIsSysAdmin && appAccessChecks[host] !== 'allowed'}
                                             onChange={() => handleTogglePermittedHost(host)}
                                         />
                                     </Col>
@@ -1993,7 +2051,7 @@ const Home = () => {
 
                         {/* Passkeys, devices and sign-in limits (saved on their own) */}
                         {formData.studentId && formData.studentId !== 'default' && (
-                            <SignInPanel studentId={formData.studentId} pid={pid as string} hash={hash as string} />
+                            <SignInPanel studentId={formData.studentId} pid={pid as string} hash={hash as string} onCallerIsSysAdmin={setCallerIsSysAdmin} />
                         )}
 
                         {/* Dynamic App Configuration Sections */}
