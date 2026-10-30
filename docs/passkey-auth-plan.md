@@ -90,7 +90,8 @@ covers other apps, API responses to non-sys-admins, logs, the activity log, docs
   subdomain. It is a restricted app with its own actions profile and AWS role, and only that role can write
   the auditor tables. It replaces running student-manager locally with swapped table env vars.
 - Activity entries for auditors are tagged and hidden from everyone except sys admins. Logs show auditor pids,
-  never emails.
+  never emails. Admin actions taken in the console aren't logged at all: the API logs those only for the
+  `student-manager` actions profile (see `docs/ACTIVITY_LOG.md`).
 
 ## Phases
 

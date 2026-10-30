@@ -16,7 +16,7 @@ import {
 } from '@simplewebauthn/server';
 import { tableGetConfig } from './tableConfig';
 import { getOne, putOne, putOneWithCondition, getOneWithSort, deleteOneWithSort, queryByPartition } from './dynamoClient';
-import { noteSignIn } from './activity';
+import { noteAdminAction, noteSignIn } from './activity';
 import {
     SessionTrustLevel,
     assertHostAccess,
@@ -242,15 +242,17 @@ function notePasskeyAdded(pid: string, clientIp: string | null, oidcToken?: stri
  * @param {string} callerPid - The admin issuing the invite.
  * @param {string} targetPid - The participant to invite.
  * @param {string} linkHost - The app the invite link opens.
+ * @param {string} host - The host of the calling app.
  * @returns {Promise<{ success: boolean, expiresAt: number }>}
  * @throws {Error} AUTH_PASSKEYS_NOT_ENABLED, AUTH_RESTRICTED_HOST_SYS_ADMIN_ONLY, AUTH_PID_NOT_FOUND,
  *                 AUTH_PASSKEY_LIMIT_REACHED, or a link/permission error.
  */
-export async function passkeyInviteSend(callerPid: string, targetPid: string, linkHost: string, oidcToken?: string): Promise<{ success: boolean, expiresAt: number }> {
+export async function passkeyInviteSend(callerPid: string, targetPid: string, linkHost: string, host: string, oidcToken?: string): Promise<{ success: boolean, expiresAt: number }> {
     const entry = parseAccessList().find((e: any) => e.host === linkHost);
     if (!entry) throw new Error('UNKNOWN_HOST');
     if (!passkeysEnabled(entry)) throw new Error('AUTH_PASSKEYS_NOT_ENABLED');
-    if (getRestrictedHosts().includes(linkHost) && !isSysAdmin(callerPid)) throw new Error('AUTH_RESTRICTED_HOST_SYS_ADMIN_ONLY');
+    const restricted = getRestrictedHosts().includes(linkHost);
+    if (restricted && !isSysAdmin(callerPid)) throw new Error('AUTH_RESTRICTED_HOST_SYS_ADMIN_ONLY');
 
     const result = await findParticipantForAuth(targetPid, oidcToken);
     // Auditors are managed by sys admins only; to anyone else they don't exist.
@@ -290,6 +292,12 @@ export async function passkeyInviteSend(callerPid: string, targetPid: string, li
         throw new Error('AUTH_INVITE_EMAIL_SEND_FAILED');
     }
     console.log(`passkeyInviteSend: invite issued for ${targetPid} by ${callerPid}, expires ${formatUtc(expiresAt)}`);
+    noteAdminAction(callerPid, targetPid, host, () => ({
+        type: 'auth.passkeyInvited',
+        summary: 'sent a passkey invite',
+        // The log is read by admins who can't see who holds a restricted app.
+        details: restricted ? undefined : { app: linkHost.split('.')[0] },
+    }), oidcToken);
     return { success: true, expiresAt };
 }
 

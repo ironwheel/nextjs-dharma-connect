@@ -65,6 +65,9 @@ Writes are best effort. A failed activity write must never fail the operation it
 | `student.unsubscribed` | unsubscribe (via API), unsub-backlog | Participant unsubscribed from email with the email footer link (`unsub-backlog`: a request made through the legacy unsubscribe page, processed by `utils/process_unsub_backlog.py`) | `email`, `eligibility` (`refuge`, `oath`, `psb`, `amitayus-lung` → bool, shown as ✓/✗), `requestedAt` (backlog only) |
 | `student.resubscribed` | unsubscribe (via API) | Participant re-subscribed with the same link | `email`, `eligibility` |
 | `auth.signIn` | api | Participant signed in to an app selected by `ACTIVITY_LOG_SIGNIN_APPS`: a new email-verified session, or a fresh access token on a new visit with an existing session. Logged once per participant, device and app per 10 minutes. | `app` (actions profile), `method` (`email-verification`, `session`, `silent-session`) |
+| `auth.accessChanged` | student-manager (via API) | An admin changed a student's app access. The summary names the admin. Nothing is logged if nothing changed. | `added`, `removed` (apps), `settings` (per-app settings changed; simple values show before → after, lists only that they changed), `byId` |
+| `auth.passkeyInvited` | student-manager (via API) | An admin sent a student a passkey invite. The summary names the admin. | `app`, `byId` |
+| `auth.signInLimitsChanged` | student-manager (via API) | An admin changed a student's sign-in limits. The summary names the admin and lists the changes: max passkeys, browsers per app, email fallback. | `byId` |
 | `access.rcpLevel` | video-access-sync | Participant gained a new video access level | `level`, `previousLevel` |
 | `sync.run` | any service | Summary of a run that changed something | counts |
 | `sync.blocked` | any service | A run refused to write (safety limit) | counts |
@@ -88,6 +91,12 @@ labels for new types can be added in `packages/sharedFrontend/src/ActivityLog.ts
   on the activity table. The participant's name is looked up best effort with the app's role.
   Concurrent requests from one page load are deduplicated with short-lived marker items in the
   `_dedupe` partition, which the UI never reads.
+- **Admin actions:** the API logs the `auth.*` admin events above after responding (`waitUntil`) with its
+  auth role, so they need no new permissions. They are logged only for requests from the `student-manager`
+  actions profile, so the sys-admin console and `utils/issue_passkey_invite.py` log nothing. Nothing is
+  logged unless both the admin and the student are in the students table, which keeps auditors out, or
+  while that table points at the auditors table (the local table swap). Other admins can read the log, so
+  restricted apps are left out: a change that only touches them logs nothing, and an invite to one logs no app.
 - **Register app:** browsers never write to the table. After saving a registration, the register app calls
   `POST /api/activity/registration` with `{ eventCode }`. The API logs the event for the authenticated
   participant only if their record shows `programs.<eventCode>.join` with a `submitTime` from the last
