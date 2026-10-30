@@ -38,9 +38,11 @@ interface SignInSummary {
     maxPasskeys: number;
     maxPasskeysOverride: number | null;
     canEditLimits: boolean;
+    callerIsSysAdmin?: boolean;
 }
 
 interface SignInPanelProps {
+    onCallerIsSysAdmin?: (isSysAdmin: boolean) => void;
     studentId: string;
     pid: string;
     hash: string;
@@ -126,7 +128,7 @@ const sectionStyle: React.CSSProperties = {
  * @description Shows and edits a student's passkeys, devices and sign-in limits. Changes save immediately,
  *              separately from the edit form's Save.
  */
-export const SignInPanel: React.FC<SignInPanelProps> = ({ studentId, pid, hash }) => {
+export const SignInPanel: React.FC<SignInPanelProps> = ({ studentId, pid, hash, onCallerIsSysAdmin }) => {
     const [summary, setSummary] = useState<SignInSummary | null>(null);
     const [loadError, setLoadError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
@@ -142,6 +144,7 @@ export const SignInPanel: React.FC<SignInPanelProps> = ({ studentId, pid, hash }
             if (!result || result.redirected) return;
             const s = result as SignInSummary;
             setSummary(s);
+            onCallerIsSysAdmin?.(s.callerIsSysAdmin === true);
             setMaxPasskeysInput(s.maxPasskeysOverride === null ? '' : String(s.maxPasskeysOverride));
             setDeviceLimitInputs(Object.fromEntries(s.apps.map(a => [a.host, a.deviceLimitOverride === null ? '' : String(a.deviceLimitOverride)])));
             setFallbackInputs(Object.fromEntries(s.apps.map(a => [a.host, a.emailFallback])));
@@ -149,7 +152,7 @@ export const SignInPanel: React.FC<SignInPanelProps> = ({ studentId, pid, hash }
         } catch (err) {
             setLoadError(errorText(err));
         }
-    }, [studentId, pid, hash]);
+    }, [studentId, pid, hash, onCallerIsSysAdmin]);
 
     useEffect(() => { load(); }, [load]);
 
