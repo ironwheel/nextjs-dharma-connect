@@ -771,13 +771,14 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash, eventCod
 
                 {mode === 'deviceLimit' && (
                     <div style={noticeStyle('warning')}>
-                        <p style={{ fontWeight: 600 }}>This browser can't be used for this app.</p>
+                        <p style={{ fontWeight: 600 }}>You've reached the browser limit for this app.</p>
                         <p style={{ fontSize: '0.875rem', marginTop: '0.25rem' }}>
-                            You're set up for this app in a different browser. Please open this page there instead.
-                            Each Chrome or Edge profile counts as a separate browser, and so does a private window.
+                            Your account can be used for this app in a limited number of browsers, and all of them are in use.
+                            If you already use this app in another browser, please open this page there.
+                            The same browser can count again after its cookies are cleared, in a private window, or in another Chrome or Edge profile.
                         </p>
                         <p style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>
-                            If you need to use this browser, please ask an admin to allow another one
+                            To use this browser, please ask an admin to make room for it
                             {signInOptions?.browserCode ? <>, and tell them this browser's code: <strong style={{ fontFamily: 'monospace', fontSize: '1rem', letterSpacing: '0.1em' }}>{signInOptions.browserCode}</strong></> : null}.
                         </p>
                     </div>
