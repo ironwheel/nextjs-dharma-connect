@@ -42,6 +42,7 @@ import {
 } from 'sharedFrontend';
 
 // Import API actions
+import { applyEmailConditionals } from '../components/emailConditionals';
 import { api, getAllTableItems, getAllTableItemsFiltered, getTableItem, updateTableItem, queryGetTableItems, authGetRegistrationLink } from 'sharedFrontend';
 
 // Import MantraCount component
@@ -1326,6 +1327,15 @@ const HomeContent = () => {
                             pageData = pageData.replace(/<img\b[^>]*\/>/i, '');
                             pageData = pageData.replace(/<img\b[^>]*>\s*(?:<\/img>)?/i, '');
                         }
+
+                        // #if / #else / #endif (same semantics as email-agent); run first so
+                        // macros inside discarded branches are never expanded
+                        pageData = applyEmailConditionals(pageData, {
+                            student,
+                            event: el?.parentEvent,
+                            checkEligibility,
+                            pools,
+                        });
 
                         // Support selected #macros used by email-agent templates
                         if (pageData.includes('#salutation')) {
