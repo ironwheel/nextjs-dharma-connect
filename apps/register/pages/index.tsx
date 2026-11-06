@@ -245,6 +245,34 @@ async function fetchFafAggregatedInstallmentTotals(
     return { offeringsReceivedCents, balanceDueCents, cashDueCents };
 }
 
+/**
+ * Does this person still owe an offering for the event? Applies the same per-presentation
+ * completion rules the routing effect applies to the registrant, so a FAF member is judged
+ * the same way the registrant is.
+ *
+ * Returns false for a person the offer screen could not collect from anyway — no retreat
+ * selections, or selections missing from the event config — since routing them to the offer
+ * screen would only strand them on its configuration error.
+ */
+function personOwesOfferingForEvent(prog: any, event: any): boolean {
+    if (!prog || typeof prog !== 'object') return false;
+    const presentation = event?.config?.offeringPresentation as string | undefined;
+    const offeringHistory = prog?.offeringHistory || {};
+    if (presentation === 'installments' || presentation === 'installmentsTotalOrMore') {
+        const totals = installmentsPersonLineTotals(
+            prog,
+            event,
+            getInstallmentsSubEventNameForEvent(event),
+        );
+        return totals !== null && totals.balanceDueCents > 0;
+    }
+    if (presentation === 'nextAndRemaining') {
+        return offeringSubEventNames(event).some((name) => !offeringHistory[name]);
+    }
+    // Every other presentation is settled by a single offering, matching the registrant's rule.
+    return Object.keys(offeringHistory).length === 0;
+}
+
 const THEMES: { id: ThemeId; label: string; subtitle: string }[] = [
     { id: 'light', label: 'Light', subtitle: 'clean, neutral' },
     { id: 'meadow', label: 'Meadow', subtitle: 'warm, natural' },
@@ -501,6 +529,14 @@ export default function Home() {
     /** When phase is offeringCompleteCold: 'warm' = just completed via Stripe callback this session; 'cold' = loaded with existing offering. */
     const [offeringCompleteVariant, setOfferingCompleteVariant] = useState<'warm' | 'cold'>('cold');
 
+    /**
+     * Whether any joined FAF member still owes an offering. Routing needs this to choose between
+     * the offer screen and the terminal completion card: the registrant can be fully settled while
+     * a FAF member is not, and the offer screen is the only place that balance can be paid.
+     * 'unknown' until the FAF rows have been read.
+     */
+    const [fafOutstanding, setFafOutstanding] = useState<'unknown' | 'none' | 'owing'>('unknown');
+
     /** Installments totals across registrant + joined FAF (loaded async on offering completion screen). */
     const [fafAggregatedInstallments, setFafAggregatedInstallments] = useState<{
         offeringsReceivedCents: number;
@@ -514,6 +550,40 @@ export default function Home() {
     const [testModeClearOfferingHistoryOnly, setTestModeClearOfferingHistoryOnly] = useState(false);
     const [testModeOathEligibility, setTestModeOathEligibility] = useState<'actual' | 'true' | 'false'>('actual');
     const [testModeConfigAccepted, setTestModeConfigAccepted] = useState(false);
+
+    // Resolve whether any joined FAF member still owes an offering, for the routing effect below.
+    // Never resets to 'unknown' once resolved, so a reload after a payment does not re-hold routing.
+    useEffect(() => {
+        if (!data?.student || !data?.event) return;
+        const fafIds = Array.isArray(data.student.faf) ? data.student.faf : [];
+        if (heartGiftMode || fafIds.length === 0 || !eventRequiresOffering(data.event)) {
+            setFafOutstanding('none');
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            let owing = false;
+            for (const fid of fafIds) {
+                try {
+                    const f = await getTableItem('students', fid, studentPid, studentHash);
+                    if (!f || (f as any).redirected) continue;
+                    const fp = (f as any).programs?.[activeEventCode];
+                    // Only a joined FAF member can be offered for (matches Offer's canOffer).
+                    if (fp?.join !== true) continue;
+                    if (personOwesOfferingForEvent(fp, data.event)) {
+                        owing = true;
+                        break;
+                    }
+                } catch {
+                    /* skip unreadable FAF row */
+                }
+            }
+            if (!cancelled) setFafOutstanding(owing ? 'owing' : 'none');
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [data?.student, data?.event, activeEventCode, studentPid, studentHash, heartGiftMode]);
 
     useEffect(() => {
         if (!data?.student || !data?.event) return;
@@ -651,23 +721,30 @@ export default function Home() {
                     ? 'complete'
                     : 'incomplete';
 
-        // If an offering has already been recorded for this event:
-        // - nextAndRemaining: complete only when all subevents paid
-        // - installments: complete only when combined selected-retreat balance is fully paid
-        // - otherwise, show terminal offering completion card.
+        // Does the registrant still owe anything?
+        // - nextAndRemaining: owes until all subevents are paid
+        // - installments: owes until the combined selected-retreat balance is fully paid
+        // - otherwise: a single recorded offering settles them
+        const selfOwesOffering =
+            offeringPresentation === 'nextAndRemaining'
+                ? hasUnpaidSubEvents
+                : offeringPresentation === 'installments' || offeringPresentation === 'installmentsTotalOrMore'
+                    ? installmentsStatus !== 'complete'
+                    : false;
+
+        // If an offering has already been recorded for this event, show the terminal completion
+        // card only once the whole party is settled. A settled registrant does not mean a settled
+        // family: a joined FAF member may still owe, and the offer screen is the only place that
+        // balance can be paid.
         if (hasAnyOffering) {
-            if (offeringPresentation === 'nextAndRemaining' && hasUnpaidSubEvents) {
+            const fafIds = Array.isArray(student.faf) ? student.faf : [];
+            // Hold the current phase rather than flashing the completion card while FAF loads.
+            if (!selfOwesOffering && fafIds.length > 0 && fafOutstanding === 'unknown') {
+                return;
+            }
+            if (selfOwesOffering || fafOutstanding === 'owing') {
                 // Do not override the just-completed warm card; only redirect to offer
                 // when we're not currently showing the warm completion variant.
-                if (!(phase === 'offeringCompleteCold' && offeringCompleteVariant === 'warm')) {
-                    if (phase !== 'offer') {
-                        setPhase('offer');
-                    }
-                }
-            } else if (
-                (offeringPresentation === 'installments' || offeringPresentation === 'installmentsTotalOrMore') &&
-                installmentsStatus !== 'complete'
-            ) {
                 if (!(phase === 'offeringCompleteCold' && offeringCompleteVariant === 'warm')) {
                     if (phase !== 'offer') {
                         setPhase('offer');
@@ -729,7 +806,7 @@ export default function Home() {
             return;
         }
         setPhase('join');
-    }, [data, router.query, activeEventCode, testModeConfigAccepted, phase, offeringCompleteVariant, heartGiftMode]);
+    }, [data, router.query, activeEventCode, testModeConfigAccepted, phase, offeringCompleteVariant, heartGiftMode, fafOutstanding]);
 
     // Stripe capture phase: after Stripe redirects back with payment_intent in the URL.
     useEffect(() => {

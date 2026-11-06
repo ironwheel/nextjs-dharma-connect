@@ -1755,13 +1755,17 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
     );
   }
 
-  // Single card for nextAndRemaining: header from first canOffer person's unpaid (sorted) and choice.
-  const firstCanOffer = fafFull.find((p) => p.canOffer);
-  const unpaidForHeader = firstCanOffer ? getUnpaidSubEventsForPerson(firstCanOffer) : [];
-  const choiceForHeader = firstCanOffer ? seriesChoiceByPerson[firstCanOffer.id] || 'next' : 'next';
+  // Single card for nextAndRemaining: header from the first person who still has something to
+  // pay, and their choice. That is not always the registrant — they may be fully paid while a
+  // FAF member is not, and keying the header off a settled person would blank it out.
+  const headerPerson =
+    fafFull.find((p) => p.canOffer && getUnpaidSubEventsForPerson(p).length > 0) ??
+    fafFull.find((p) => p.canOffer);
+  const unpaidForHeader = headerPerson ? getUnpaidSubEventsForPerson(headerPerson) : [];
+  const choiceForHeader = headerPerson ? seriesChoiceByPerson[headerPerson.id] || 'next' : 'next';
   const headerSubEventNames =
-    isEligibleForSubeventSelection && firstCanOffer
-      ? getSelectedUnpaidSubEventsForPerson(firstCanOffer)
+    isEligibleForSubeventSelection && headerPerson
+      ? getSelectedUnpaidSubEventsForPerson(headerPerson)
       : unpaidForHeader.length <= 1 || choiceForHeader === 'next'
         ? unpaidForHeader.slice(0, 1)
         : unpaidForHeader;
@@ -2300,6 +2304,9 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                 if (!person.canOffer) return null;
                 const personSummary = getInstallmentsSummary(person);
                 if (!personSummary.ok) return null;
+                // Already settled: no amount to choose. Without this the stepper renders an
+                // inverted range (minimum of one cent against a zero balance).
+                if (personSummary.balanceDueCents <= 0) return null;
                 const personBalanceCents = personSummary.balanceDueCents;
                 const personBalanceDollars = personBalanceCents / 100;
                 const personMinCents = isInstallmentsTotalOrMorePresentation
@@ -2383,6 +2390,11 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
         const oc = oid ? configs[oid] : null;
         if (!oc) return null;
 
+        // Nobody who can offer still owes this subevent, so there is nothing to collect for it.
+        // Reachable now that a settled registrant no longer ends the offering flow for the party.
+        const hasAnyoneOwingSubEvent = fafFull.some((p) => p.canOffer && !p.offeringHistory?.[subName]);
+        if (!hasAnyoneOwingSubEvent) return null;
+
         // Header label logic based on number of subevents and what user is offering for.
         let headerLabel: string | null = null;
         if (subEventCount === 1) {
@@ -2419,7 +2431,10 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                 )}
               </div>
             )}
-            {fafFull.map((person, pIdx) => (
+            {fafFull.map((person, pIdx) => {
+              // This person has already offered for this subevent: do not offer it again.
+              if (person.canOffer && person.offeringHistory?.[subName]) return null;
+              return (
               <div key={person.id} className="mb-4 pt-3 border-t border-reg-border">
                 <p className="text-sm font-semibold text-reg-text mb-2">
                   {person.name}
@@ -2825,7 +2840,8 @@ export const Offer: React.FC<{ context: ScriptContext; onComplete: () => void | 
                   </div>
                 ) : null}
               </div>
-            ))}
+              );
+            })}
           </div>
         );
       })}
