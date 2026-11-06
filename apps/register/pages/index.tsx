@@ -136,6 +136,15 @@ function formatAmount(amountCents: number, currency: string): string {
     return `${currencySymbol(currency)}${(amountCents / 100).toFixed(2)} ${currency}`;
 }
 
+/** Bare amount for prompt substitution, where the prompt text supplies its own currency symbol/code. */
+function formatPlainAmount(amountCents: number): string {
+    const digits = amountCents % 100 === 0 ? 0 : 2;
+    return (amountCents / 100).toLocaleString('en-US', {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits,
+    });
+}
+
 function sanitizePromptHtml(raw: string): string {
     if (!raw) return '';
     return String(raw)
@@ -170,7 +179,7 @@ function installmentsPersonLineTotals(
     program: any,
     event: any,
     subEventName: string,
-): { maximumDueCents: number; offeredSoFarCents: number; balanceDueCents: number } | null {
+): { maximumDueCents: number; offeredSoFarCents: number; balanceDueCents: number; cashDueCents: number } | null {
     const whichRetreatsConfig = event?.config?.whichRetreatsConfig || {};
     const whichRetreats = program?.whichRetreats || {};
     const selectedRetreats = Object.keys(whichRetreats).filter((k) => whichRetreats[k] === true);
@@ -184,17 +193,19 @@ function installmentsPersonLineTotals(
         event?.config?.offeringLimitFeeCount,
     );
     let maximumDueCents = 0;
+    let cashDueCents = 0;
     for (const retreatKey of retreatsForTotals) {
         const cfg = whichRetreatsConfig[retreatKey];
         const total = Number(cfg?.offeringTotal ?? 0);
         const cashTotal = Number(cfg?.offeringCashTotal ?? 0);
         maximumDueCents += Math.max(0, Math.round((total - cashTotal) * 100));
+        cashDueCents += Math.max(0, Math.round(cashTotal * 100));
     }
     const historyEntry = program?.offeringHistory?.[subEventName] || {};
     const installmentHistory = historyEntry?.installments || {};
     const offeredSoFarCents = sumInstallmentPaymentsCents(installmentHistory);
     const balanceDueCents = Math.max(0, maximumDueCents - offeredSoFarCents);
-    return { maximumDueCents, offeredSoFarCents, balanceDueCents };
+    return { maximumDueCents, offeredSoFarCents, balanceDueCents, cashDueCents };
 }
 
 async function fetchFafAggregatedInstallmentTotals(
@@ -203,14 +214,16 @@ async function fetchFafAggregatedInstallmentTotals(
     activeEventCode: string,
     pid: string,
     hash: string,
-): Promise<{ offeringsReceivedCents: number; balanceDueCents: number }> {
+): Promise<{ offeringsReceivedCents: number; balanceDueCents: number; cashDueCents: number }> {
     const subEventName = getInstallmentsSubEventNameForEvent(event);
     let offeringsReceivedCents = 0;
     let balanceDueCents = 0;
+    let cashDueCents = 0;
     const self = installmentsPersonLineTotals(student?.programs?.[activeEventCode], event, subEventName);
     if (self) {
         offeringsReceivedCents += self.offeredSoFarCents;
         balanceDueCents += self.balanceDueCents;
+        cashDueCents += self.cashDueCents;
     }
     const fafIds = Array.isArray(student?.faf) ? student.faf : [];
     for (const fid of fafIds) {
@@ -223,12 +236,13 @@ async function fetchFafAggregatedInstallmentTotals(
             if (t) {
                 offeringsReceivedCents += t.offeredSoFarCents;
                 balanceDueCents += t.balanceDueCents;
+                cashDueCents += t.cashDueCents;
             }
         } catch {
             /* skip missing FAF row */
         }
     }
-    return { offeringsReceivedCents, balanceDueCents };
+    return { offeringsReceivedCents, balanceDueCents, cashDueCents };
 }
 
 const THEMES: { id: ThemeId; label: string; subtitle: string }[] = [
@@ -491,6 +505,7 @@ export default function Home() {
     const [fafAggregatedInstallments, setFafAggregatedInstallments] = useState<{
         offeringsReceivedCents: number;
         balanceDueCents: number;
+        cashDueCents: number;
     } | null>(null);
 
     // Test mode config: clear student data options, oath pool eligibility override
@@ -1143,6 +1158,10 @@ export default function Home() {
         const cash = Number(cfg?.offeringCashTotal ?? 0);
         return sum + Math.max(0, Math.round((total - cash) * 100));
     }, 0);
+    const installmentsCashDueCents = retreatsForInstallmentsDue.reduce((sum: number, retreatKey: string) => {
+        const cfg = (whichRetreatsConfig as any)?.[retreatKey];
+        return sum + Math.max(0, Math.round(Number(cfg?.offeringCashTotal ?? 0) * 100));
+    }, 0);
     const offeringsReceivedCents = Object.values(activeOfferingHistory || {}).reduce((sum: number, subEntry: any) => {
         return sum + sumInstallmentPaymentsCents(subEntry?.installments);
     }, 0);
@@ -1160,6 +1179,10 @@ export default function Home() {
         fafInstallTotalsForComplete !== null
             ? fafInstallTotalsForComplete.balanceDueCents
             : installmentsBalanceDueCents;
+    const installmentsCashDueCentsDisplay =
+        fafInstallTotalsForComplete !== null
+            ? fafInstallTotalsForComplete.cashDueCents
+            : installmentsCashDueCents;
 
     return (
         <div className="min-h-screen bg-reg-page text-reg-text font-sans">
@@ -1376,6 +1399,14 @@ export default function Home() {
                                         '';
                                     html = html.replace(/\|\|title\|\|/g, title);
                                     html = html.replace(/\|\|coord-email\|\|/g, coordEmail);
+                                    // arg2: cash balance owed on site, summed across the registrant and
+                                    // joined FAF, matching the totals shown below this card.
+                                    if (isInstallmentsPresentation) {
+                                        html = html.replace(
+                                            /\|\|arg2\|\|/g,
+                                            formatPlainAmount(installmentsCashDueCentsDisplay),
+                                        );
+                                    }
                                     return <span dangerouslySetInnerHTML={{ __html: html }} />;
                                 })()}
                             </div>
