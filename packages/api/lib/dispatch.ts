@@ -472,7 +472,7 @@ async function dispatchAuth(
           if (!invite) {
             return res.status(400).json({ error: 'Missing required parameter: invite' });
           }
-          const result = await passkeyRegisterOptions(pid, hash, host, deviceFingerprint, invite, oidcToken, userAgent);
+          const result = await passkeyRegisterOptions(pid, hash, host, deviceFingerprint, invite, oidcToken);
           return res.status(200).json(result);
         }
       case 'passkeyRegisterVerify':

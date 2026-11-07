@@ -344,6 +344,11 @@ export async function createSession(pid: string, deviceFingerprint: string, trus
 // How often a device's lastSeenAt is refreshed, to keep writes down on token refreshes.
 const DEVICE_SEEN_REFRESH_MS = 60 * 60 * 1000;
 
+// A browser that signs in with emailed codes stops counting toward an app's device limit once it hasn't been
+// seen there for this long, so browsers that lost their cookie (private windows, cleared data) free their
+// places on their own. Records of browsers that only ever used passkeys expire after the same time.
+export const DEVICE_SLOT_IDLE_MS = 30 * 24 * 60 * 60 * 1000;
+
 // Browsers refused by a device limit are recorded, for the admin sign-in panel, in the devices table under
 // 'refused#<fingerprint>'. They hold no slots. The panel shows them for a week.
 export const REFUSED_DEVICE_PREFIX = 'refused#';
@@ -379,22 +384,43 @@ export function deviceLimit(entry: any, authData: any, pid: string, host: string
 }
 
 /**
+ * @function slotCounts
+ * @description Whether a device's record for an app counts toward the app's device limit: it last signed in
+ *              there with an emailed code (not a passkey) and was seen there within DEVICE_SLOT_IDLE_MS.
+ * @param {any} slot - The device's `apps[host]` record.
+ * @param {number} now - The current time in ms.
+ */
+export function slotCounts(slot: any, now: number): boolean {
+    return !!slot && slot.passkey !== true && now - (slot.lastSeenAt || 0) <= DEVICE_SLOT_IDLE_MS;
+}
+
+/**
+ * @function passkeySession
+ * @description Whether a session was opened with a passkey. Its browser doesn't count toward device limits.
+ */
+export function passkeySession(session: any): boolean {
+    const level = sessionTrustLevel(session);
+    return level === 'passkey' || level === 'passkey-uv';
+}
+
+/**
  * @async
  * @function claimDeviceSlot
- * @description Checks a device against an app's device limit. A device keeps its slot for an app from the
- *              first time it signs in there until an admin removes it. A device without a slot gets one if
- *              the participant is under the limit.
+ * @description Checks a device against an app's device limit and records it for the admin sign-in panel.
+ *              Only browsers that sign in with emailed codes count toward the limit, and only while they've been
+ *              seen within DEVICE_SLOT_IDLE_MS. A browser that signs in with a passkey is always let in and
+ *              recorded as not counting, since the passkey limit already bounds the person. A browser that
+ *              doesn't count gets a counted place if the participant is under the limit.
  * @param {any} entry - The host's APP_ACCESS_JSON entry.
  * @param {any} authData - The auth record used for the participant.
  * @param {string} pid - The participant ID.
  * @param {string} host - The host.
  * @param {string} deviceFingerprint - The device fingerprint.
  * @param {string} userAgent - The device's user agent, shown to admins.
- * @param {boolean} checkOnly - Only report whether the device would fit; don't claim a slot. A refusal is
- *                              still recorded for the admin sign-in panel.
+ * @param {boolean} viaPasskey - The browser signed in, or holds a session opened, with a passkey.
  * @returns {Promise<boolean>} True if the device may use the app.
  */
-export async function claimDeviceSlot(entry: any, authData: any, pid: string, host: string, deviceFingerprint: string, userAgent: string | undefined, oidcToken?: string, checkOnly = false): Promise<boolean> {
+export async function claimDeviceSlot(entry: any, authData: any, pid: string, host: string, deviceFingerprint: string, userAgent: string | undefined, oidcToken?: string, viaPasskey = false): Promise<boolean> {
     const limit = deviceLimit(entry, authData, pid, host);
     if (limit === undefined) return true;
 
@@ -402,9 +428,11 @@ export async function claimDeviceSlot(entry: any, authData: any, pid: string, ho
     const devices = await queryByPartition(tableCfg.tableName, tableCfg.pk, pid, process.env.AUTH_ROLE_ARN!, oidcToken);
     const now = Date.now();
     const device = devices.find((d: any) => d.fingerprint === deviceFingerprint);
+    const current = device?.apps?.[host];
+    const seenRecently = !!current && now - (current.lastSeenAt || 0) <= DEVICE_SEEN_REFRESH_MS;
 
-    if (device?.apps?.[host]) {
-        if (!checkOnly && now - (device.apps[host].lastSeenAt || 0) > DEVICE_SEEN_REFRESH_MS) {
+    if (viaPasskey ? current?.passkey === true && seenRecently : slotCounts(current, now)) {
+        if (!seenRecently) {
             await updateItem(tableCfg.tableName, { pid, fingerprint: deviceFingerprint },
                 'SET apps.#h.lastSeenAt = :now, lastSeenAt = :now', { ':now': now }, { '#h': host },
                 process.env.AUTH_ROLE_ARN!, oidcToken);
@@ -412,15 +440,14 @@ export async function claimDeviceSlot(entry: any, authData: any, pid: string, ho
         return true;
     }
 
-    const holding = devices.filter((d: any) => d.apps?.[host]).length;
-    if (holding >= limit) {
+    const holding = devices.filter((d: any) => d.fingerprint !== deviceFingerprint && slotCounts(d.apps?.[host], now)).length;
+    if (!viaPasskey && holding >= limit) {
         console.log(`DEVICE LIMIT [pid=${pid}]: ${holding}/${limit} devices already hold ${host}; refusing new device`);
         await recordRefusedDevice(pid, host, deviceFingerprint, userAgent, now, oidcToken);
         return false;
     }
-    if (checkOnly) return true;
 
-    // Once the browser holds the app it was refused for, its refusal is no longer news.
+    // Once the browser is in for the app it was refused for, its refusal is no longer news.
     const refusal = devices.find((d: any) => d.fingerprint === REFUSED_DEVICE_PREFIX + deviceFingerprint);
     const clearRefusal = async () => {
         if (refusal?.lastRefusedHost !== host) return;
@@ -428,7 +455,12 @@ export async function claimDeviceSlot(entry: any, authData: any, pid: string, ho
             .catch((err: unknown) => console.error(`DEVICE LIMIT [pid=${pid}]: couldn't clear refused device:`, err));
     };
 
-    const slot = { firstSeenAt: now, lastSeenAt: now };
+    const slot = { firstSeenAt: current?.firstSeenAt || now, lastSeenAt: now, passkey: viaPasskey };
+    // A record whose every app was reached with a passkey holds no places, so it expires once unused.
+    const apps = { ...(device?.apps || {}), [host]: slot };
+    const passkeyOnly = Object.values(apps).every((s: any) => s.passkey === true);
+    const ttl = Math.floor((now + DEVICE_SLOT_IDLE_MS) / 1000);
+    const counted = viaPasskey ? 'not counted (passkey)' : `${holding + 1}/${limit}`;
     if (!device) {
         try {
             await putOneWithCondition(tableCfg.tableName, {
@@ -437,9 +469,10 @@ export async function claimDeviceSlot(entry: any, authData: any, pid: string, ho
                 userAgent: (userAgent || '').slice(0, 512),
                 firstSeenAt: now,
                 lastSeenAt: now,
-                apps: { [host]: slot },
+                apps,
+                ...(passkeyOnly ? { ttl } : {}),
             }, 'attribute_not_exists(fingerprint)', undefined, process.env.AUTH_ROLE_ARN!, oidcToken);
-            console.log(`DEVICE LIMIT [pid=${pid}]: new device holds ${host} (${holding + 1}/${limit})`);
+            console.log(`DEVICE LIMIT [pid=${pid}]: new device holds ${host}, ${counted}`);
             await clearRefusal();
             return true;
         } catch (err) {
@@ -448,9 +481,10 @@ export async function claimDeviceSlot(entry: any, authData: any, pid: string, ho
         }
     }
     await updateItem(tableCfg.tableName, { pid, fingerprint: deviceFingerprint },
-        'SET apps.#h = if_not_exists(apps.#h, :slot), lastSeenAt = :now', { ':slot': slot, ':now': now }, { '#h': host },
+        passkeyOnly ? 'SET apps.#h = :slot, lastSeenAt = :now, #ttl = :ttl' : 'SET apps.#h = :slot, lastSeenAt = :now REMOVE #ttl',
+        { ':slot': slot, ':now': now, ...(passkeyOnly ? { ':ttl': ttl } : {}) }, { '#h': host, '#ttl': 'ttl' },
         process.env.AUTH_ROLE_ARN!, oidcToken);
-    console.log(`DEVICE LIMIT [pid=${pid}]: device now holds ${host} (${holding + 1}/${limit})`);
+    console.log(`DEVICE LIMIT [pid=${pid}]: device now holds ${host}, ${counted}`);
     await clearRefusal();
     return true;
 }
@@ -1557,7 +1591,7 @@ export async function verificationCheck(pid: string, hash: string, host: string,
         }
 
 
-        if (!(await claimDeviceSlot(entry, data, pid, host, deviceFingerprint, userAgent, oidcToken))) {
+        if (!(await claimDeviceSlot(entry, data, pid, host, deviceFingerprint, userAgent, oidcToken, passkeySession(session)))) {
             console.log(`VERIFICATION CHECK [pid=${pid}]: Active session found, but this device is over the device limit`);
             return { status: 'device-limit-reached', ...(await signInOptions(entry, data, pid, host, deviceFingerprint)) };
         }
@@ -1830,7 +1864,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
 
             if (sessionTTL > currentTimeSeconds && meetsTrust(existingSession, requiredTrust)) {
                 console.log(`SECURITY CHECK [pid=${pid}]: Valid global session found for SSO - minting new token for ${host}`);
-                if (!(await claimDeviceSlot(entry, data, pid, host, deviceFingerprint, userAgent, oidcToken))) return refuseDevice();
+                if (!(await claimDeviceSlot(entry, data, pid, host, deviceFingerprint, userAgent, oidcToken, passkeySession(existingSession)))) return refuseDevice();
                 const { actions: appActions, role: appRole, profile: appProfile } = await getAppActions(host, oidcToken);
                 const accessToken = createToken(pid, deviceFingerprint, appActions, appRole, host);
                 noteSignIn(pid, deviceFingerprint, appProfile, 'session', appRole, oidcToken);
@@ -1929,7 +1963,7 @@ export async function checkAccess(pid: string, hash: string, host: string, devic
                 // Session is valid and acceptable, generate fresh access token with all actions
                 console.log(`SESSION VALID [pid=${pid}]: Refreshing access token`);
                 console.log(`  - ${timeUntilExpirySeconds} seconds remaining on session`);
-                if (!(await claimDeviceSlot(entry, data, pid, host, deviceFingerprint, userAgent, oidcToken))) return refuseDevice();
+                if (!(await claimDeviceSlot(entry, data, pid, host, deviceFingerprint, userAgent, oidcToken, passkeySession(session)))) return refuseDevice();
                 const { actions: allActionsList, role: refreshRole } = await getAppActions(host, oidcToken);
                 return {
                     status: 'authenticated',
