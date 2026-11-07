@@ -7,14 +7,15 @@
  */
 import { tableGetConfig } from './tableConfig';
 import { getOne, getOneWithSort, deleteOneWithSort, queryByPartition } from './dynamoClient';
-import { assertCanManageParticipant, deviceLimit, parseAccessList, REFUSED_DEVICE_PREFIX, REFUSED_DEVICE_RETENTION_MS } from './authUtils';
+import { assertCanManageParticipant, deviceLimit, parseAccessList, REFUSED_DEVICE_PREFIX, REFUSED_DEVICE_RETENTION_MS, slotCounts } from './authUtils';
 import { browserCode } from './device';
 
 /**
  * @async
  * @function deviceList
  * @description Lists a participant's devices, the browsers recently refused by a device limit, and for each
- *              app that limits devices, how many they may use. A refusal is left out once that browser holds
+ *              app that limits devices, how many they may use. Each app on a device says whether it counts
+ *              toward that app's limit (see slotCounts). A refusal is left out once that browser counts for
  *              the app it was refused for.
  * @param {string} callerPid - The admin making the request.
  * @param {string} targetPid - The participant.
@@ -26,12 +27,13 @@ export async function deviceList(callerPid: string, targetPid: string, oidcToken
     const devicesCfg = tableGetConfig('devices');
     const records = await queryByPartition(devicesCfg.tableName, devicesCfg.pk, targetPid, process.env.AUTH_ROLE_ARN!, oidcToken);
     const devices = records.filter((d: any) => !d.fingerprint.startsWith(REFUSED_DEVICE_PREFIX));
-    const since = Date.now() - REFUSED_DEVICE_RETENTION_MS;
+    const now = Date.now();
+    const since = now - REFUSED_DEVICE_RETENTION_MS;
     const refused = records
         .filter((d: any) => d.fingerprint.startsWith(REFUSED_DEVICE_PREFIX) && d.lastRefusedAt > since)
         .filter((d: any) => {
             const fingerprint = d.fingerprint.slice(REFUSED_DEVICE_PREFIX.length);
-            return !devices.some((dev: any) => dev.fingerprint === fingerprint && dev.apps?.[d.lastRefusedHost]);
+            return !devices.some((dev: any) => dev.fingerprint === fingerprint && slotCounts(dev.apps?.[d.lastRefusedHost], now));
         })
         .sort((a: any, b: any) => b.lastRefusedAt - a.lastRefusedAt);
 
@@ -53,7 +55,8 @@ export async function deviceList(callerPid: string, targetPid: string, oidcToken
             userAgent: d.userAgent,
             firstSeenAt: d.firstSeenAt,
             lastSeenAt: d.lastSeenAt,
-            apps: d.apps || {},
+            apps: Object.fromEntries(Object.entries(d.apps || {}).map(([host, slot]: [string, any]) =>
+                [host, { firstSeenAt: slot.firstSeenAt, lastSeenAt: slot.lastSeenAt, passkey: slot.passkey === true, counts: slotCounts(slot, now) }])),
         })),
         refused: refused.map((d: any) => ({
             fingerprint: d.fingerprint,

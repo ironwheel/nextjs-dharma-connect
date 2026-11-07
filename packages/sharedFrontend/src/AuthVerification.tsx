@@ -776,7 +776,19 @@ const AuthVerification: React.FC<AuthVerificationProps> = ({ pid, hash, eventCod
                             Your account can be used for this app in a limited number of browsers, and all of them are in use.
                             If you already use this app in another browser, please open this page there.
                             The same browser can count again after its cookies are cleared, in a private window, or in another Chrome or Edge profile.
+                            A browser you haven't used here for 30 days stops counting.
                         </p>
+                        {signInOptions?.authMode && signInOptions.authMode !== 'email' && (
+                            <p style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>
+                                If you use private windows, or your browser clears its data when it closes, please use a regular window or sign in with a passkey instead: browsers that use a passkey aren't limited.
+                                {signInOptions.hasPasskey ? null : ' To set one up, please ask an admin for a passkey invitation.'}
+                            </p>
+                        )}
+                        {signInOptions?.authMode && signInOptions.authMode !== 'email' && signInOptions.hasPasskey && (
+                            <button onClick={() => { setProblem(null); setMode('passkey'); }} style={linkButtonStyle(false)}>
+                                Sign in with my passkey
+                            </button>
+                        )}
                         <p style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>
                             To use this browser, please ask an admin to make room for it
                             {signInOptions?.browserCode ? <>, and tell them this browser's code: <strong style={{ fontFamily: 'monospace', fontSize: '1rem', letterSpacing: '0.1em' }}>{signInOptions.browserCode}</strong></> : null}.

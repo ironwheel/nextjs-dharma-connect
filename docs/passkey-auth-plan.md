@@ -39,6 +39,9 @@ App defaults live in `APP_ACCESS_JSON` (changed by deploy). Per-user overrides l
 - Sessions with no `trustLevel` (from before this change) count as the lowest level once an app requires passkeys.
 - Email-fallback sessions are `email-verified`, bound to the device, and counted against `maxDevices`.
   Fallback users should get `maxDevices` 1.
+- Only emailed-code browsers count against `maxDevices`. Browsers that sign in with a passkey, or hold a session
+  opened with one, never do: the passkey limit already bounds the person, and private windows would otherwise
+  use up the limit. See "Passkey browsers and idle browsers" below.
 
 ## Enrollment: admin invites only
 
@@ -60,9 +63,9 @@ Student invites go out in batches because SMTP sending is rate-limited.
 - Each browser holds a random device ID in an httpOnly cookie that only the API reads (Phase 0). Sessions,
   tokens and logs use its SHA-256 digest, never the raw value.
 - A `devices` table records pid, device digest, apps used, first and last seen, user agent, and approximate location.
-- A device takes a slot for an app the first time it authenticates there. The slot stays taken until an
-  admin removes it. Over the limit, the passkey check succeeds but no token is issued, and the page says to
-  contact an admin.
+- A device takes a slot for an app the first time it signs in there with an emailed code. The slot stays taken
+  until an admin removes it or the browser goes unused there for 30 days. Over the limit, no token is issued,
+  and the page says to contact an admin. Passkey sign-ins never take a slot.
 
 ## Auditors and restricted apps
 
@@ -182,15 +185,14 @@ Deploy notes:
     own calls still get a verification token, so `verificationCheck` can return `device-limit-reached`.
   - Emailed-code and passkey sign-in refuse with `AUTH_DEVICE_LIMIT_REACHED` before creating a session, and an
     emailed code stays usable until it expires.
-  - Enrollment checks without taking a slot at the options step, and takes it at verify, before the invite is
-    used up.
+  - Enrollment and passkey sign-in are never refused (see "Passkey browsers and idle browsers").
 - **Admin:** `POST/auth/deviceList` (`targetUserPid`) returns devices (fingerprint digest, user agent, first and
   last seen, apps) and the participant's limit for each limited app. `POST/auth/deviceRemove` (`targetUserPid`,
   `fingerprint`) removes the device from every app and ends its session. Auditors are invisible to non-sys-admins.
 - **Self-limits:** admins can't raise their own `maxDevices` (from Phase 1a).
 
 Deploy notes:
-- Table `devices` (`DYNAMODB_TABLE_DEVICES`): pk `pid`, sk `fingerprint`. TTL on `ttl`, used only by refusal records; see "Browser codes" below.
+- Table `devices` (`DYNAMODB_TABLE_DEVICES`): pk `pid`, sk `fingerprint`. TTL on `ttl`, used by refusal records and by records of browsers that only used passkeys; see "Browser codes" and "Passkey browsers and idle browsers" below.
 - The auth role needs Get/Put/Delete/Query on it, plus UpdateItem (a separate `DevicesUpdate` statement).
 - Add `POST/auth/deviceList` and `POST/auth/deviceRemove` to the student-manager actions profile ahead of the admin UI.
 - Turn limits on at rollout by adding `"maxDevices": 1` to each coordinator app entry and `"maxDevices": 2` to
@@ -210,7 +212,9 @@ Deploy notes:
 - **Passkey sign-in** (the participant has a passkey): "Sign in with passkey", with a hint about using a phone,
   and "Email me a code instead" only when emailed codes are allowed.
 - **Needs an invite** (`passkey-required`, no passkey, no fallback): explains that an admin must send an invitation.
-- **Device limit reached**: says this browser isn't the one set up for the app, and shows its browser code.
+- **Device limit reached**: says the app's browser limit is reached, explains what makes a browser count again,
+  and shows its browser code. On apps with passkeys it adds that passkey browsers aren't limited, with "Sign in
+  with my passkey" for passkey holders and "ask an admin for a passkey invitation" for everyone else.
 - **Emailed code** (unchanged UI): for `email` apps, for fallback users, or when the check can't load. A code
   refused for the device limit, or because emailed codes are off, switches to the matching screen.
 
@@ -288,6 +292,30 @@ student-manager, when access is granted, and neither the API nor sign-in checks 
 
 Not to be confused with `"restricted": true` in `APP_ACCESS_JSON`, which marks sys-admin-only apps.
 
+### Passkey browsers and idle browsers (done in this change)
+
+Private windows, and browsers set to clear their data on close, get a new device cookie on every visit. With
+slots that never released, a student using them filled the limit within days and was then refused everywhere,
+including in their normal browser.
+
+- **Passkey browsers don't count.** `claimDeviceSlot` takes `viaPasskey`: true for passkey sign-in, enrollment,
+  and session checks on a session whose trust level is `passkey` or `passkey-uv` (`passkeySession`). Such a
+  browser is always let in. Its `apps[host]` record gets `passkey: true` and doesn't count. Enrollment no longer
+  checks the limit at the options step. The passkey limit (`maxPasskeys`) bounds the person instead.
+- **Idle browsers stop counting.** A record counts toward an app's limit only if it has no `passkey: true` and
+  was seen there in the last 30 days (`slotCounts`, `DEVICE_SLOT_IDLE_MS`). A browser that comes back after that,
+  or a passkey browser that signs in with an emailed code, needs a free place like a new one.
+- **Records of passkey-only browsers expire.** A device record whose every app has `passkey: true` gets a `ttl` 30
+  days ahead, refreshed when seen. Once any app on it counts, the `ttl` is removed.
+- **The rule for students:** emailed codes need a browser that remembers this site; otherwise use a passkey. We
+  can't detect private windows, but the limit has the same effect: emailed codes from a private window use up
+  the limit within a few visits, while passkeys keep working.
+- **Admin:** `deviceList` marks each app on a device with `passkey` and `counts`. The Sign-in panel shows
+  "(passkey, not counted)" or "(unused 30+ days, not counted)". A refusal stays listed until that browser
+  counts for the app.
+- **Login page:** see Phase 2's device-limit screen.
+- Existing records have no `passkey` field and are treated as emailed-code browsers.
+
 ### Phase 4: rollout
 
 1. The sys admin enrolls with the script and invites the other student-manager admins. Staff apps move to
@@ -302,6 +330,8 @@ Not to be confused with `"restricted": true` in `APP_ACCESS_JSON`, which marks s
 - **Register's offering flow:** register stays `silent`. Device binding must never produce a 401 or extra
   token refresh there, and no new actions are added on that path.
 - **Safari cookie lifetime:** Safari may cap cookie lifetime at 7 days in some hosting setups. Check during
-  the pilot that the device cookie survives longer than 7 days. If it doesn't, admin-only device slots will
-  generate support load.
-- **Synced and shared passkeys:** an accepted limitation, bounded by the device limit.
+  the pilot that the device cookie survives longer than 7 days. If it doesn't, each lost cookie holds an
+  emailed-code slot for 30 days, which will generate support load for Safari users of emailed codes.
+- **Synced and shared passkeys:** an accepted limitation, bounded by `maxPasskeys`. Passkey browsers don't count
+  toward the device limit, so sharing a passkey (for example through a shared password group) isn't otherwise
+  limited.

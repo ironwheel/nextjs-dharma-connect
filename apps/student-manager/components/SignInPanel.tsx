@@ -32,7 +32,7 @@ interface SignInApp {
 
 interface SignInSummary {
     passkeys: Array<{ credentialId: string, aaguid?: string, deviceType?: string, backedUp?: boolean, createdAt?: number, createdHost?: string, lastUsedAt?: number, lastUsedHost?: string }>;
-    devices: Array<{ fingerprint: string, browserCode: string, userAgent?: string, firstSeenAt?: number, lastSeenAt?: number, apps: Record<string, { firstSeenAt: number, lastSeenAt: number }> }>;
+    devices: Array<{ fingerprint: string, browserCode: string, userAgent?: string, firstSeenAt?: number, lastSeenAt?: number, apps: Record<string, { firstSeenAt: number, lastSeenAt: number, passkey?: boolean, counts?: boolean }> }>;
     refusedBrowsers?: Array<{ fingerprint: string, browserCode: string, userAgent?: string, host: string, firstRefusedAt?: number, lastRefusedAt: number, attempts: number }>;
     apps: SignInApp[];
     maxPasskeys: number;
@@ -106,6 +106,17 @@ const refusalHint = (userAgent: string | undefined, devices: SignInSummary['devi
         ? `Same kind of browser as ${same.join(', ')}: probably another profile of that browser, a private window, or cleared cookies.`
         : 'A different browser or device from the ones above.';
 };
+
+/**
+ * @function deviceApps
+ * @description The apps a browser has used, each marked when it doesn't count toward that app's browser limit.
+ */
+const deviceApps = (apps: SignInSummary['devices'][number]['apps']) => Object.entries(apps)
+    .map(([host, slot]) => {
+        if (slot.counts !== false) return appName(host);
+        return `${appName(host)} (${slot.passkey ? 'passkey' : 'unused 30+ days'}, not counted)`;
+    })
+    .join(', ');
 
 const browserCodeStyle: React.CSSProperties = { fontFamily: 'monospace', letterSpacing: '0.1em', marginRight: '8px' };
 
@@ -266,7 +277,8 @@ export const SignInPanel: React.FC<SignInPanelProps> = ({ studentId, pid, hash, 
             <h6>Browsers</h6>
             <p style={{ color: '#aaa', fontSize: '0.85em' }}>
                 Each browser on each computer or phone counts separately, and so does each Chrome or Edge profile and each private window.
-                The code matches the one the student sees when a browser is refused.
+                Only browsers that sign in with an emailed code count toward a limit, and only until they go unused for 30 days.
+                Browsers that sign in with a passkey are listed but never count. The code matches the one the student sees when a browser is refused.
             </p>
             {summary.devices.length === 0 ? (
                 <p style={{ color: '#aaa' }}>No browsers recorded. Browsers are recorded for apps with a browser limit.</p>
@@ -277,7 +289,7 @@ export const SignInPanel: React.FC<SignInPanelProps> = ({ studentId, pid, hash, 
                         {summary.devices.map(d => (
                             <tr key={d.fingerprint}>
                                 <td title={d.userAgent}><span style={browserCodeStyle}>{d.browserCode}</span>{describeDevice(d.userAgent)}</td>
-                                <td>{Object.keys(d.apps).map(appName).join(', ')}</td>
+                                <td>{deviceApps(d.apps)}</td>
                                 <td>{formatDate(d.firstSeenAt)}</td>
                                 <td>{formatDate(d.lastSeenAt)}</td>
                                 <td><Button size="sm" variant="outline-danger" disabled={!editable} onClick={() => removeDevice(d.fingerprint)}>Remove</Button></td>
