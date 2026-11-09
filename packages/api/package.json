@@ -8,7 +8,8 @@
   "scripts": {
     "dev": "next dev -p 3001",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "node --test \"test/**/*.test.cjs\""
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.0.0",

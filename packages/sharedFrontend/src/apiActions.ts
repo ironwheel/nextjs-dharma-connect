@@ -1415,3 +1415,79 @@ export async function getAudioPlaybackUrl(
         throw new Error(error.message || 'Failed to get audio playback URL');
     }
 }
+
+/** A pull request, as recovered from the commit that landed it. */
+export interface DeployPullRequest {
+    number: number;
+    title: string;
+    url: string;
+}
+
+/** One release-* tag, with its notes. */
+export interface DeployRelease {
+    tag: string;
+    sha: string;
+    shortSha: string;
+    /** ISO 8601; empty if unknown. */
+    date: string;
+    promotedBy: string;
+    reason: string;
+    previousTag: string | null;
+    compareUrl: string | null;
+    pullRequests: DeployPullRequest[];
+}
+
+/** A pull request merged on the tracked branch. */
+export interface DeployChange extends DeployPullRequest {
+    /** The merge or squash commit on the branch. */
+    sha: string;
+    shortSha: string;
+    /** ISO 8601; empty if unknown. */
+    date: string;
+}
+
+/** What GET /deploy/version returns for one build. */
+export interface DeployVersionInfo {
+    sha: string;
+    shortSha: string;
+    /** Release tag, else the short commit (prefixed "dev · " on dev). */
+    label: string;
+    releaseTag: string | null;
+    environment: string;
+    branch: string;
+    commit: { subject: string; date: string; url: string } | null;
+    /** Newest first; empty when the repository has no release tags. */
+    releases: DeployRelease[];
+    /** Pull requests recently merged on the branch, newest first; filled only when there are no releases. */
+    changes: DeployChange[];
+    /** Why something above is missing. Empty when everything resolved. */
+    reason: string;
+}
+
+/**
+ * @async
+ * @function getDeploymentVersion
+ * @description The version badge's label and history for one build, read from git by the API.
+ * @param {string} sha - The build's full 40-character commit SHA.
+ * @param {string} pid - The participant ID.
+ * @param {string} hash - The verification hash.
+ * @returns {Promise<DeployVersionInfo | RedirectedResponse>} The version info, or a redirect marker.
+ */
+export async function getDeploymentVersion(
+    sha: string,
+    pid: string,
+    hash: string
+): Promise<DeployVersionInfo | RedirectedResponse> {
+    try {
+        const response = await api.get(`${API_BASE_URL}/deploy/version?sha=${encodeURIComponent(sha)}`, pid, hash);
+
+        if (response && response.redirected) {
+            return { redirected: true };
+        }
+
+        return response as DeployVersionInfo;
+    } catch (error: any) {
+        console.error(`[API] getDeploymentVersion failed for ${sha.substring(0, 7)}:`, error);
+        throw new Error(error.message || 'Failed to get version info');
+    }
+}

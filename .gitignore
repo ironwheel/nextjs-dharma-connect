@@ -92,3 +92,6 @@ utils/write-cache.sh
 
 # Proposed Guest Role Policy
 docs/proposed-guest-role-policy.md
+
+# Test builds (packages/api/test transpiles lib here)
+.test-build/
