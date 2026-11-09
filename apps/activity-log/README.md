@@ -22,14 +22,14 @@ pnpm dev:activity-log
 1. **Actions profile** `activity-log` in the actions-profiles table, with its app role:
    - `GET/table/activity-log`: the log
    - `POST/auth/getConfigValue`: the per-user `emailDisplay` setting
-   - `GET/table/versions`: the version badge
+   - `GET/deploy/version`: the version badge
 2. **App role:** create it with `packages/api/utils/createAppRole.ts activity-log`. That grants Query on
-   the activity table and its index, and read access to the versions table.
+   the activity table and its index.
 3. **Host mapping:** add an app-actions entry mapping the host to the `activity-log` profile.
 4. **API settings:** add the host to the API's `APP_ACCESS_JSON` (default email-verification sessions) and
    `CORS_ORIGIN_LIST`, then redeploy the API.
 5. **Vercel:** create a project with root directory `apps/activity-log` and the domain. Set
-   `NEXT_PUBLIC_API_URL`, and expose system environment variables (the version badge reads
-   `NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA`).
+   `NEXT_PUBLIC_API_URL`. The version badge needs nothing more: `next.config.js` passes Vercel's
+   commit SHA to the browser.
 6. **student-manager:** add the host to the default auth record's config, so student-manager offers it
    when editing a user's permitted hosts.

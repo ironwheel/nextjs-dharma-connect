@@ -23,6 +23,7 @@ import { deviceList, deviceRemove } from './devices';
 import { signInSummary, setSignInLimits } from './signInSettings';
 import { passkeyInviteSend, passkeyRegisterOptions, passkeyRegisterVerify, passkeyAuthOptions, passkeyAuthVerify, passkeyList, passkeyRevoke } from './passkeys';
 import { getUnsubscribeStatus, setUnsubscribe } from './unsubscribe';
+import { dispatchDeploy } from './versionInfo';
 
 /**
  * @async
@@ -1215,6 +1216,11 @@ export async function dispatch(
       const [unsubscribeAction] = rest;
       console.log("DISPATCH: subsystem:", subsystem, "action:", unsubscribeAction);
       return await dispatchUnsubscribe(unsubscribeAction, req, res);
+    case 'deploy':
+      // Deploy URLs: /api/deploy/[action] e.g. /api/deploy/version (the version badge)
+      const [deployAction] = rest;
+      console.log("DISPATCH: subsystem:", subsystem, "action:", deployAction);
+      return await dispatchDeploy(deployAction, req, res);
     default:
       return res.status(404).json({ error: `Unknown subsystem: ${subsystem}` });
   }

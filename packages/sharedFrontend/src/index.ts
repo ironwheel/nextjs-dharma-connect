@@ -17,3 +17,5 @@ export { WebSocketProvider, useWebSocket } from './WebSocketProvider';
 export { ActivityLog } from './ActivityLog';
 export type { ActivityItem, ActivityLogProps } from './ActivityLog';
 export { default as VersionBadge } from './VersionBadge';
+export { VersionInfoPanel, VersionInfoModal } from './VersionInfoModal';
+export type { VersionInfoPanelProps, VersionInfoModalProps } from './VersionInfoModal';

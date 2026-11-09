@@ -2,28 +2,26 @@
  * @file packages/sharedFrontend/src/VersionBadge.tsx
  * @copyright Robert E. Taylor, Extropic Systems, 2025
  * @license MIT
- * @description Shared version badge component that looks up version metadata from the `versions` DynamoDB table.
+ * @description Shared version badge: which build this is, and the version history.
+ *
+ * The build knows only its own commit (NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA, mapped
+ * from Vercel's VERCEL_GIT_COMMIT_SHA by each app's next.config). Everything
+ * else comes from the API's GET /deploy/version, which reads it from git: the
+ * label is the build's release tag when it is exactly a release and its short
+ * commit otherwise, and the history is the releases, or the pull requests
+ * recently merged on the tracked branch. There is no table to maintain.
  */
 
 import React, { useEffect, useState } from 'react';
-import Modal from 'react-bootstrap/Modal';
-import { getTableItemOrNull, getAllTableItems } from './apiActions';
-
-export interface VersionRecord {
-  gitSHA: string;
-  versionString?: string;
-  features?: string[];
-  fixes?: string[];
-  headline?: string;
-  date?: string;
-}
+import { getDeploymentVersion, type DeployVersionInfo } from './apiActions';
+import { VersionInfoPanel } from './VersionInfoModal';
 
 export interface VersionBadgeProps {
   pid: string;
   hash: string;
   /**
    * Optional override for the current git SHA.
-   * If not provided, the component will use NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA or VERCEL_GIT_COMMIT_SHA.
+   * If not provided, the component uses NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA.
    */
   gitShaOverride?: string;
   /**
@@ -34,132 +32,60 @@ export interface VersionBadgeProps {
 
 const formatDate = (isoDate?: string): string => {
   if (!isoDate) return '';
-  try {
-    const d = new Date(isoDate);
-    if (Number.isNaN(d.getTime())) return isoDate;
-    return d.toLocaleString();
-  } catch {
-    return isoDate;
-  }
+  const d = new Date(isoDate);
+  return Number.isNaN(d.getTime()) ? isoDate : d.toLocaleString();
 };
 
-const resolveCurrentGitSha = (): string => {
-  // NOTE: Only NEXT_PUBLIC_ env vars are exposed to the browser in Next.js.
-  const envSha = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || null;
+// Only NEXT_PUBLIC_ variables reach the browser. A local build has no commit.
+const resolveCurrentGitSha = (): string => process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || 'localhost';
 
-  if (!envSha) {
-    throw new Error(
-      'VersionBadge: NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA must be defined (and exposed to the browser) for version lookup.'
-    );
-  }
-
-  return envSha;
-};
+const isCommitSha = (sha: string): boolean => /^[0-9a-f]{40}$/i.test(sha);
 
 const VersionBadge: React.FC<VersionBadgeProps> = ({ pid, hash, gitShaOverride, className }) => {
-  const [currentRecord, setCurrentRecord] = useState<VersionRecord | null>(null);
-  const [allRecords, setAllRecords] = useState<VersionRecord[]>([]);
+  const [info, setInfo] = useState<DeployVersionInfo | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isLoadingCurrent, setIsLoadingCurrent] = useState(false);
-  const [isLoadingAll, setIsLoadingAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const resolvedGitSha = gitShaOverride || resolveCurrentGitSha();
+  const sha = gitShaOverride || resolveCurrentGitSha();
 
-  // Load the current version record based on git SHA
   useEffect(() => {
-    const loadCurrent = async () => {
-      if (!pid || !hash) return;
-      if (!resolvedGitSha || resolvedGitSha === 'localhost') {
-        setCurrentRecord(null);
-        return;
-      }
-
-      setIsLoadingCurrent(true);
+    const load = async () => {
+      // 'localhost', or anything else that is not a commit, has nothing to look up.
+      if (!pid || !hash || !isCommitSha(sha)) return;
+      setIsLoading(true);
       setError(null);
       try {
-        const record = await getTableItemOrNull('versions', resolvedGitSha, pid, hash);
-
-        if (record && 'redirected' in record) {
+        const result = await getDeploymentVersion(sha, pid, hash);
+        if ('redirected' in result) {
           // Auth flow will be handled by sharedFrontend httpClient
           return;
         }
-
-        if (record) {
-          setCurrentRecord(record as VersionRecord);
-        } else {
-          setCurrentRecord(null);
-        }
-      } catch (err: any) {
-        console.error('VersionBadge: failed to load current version record:', err);
+        setInfo(result);
+      } catch (err: unknown) {
+        console.error('VersionBadge: failed to load version info:', err);
         setError('Failed to load version info');
-        setCurrentRecord(null);
       } finally {
-        setIsLoadingCurrent(false);
+        setIsLoading(false);
       }
     };
-
-    loadCurrent();
-    // We intentionally exclude resolvedGitSha from deps to avoid re-fetching
-    // on every render; it is stable for a given page load.
+    load();
+    // The build's commit is fixed for the page's lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pid, hash]);
 
-  const loadAllRecords = async () => {
-    if (!pid || !hash) return;
-    if (isLoadingAll || allRecords.length > 0) {
-      return;
-    }
-
-    setIsLoadingAll(true);
-    setError(null);
-    try {
-      const items = await getAllTableItems('versions', pid, hash);
-
-      if (items && 'redirected' in items) {
-        // Auth flow handled elsewhere
-        return;
-      }
-
-      const castItems = (items || []) as VersionRecord[];
-      const sorted = [...castItems].sort((a, b) => {
-        const aTime = a.date ? new Date(a.date).getTime() : 0;
-        const bTime = b.date ? new Date(b.date).getTime() : 0;
-        return bTime - aTime;
-      });
-      setAllRecords(sorted);
-    } catch (err: any) {
-      console.error('VersionBadge: failed to load all version records:', err);
-      setError('Failed to load version history');
-    } finally {
-      setIsLoadingAll(false);
-    }
-  };
-
-  const handleOpenModal = async () => {
-    setIsModalOpen(true);
-    await loadAllRecords();
-  };
-
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-  };
-
-  const displayLabel = (() => {
-    if (resolvedGitSha === 'localhost' || !resolvedGitSha) {
-      return 'localhost';
-    }
-    if (currentRecord?.versionString) {
-      return currentRecord.versionString;
-    }
-    return resolvedGitSha.substring(0, 7);
-  })();
+  const label = !isCommitSha(sha) ? 'localhost' : info?.label || sha.substring(0, 7);
+  const tooltip = [
+    info?.commit ? `${info.commit.subject} (${formatDate(info.commit.date)})` : null,
+    info?.reason || null,
+    'Click to view version history',
+  ].filter(Boolean).join('\n');
 
   return (
     <>
       <button
         type="button"
-        onClick={handleOpenModal}
+        onClick={() => setIsModalOpen(true)}
         className={className}
         style={{
           border: 'none',
@@ -170,119 +96,20 @@ const VersionBadge: React.FC<VersionBadgeProps> = ({ pid, hash, gitShaOverride, 
           cursor: 'pointer',
           whiteSpace: 'nowrap',
         }}
-        title="Click to view version history"
+        title={tooltip}
       >
-        {isLoadingCurrent ? 'Version Loading…' : `Version ${displayLabel}`}
+        {isLoading ? 'Version Loading…' : `Version ${label}`}
       </button>
 
-      <Modal
+      <VersionInfoPanel
         show={isModalOpen}
-        onHide={handleCloseModal}
-        centered
-        size="lg"
-        backdrop="static"
-        dialogClassName="version-modal-dialog"
-        contentClassName="bg-slate-900 text-slate-100 border border-slate-700"
-      >
-        <Modal.Header closeButton closeVariant="white">
-          <Modal.Title>
-            <span className="text-sm font-semibold tracking-wide text-slate-200">
-              Version Notes
-            </span>
-          </Modal.Title>
-        </Modal.Header>
-
-        {error && (
-          <div className="px-4 py-2 text-sm text-red-300 border-b border-red-500/40 bg-red-950/40">
-            {error}
-          </div>
-        )}
-
-        <Modal.Body>
-          {isLoadingAll && allRecords.length === 0 && (
-            <div className="flex items-center justify-center py-4">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-500 border-t-transparent mr-3" />
-              <span className="text-sm text-slate-300">
-                Loading version history…
-              </span>
-            </div>
-          )}
-
-          {!isLoadingAll && allRecords.length === 0 && !error && (
-            <div className="text-sm text-slate-300">
-              No version records found.
-            </div>
-          )}
-
-          {allRecords.map((record) => {
-            const isCurrent =
-              currentRecord?.gitSHA &&
-              record.gitSHA === currentRecord.gitSHA;
-
-            return (
-              <div
-                key={record.gitSHA}
-                className={`version-notes-card mb-3 rounded-md border px-4 py-3 ${isCurrent
-                    ? 'border-blue-400/80 bg-slate-800/80'
-                    : 'border-slate-700 bg-slate-900'
-                  }`}
-              >
-                <div className="mb-1 flex items-baseline justify-between gap-3">
-                  <div className="text-sm font-semibold">
-                    {record.versionString || record.gitSHA.substring(0, 7)}
-                    {isCurrent && (
-                      <span className="ml-2 text-xs font-semibold uppercase tracking-wide text-blue-300">
-                        (Current)
-                      </span>
-                    )}
-                  </div>
-                  <div className="whitespace-nowrap text-xs text-slate-400">
-                    {formatDate(record.date)}
-                  </div>
-                </div>
-
-                {record.headline && (
-                  <div className="mb-2 text-sm font-medium text-slate-100">
-                    {record.headline}
-                  </div>
-                )}
-
-                {Array.isArray(record.features) &&
-                  record.features.length > 0 && (
-                    <div className="mb-2">
-                      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-300">
-                        Features
-                      </div>
-                      <ul className="m-0 list-disc pl-5 text-sm text-slate-200">
-                        {record.features.map((f, idx) => (
-                          <li key={idx}>{f}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                {Array.isArray(record.fixes) &&
-                  record.fixes.length > 0 && (
-                    <div>
-                      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-300">
-                        Fixes
-                      </div>
-                      <ul className="m-0 list-disc pl-5 text-sm text-slate-200">
-                        {record.fixes.map((f, idx) => (
-                          <li key={idx}>{f}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-              </div>
-            );
-          })}
-        </Modal.Body>
-      </Modal>
+        info={info}
+        isLoading={isLoading}
+        error={error}
+        onClose={() => setIsModalOpen(false)}
+      />
     </>
   );
 };
 
 export default VersionBadge;
-
-
