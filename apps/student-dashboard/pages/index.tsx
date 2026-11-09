@@ -43,6 +43,7 @@ import {
 
 // Import API actions
 import { applyEmailConditionals } from '../components/emailConditionals';
+import { findZoomLinkInEmailHtml } from '../components/emailLinks';
 import { api, getAllTableItems, getAllTableItemsFiltered, getTableItem, updateTableItem, queryGetTableItems, authGetRegistrationLink } from 'sharedFrontend';
 
 // Import MantraCount component
@@ -237,6 +238,8 @@ const HomeContent = () => {
     const [name, setName] = useState("Unknown");
     const [displayPid, setDisplayPid] = useState("Unknown");
     const [email, setEMail] = useState("Unknown");
+    // Zoom links found in registered-student emails, keyed by `${aid}#${subEventName}`
+    const [emailZoomLinks, setEmailZoomLinks] = useState<Record<string, string>>({});
     const [kmStatus, setKMStatus] = useState(false);
     const [kmCache, setKMCache] = useState(null);
     const [value, setValue] = useState(0);
@@ -1403,6 +1406,16 @@ const HomeContent = () => {
                             pageData = pageData.replace(/\|\|taid\|\|/g, tangra);
                         }
 
+                        // Registered-student email: surface any Zoom link it contains so the
+                        // subevent doesn't also need zoomLink entered by hand.
+                        if (state === 'reg-confirm') {
+                            const emailZoomLink = findZoomLinkInEmailHtml(pageData);
+                            if (emailZoomLink) {
+                                const zoomKey = `${el?.parentEvent?.aid}#${el?.subEventName}`;
+                                setEmailZoomLinks(prev => prev[zoomKey] === emailZoomLink ? prev : { ...prev, [zoomKey]: emailZoomLink });
+                            }
+                        }
+
                         setIFrameData(pageData);
                     } catch (err) {
                         setIFrameData("<p>Error: Embedded Email fails: " + JSON.stringify(err) + "</p>");
@@ -1485,7 +1498,10 @@ const HomeContent = () => {
                     if (el.parentEvent.config.inPerson) {
                         return null;
                     }
-                    if (typeof el.subEvent.zoomLink === 'undefined') {
+                    // A zoomLink entered on the subevent wins; otherwise use one found in the email
+                    const zoomLink = el.subEvent.zoomLink ||
+                        emailZoomLinks[`${el.parentEvent.aid}#${el.subEventName}`];
+                    if (!zoomLink) {
                         return (
                             <>
                                 {promptLookup('zoomLinkNotAvailable')}
@@ -1494,7 +1510,7 @@ const HomeContent = () => {
                     } else {
                         return (
                             <>
-                                <div dangerouslySetInnerHTML={promptLookupHTMLWithArgs('zoomLink', el.subEvent.zoomLink, el.subEvent.zoomLink)} />
+                                <div dangerouslySetInnerHTML={promptLookupHTMLWithArgs('zoomLink', zoomLink, zoomLink)} />
                             </>
                         );
                     }
