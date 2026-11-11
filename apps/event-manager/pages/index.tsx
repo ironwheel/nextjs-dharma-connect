@@ -2193,7 +2193,10 @@ const Home = () => {
             // Enable each video for playback
             toast.info(`Enabling ${videoIds.length} video(s) for playback...`);
 
-            for (const videoId of videoIds) {
+            for (let i = 0; i < videoIds.length; i++) {
+                const videoId = videoIds[i];
+                // Pace consecutive videos so Vimeo doesn't rate limit back-to-back calls
+                if (i > 0) await new Promise(resolve => setTimeout(resolve, 1500));
                 try {
                     await enableVimeoVideoPlayback(videoId, pid as string, hash as string);
                 } catch (error: any) {

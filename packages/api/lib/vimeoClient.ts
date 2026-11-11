@@ -31,6 +31,29 @@ if (VIMEO_TEAM_BEARER_TOKEN && VIMEO_TEAM_OWNER_ID) {
   console.warn('VIMEO_TEAM_BEARER_TOKEN and VIMEO_TEAM_OWNER_ID must both be set to use the second Vimeo account');
 }
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Gap between consecutive Vimeo write calls for one video, to stay under Vimeo's rate limits.
+const VIMEO_CALL_GAP_MS = Number(process.env.VIMEO_CALL_GAP_MS ?? 500);
+const VIMEO_MAX_RETRIES = 3;
+
+/**
+ * Run a Vimeo request, retrying on 429 (rate limited) and honouring Retry-After.
+ */
+async function withRateLimitRetry<T>(fn: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      if (error?.response?.status !== 429 || attempt >= VIMEO_MAX_RETRIES) throw error;
+      const retryAfter = Number(error.response.headers?.['retry-after']);
+      const waitMs = Math.min(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 2000 * (attempt + 1), 15000);
+      console.warn(`Vimeo rate limited (429); retrying in ${waitMs}ms`);
+      await sleep(waitMs);
+    }
+  }
+}
+
 const isAccessDenied = (error: any) => error?.response?.status === 403 || error?.response?.status === 404;
 
 // Parse VIMEO_ALLOWED_DOMAINS as comma-separated list or JSON array
@@ -252,12 +275,12 @@ export async function enableVideoPlayback(videoId: string): Promise<void> {
     let lastError: any;
     for (const account of VIMEO_ACCOUNTS) {
       try {
-        await axios.patch(url, payload, {
+        await withRateLimitRetry(() => axios.patch(url, payload, {
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${account.token}`,
           },
-        });
+        }));
         token = account.token;
         break;
       } catch (error: any) {
@@ -271,12 +294,13 @@ export async function enableVideoPlayback(videoId: string): Promise<void> {
     for (const domain of VIMEO_ALLOWED_DOMAINS) {
       const domainUrl = `${VIMEO_API_BASE}/videos/${videoId}/privacy/domains/${encodeURIComponent(domain)}`;
       try {
-        await axios.put(domainUrl, {}, {
+        await sleep(VIMEO_CALL_GAP_MS);
+        await withRateLimitRetry(() => axios.put(domainUrl, {}, {
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`,
           },
-        });
+        }));
       } catch (error: any) {
         // Log but don't fail if one domain fails - continue with others
         console.warn(`Failed to enable domain ${domain} for video ${videoId}:`, error.response?.status, error.response?.statusText);
