@@ -2266,6 +2266,7 @@ const Home = () => {
         try {
             const updatedEntry: Record<string, any> = { ...entry };
             const written: Prompt[] = [];
+            let cacheFailed = false;
 
             for (const { field, suffix } of fields) {
                 const edited = videoTextEdits[index]?.[field];
@@ -2296,6 +2297,14 @@ const Home = () => {
                     };
                     await putTableItem('prompts', prompt.prompt, prompt, pid as string, hash as string);
                     written.push(prompt);
+                    // Mirror into the student dashboard's tier 2 prompt cache so students see it immediately
+                    try {
+                        const cacheRecord = { eventCode: aid, promptKey: `2#${language}#${promptName}`, text: prompt.text };
+                        await putTableItem('sd-prompts-cache', aid, cacheRecord, pid as string, hash as string);
+                    } catch (cacheError) {
+                        console.error('Error updating student dashboard prompt cache:', cacheError);
+                        cacheFailed = true;
+                    }
                 }
                 updatedEntry[field] = promptName;
             }
@@ -2315,6 +2324,9 @@ const Home = () => {
                 return next;
             });
             toast.success(`Saved video ${index + 1} text (${languages.join(', ')}). Click Update SubEvent to keep the changes.`);
+            if (cacheFailed) {
+                toast.warning('Prompts saved, but the student dashboard cache could not be updated. Run the prompt cache refresh script.');
+            }
         } catch (error: any) {
             console.error('Error saving video text:', error);
             toast.error(`Failed to save video text: ${error.message}`);

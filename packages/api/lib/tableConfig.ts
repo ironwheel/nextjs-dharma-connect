@@ -48,7 +48,7 @@ export const tables: TableConfig[] = [
   { resource: 'eligibility-cache', envVar: 'DYNAMODB_TABLE_ELIGIBILITY_CACHE', pk: 'aid', sk: '', ops: ['get', 'put', 'list', 'delete'] },
   { resource: 'mantra-count', envVar: 'DYNAMODB_TABLE_MANTRA_COUNT', pk: 'id', sk: '', ops: ['get', 'put', 'list', 'update'] },
   { resource: 'mantra-config', envVar: 'DYNAMODB_TABLE_MANTRA_CONFIG', pk: 'id', sk: '', ops: ['get', 'put', 'list', 'update'] },
-  { resource: 'sd-prompts-cache', envVar: 'DYNAMODB_TABLE_PROMPTS_CACHE', pk: 'eventCode', sk: 'promptKey', ops: ['get', 'list', 'query'] },
+  { resource: 'sd-prompts-cache', envVar: 'DYNAMODB_TABLE_PROMPTS_CACHE', pk: 'eventCode', sk: 'promptKey', ops: ['get', 'list', 'query', 'put'] },
   { resource: 'refunds', envVar: 'DYNAMODB_TABLE_REFUNDS', pk: 'stripePaymentIntent', sk: '', ops: ['get', 'list', 'put'] },
   { resource: 'versions', envVar: 'DYNAMODB_TABLE_VERSIONS', pk: 'gitSHA', sk: '', ops: ['get', 'list', 'put'] },
   /** transactions: GSIs aid-index (pk=aid), eventCode-index (pk=eventCode) for legacy heart-gift rollup. */
