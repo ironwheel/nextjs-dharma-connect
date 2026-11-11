@@ -567,6 +567,9 @@ const Home = () => {
     const [selectedPromptGroup, setSelectedPromptGroup] = useState<PromptGroup | null>(null);
     const [selectedView, setSelectedView] = useState<View | null>(null);
     const [selectedSubEventKey, setSelectedSubEventKey] = useState<string>('');
+    // Per-video title/description edits (English), keyed by embeddedVideoList index
+    const [videoTextEdits, setVideoTextEdits] = useState<Record<number, { title?: string; description?: string }>>({});
+    const [savingVideoTextIndex, setSavingVideoTextIndex] = useState<number | null>(null);
 
     // Form data for editing
     const [eventFormData, setEventFormData] = useState<Event>({
@@ -2012,6 +2015,7 @@ const Home = () => {
         });
         setPerLanguageShowcases(false);
         setProcessingShowcaseIndex(null);
+        setVideoTextEdits({});
         setShowSubEventModal(true);
     };
 
@@ -2026,6 +2030,7 @@ const Home = () => {
         });
         setPerLanguageShowcases(false);
         setProcessingShowcaseIndex(null);
+        setVideoTextEdits({});
         setShowSubEventModal(true);
     };
 
@@ -2217,6 +2222,104 @@ const Home = () => {
             toast.error(`Failed to process showcase: ${error.message}`);
         } finally {
             setProcessingShowcaseIndex(null);
+        }
+    };
+
+    // Per-video title/description prompts.
+    // The student dashboard reads entry.title / entry.description as prompt names and looks them
+    // up under the event's aid (or its aidAlias), so prompts are written under that aid.
+    const VIDEO_ENTRY_METADATA_KEYS = ['title', 'description', 'password'];
+
+    const videoPromptsAid = (): string => {
+        const alias = eventFormData.config?.aidAlias;
+        return (typeof alias === 'string' && alias.trim()) || eventFormData.aid || '';
+    };
+
+    const getPromptEnglishText = (promptName: unknown): string => {
+        if (typeof promptName !== 'string' || !promptName) return '';
+        const key = `${videoPromptsAid()}-${promptName}`;
+        return allPrompts.find(p => p.prompt === key && p.language === 'English')?.text ?? '';
+    };
+
+    const getVideoEntryLanguages = (entry: Record<string, any>): string[] =>
+        Object.keys(entry).filter(k => !VIDEO_ENTRY_METADATA_KEYS.includes(k) && entry[k]);
+
+    const handleSaveVideoText = async (index: number) => {
+        const entry = (subEventFormData.embeddedVideoList || [])[index];
+        const aid = videoPromptsAid();
+        if (!entry || !aid) return;
+        if (!selectedSubEventKey) {
+            toast.warning('Save the sub-event first, then set video text');
+            return;
+        }
+
+        // Prompts are written for English plus every language this video is available in
+        const languages = Array.from(new Set(['English', ...getVideoEntryLanguages(entry)]))
+            .filter(language => PROMPT_LANGUAGES.includes(language));
+
+        const fields: Array<{ field: 'title' | 'description'; suffix: string }> = [
+            { field: 'title', suffix: 'Title' },
+            { field: 'description', suffix: 'Description' },
+        ];
+
+        setSavingVideoTextIndex(index);
+        try {
+            const updatedEntry: Record<string, any> = { ...entry };
+            const written: Prompt[] = [];
+
+            for (const { field, suffix } of fields) {
+                const edited = videoTextEdits[index]?.[field];
+                if (edited === undefined) continue;
+                const englishText = edited.trim();
+
+                if (!englishText) {
+                    // Clearing the text detaches the prompt from this video; the prompts remain
+                    delete updatedEntry[field];
+                    continue;
+                }
+
+                const promptName = typeof entry[field] === 'string' && entry[field]
+                    ? entry[field]
+                    : `${selectedSubEventKey}Video${index + 1}${suffix}`.replace(/[\s-]+/g, '');
+                const result = await translatePromptText(englishText, pid as string, hash as string);
+                if (result && 'redirected' in result) {
+                    toast.error('Authentication required');
+                    return;
+                }
+                const translations = result as Record<string, string>;
+                for (const language of languages) {
+                    const prompt: Prompt = {
+                        prompt: `${aid}-${promptName}`,
+                        language,
+                        aid,
+                        text: language === 'English' ? englishText : (translations[language] ?? ''),
+                    };
+                    await putTableItem('prompts', prompt.prompt, prompt, pid as string, hash as string);
+                    written.push(prompt);
+                }
+                updatedEntry[field] = promptName;
+            }
+
+            allPrompts = [
+                ...written,
+                ...allPrompts.filter(p => !written.some(w => w.prompt === p.prompt && w.language === p.language)),
+            ];
+            setSubEventFormData(prev => {
+                const list = [...(prev.embeddedVideoList || [])];
+                list[index] = updatedEntry;
+                return { ...prev, embeddedVideoList: list };
+            });
+            setVideoTextEdits(prev => {
+                const next = { ...prev };
+                delete next[index];
+                return next;
+            });
+            toast.success(`Saved video ${index + 1} text (${languages.join(', ')}). Click Update SubEvent to keep the changes.`);
+        } catch (error: any) {
+            console.error('Error saving video text:', error);
+            toast.error(`Failed to save video text: ${error.message}`);
+        } finally {
+            setSavingVideoTextIndex(null);
         }
     };
 
@@ -3962,11 +4065,44 @@ const Home = () => {
                                     <div style={{ fontSize: '0.9rem', color: '#aaa', marginBottom: '0.5rem' }}>
                                         Processed Videos ({subEventFormData.embeddedVideoList.length} entries):
                                     </div>
-                                    {subEventFormData.embeddedVideoList.map((videoEntry, index) => (
-                                        <div key={index} style={{ fontSize: '0.85rem', color: '#888', marginBottom: '0.25rem' }}>
-                                            Entry {index}: {Object.keys(videoEntry).length} language(s)
-                                        </div>
-                                    ))}
+                                    {subEventFormData.embeddedVideoList.map((videoEntry, index) => {
+                                        const languages = getVideoEntryLanguages(videoEntry);
+                                        const titleValue = videoTextEdits[index]?.title ?? getPromptEnglishText(videoEntry.title);
+                                        const descriptionValue = videoTextEdits[index]?.description ?? getPromptEnglishText(videoEntry.description);
+                                        const dirty = videoTextEdits[index] !== undefined;
+                                        return (
+                                            <div key={index} style={{ fontSize: '0.85rem', color: '#888', marginBottom: '0.75rem' }}>
+                                                Entry {index}: {languages.length} language(s)
+                                                {languages.length > 0 ? ` (${languages.join(', ')})` : ''}
+                                                <Form.Control
+                                                    size="sm"
+                                                    type="text"
+                                                    className="mt-1"
+                                                    placeholder="Title (English, optional)"
+                                                    value={titleValue}
+                                                    onChange={(e) => setVideoTextEdits(prev => ({ ...prev, [index]: { ...prev[index], title: e.target.value } }))}
+                                                />
+                                                <Form.Control
+                                                    size="sm"
+                                                    as="textarea"
+                                                    rows={2}
+                                                    className="mt-1"
+                                                    placeholder="Description (English, optional)"
+                                                    value={descriptionValue}
+                                                    onChange={(e) => setVideoTextEdits(prev => ({ ...prev, [index]: { ...prev[index], description: e.target.value } }))}
+                                                />
+                                                <Button
+                                                    variant="outline-warning"
+                                                    size="sm"
+                                                    className="mt-1"
+                                                    disabled={!dirty || savingVideoTextIndex !== null}
+                                                    onClick={() => handleSaveVideoText(index)}
+                                                >
+                                                    {savingVideoTextIndex === index ? 'Translating & saving...' : 'Translate & save text'}
+                                                </Button>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>

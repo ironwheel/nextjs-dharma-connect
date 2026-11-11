@@ -108,6 +108,16 @@ export default function EmbeddedVideo({
                 </>
             ) : null}
 
+            {typeof videoEntry.description === 'string' ? (
+                <div className="mb-2 text-sm text-gray-300">
+                    {promptLookupAIDSpecific(
+                        parentEventAid,
+                        parentEventAidAlias ?? parentEventAid,
+                        videoEntry.description as string
+                    )}
+                </div>
+            ) : null}
+
             {!isVideoOpen(videoKey) ? (
                 videoControlBubble()
             ) : (
