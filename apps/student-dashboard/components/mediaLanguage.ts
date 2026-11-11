@@ -8,7 +8,7 @@
  */
 
 /** Keys on a media entry that are metadata, not languages. */
-export const MEDIA_ENTRY_METADATA_KEYS = new Set(['title', 'password']);
+export const MEDIA_ENTRY_METADATA_KEYS = new Set(['title', 'description', 'password']);
 
 /** Native-language display names, so the picker reads correctly to each student. */
 export const MEDIA_LANGUAGE_LABELS: Record<string, string> = {
