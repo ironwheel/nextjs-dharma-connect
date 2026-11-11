@@ -122,7 +122,7 @@ def extract_videos_from_event(event: Dict[str, Any]) -> List[str]:
                     # Handle case where video is a dictionary with language keys
                     elif isinstance(video, dict):
                         for language, video_id in video.items():
-                            if language not in ['title', 'whichRetreats'] and video_id:
+                            if language not in ['title', 'description', 'whichRetreats'] and video_id:
                                 videos.append(video_id)
                     else:
                         print(f"  Warning: Unexpected video format: {type(video)} - {video}")
@@ -192,7 +192,7 @@ def process_events(events: List[Dict[str, Any]], allowed_domain: str,
                     # Handle case where video is a dictionary with language keys
                     elif isinstance(video, dict):
                         for language, video_id in video.items():
-                            if language not in ['title', 'whichRetreats'] and video_id:
+                            if language not in ['title', 'description', 'whichRetreats'] and video_id:
                                 print(f"  Processing video: {language} - {video_id}")
                                 stats['videos_found'] += 1
                                 if set_allowed_domain(video_id, allowed_domain, dry_run):
