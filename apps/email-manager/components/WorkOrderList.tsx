@@ -1191,19 +1191,25 @@ export default function WorkOrderList({ onEdit, refreshTrigger = 0, userPid, use
                                                                 </div>
                                                                 <div style={{ display: 'flex', gap: '4px' }}>
                                                                     {/* Button logic for each step */}
-                                                                    {stepName === 'Count' && (
-                                                                        <Button
-                                                                            size="sm"
-                                                                            variant={stepStatus === 'working' ? 'warning' : 'success'}
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation()
-                                                                                handleStepAction(workOrder.id, 'Count', stepStatus !== 'working')
-                                                                            }}
-                                                                            disabled={status === 'closed' || !writePermission}
-                                                                        >
-                                                                            {buttonLabel}
-                                                                        </Button>
-                                                                    )}
+                                                                    {stepName === 'Count' && (() => {
+                                                                        // Start/Restart needs at least one language; Stop stays available.
+                                                                        const hasLanguage = Object.values(workOrder.languages ?? {}).some(Boolean)
+                                                                        const needsLanguage = stepStatus !== 'working' && !hasLanguage
+                                                                        return (
+                                                                            <Button
+                                                                                size="sm"
+                                                                                variant={stepStatus === 'working' ? 'warning' : 'success'}
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation()
+                                                                                    handleStepAction(workOrder.id, 'Count', stepStatus !== 'working')
+                                                                                }}
+                                                                                disabled={status === 'closed' || !writePermission || needsLanguage}
+                                                                                title={needsLanguage ? 'Select at least one language to run Count' : undefined}
+                                                                            >
+                                                                                {buttonLabel}
+                                                                            </Button>
+                                                                        )
+                                                                    })()}
                                                                     {stepName === 'Prepare' && (() => {
                                                                         const countStep = workOrder.steps?.find(s => extractString(s.name) === 'Count')
                                                                         const enabled = countStep && extractString(countStep.status) === 'complete'

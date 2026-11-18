@@ -113,6 +113,18 @@ async function getParentWorkOrder(
 }
 
 /**
+ * Describe what a parent work order is missing before a child stage can inherit from it.
+ * Inheritance copies languages and HTML at save time, so an unfinished parent leaves the child empty.
+ * @returns A list of missing items (empty when the parent is ready)
+ */
+function parentWorkOrderMissing(parent: { languages?: Record<string, boolean>; s3HTMLPaths?: Record<string, string> } | null | undefined): string[] {
+    const missing: string[] = [];
+    if (!Object.values(parent?.languages ?? {}).some(Boolean)) missing.push('languages');
+    if (Object.keys(parent?.s3HTMLPaths ?? {}).length === 0) missing.push('prepared HTML');
+    return missing;
+}
+
+/**
  * Get existing work orders for the same event code and sub event to prevent duplicate stage selection.
  * @param eventCode - The event code to match
  * @param subEvent - The sub event to match
@@ -450,6 +462,12 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                     attemptedStageRef.current = stage;
                     return;
                 }
+                const parentMissing = parentWorkOrderMissing(parentResult.workOrder);
+                if (parentMissing.length > 0) {
+                    toast.error(`The ${parentResult.parentStage} work order has no ${parentMissing.join(' or ')} yet. Finish setting it up before creating a ${newStage} work order.`);
+                    attemptedStageRef.current = stage;
+                    return;
+                }
                 // Inherit fields from parent work order
                 setStage(newStage)
                 setSelectedStageRecord(stageRecord)
@@ -535,6 +553,19 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
         if (isStageUsed) {
             toast.error(`Cannot create work order: Stage '${stage}' is already used in an existing work order`)
             return
+        }
+
+        // A child stage must have inherited a finished parent; otherwise it would save with no languages or HTML
+        if (!isTransactionReceipt && selectedStageRecord?.parentStages && selectedStageRecord.parentStages.length > 0) {
+            // Judge what will actually be saved: current languages plus inherited (or previously saved) HTML
+            const missing = parentWorkOrderMissing({
+                languages,
+                s3HTMLPaths: inheritedFields.s3HTMLPaths || loadedWorkOrderRef.current?.s3HTMLPaths,
+            })
+            if (missing.length > 0) {
+                toast.error(`Cannot save: the parent work order (${selectedStageRecord.parentStages.join(' or ')}) has no ${missing.join(' or ')} yet`)
+                return
+            }
         }
 
         // Determine if we need to reset steps and show warning
@@ -722,7 +753,8 @@ export default function WorkOrderForm({ id, onSave, onCancel, userPid, userHash,
                 s3HTMLPaths: s3HTMLPathsValue,
                 steps: steps,
                 locked: false,
-                createdAt: new Date().toISOString(),
+                // Keep the original creation time on edits; parent lookup sorts by it
+                createdAt: (id && loadedWorkOrderRef.current?.createdAt) || new Date().toISOString(),
                 updatedAt: new Date().toISOString()
             };
 
