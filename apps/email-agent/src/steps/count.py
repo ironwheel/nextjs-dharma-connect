@@ -37,9 +37,13 @@ class CountStep:
             True if successful, False otherwise
         """
         try:
+            # Counts are per language; with none selected there is nothing to count.
+            if not any((work_order.languages or {}).values()):
+                raise Exception("No languages selected. Select at least one language in the work order and run Count again.")
+
             # Update initial progress message
             await self._update_progress(work_order, "Starting count process...")
-            
+
             # Get stage record for filtering
             stage_record = self._get_stage_record(work_order.stage)
             
