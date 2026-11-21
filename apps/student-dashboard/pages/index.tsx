@@ -74,8 +74,18 @@ let displayControl: { [key: string]: boolean } = {
     'video': false,
     'audio': false,
     'mantra': false,
-    'schedule': false
+    'schedule': false,
+    'schedule2027': false
 };
+/**
+ * Teaching schedule sections, shown top to bottom. Both years appear together until the
+ * last event of the older year completes; then delete that year's entry here (the
+ * displayControl key above can go with it) and only the newer schedule remains.
+ */
+const SCHEDULES = [
+    { control: 'schedule', titlePrompt: 'controlTitleSchedule', contentPrompt: 'schedule' },
+    { control: 'schedule2027', titlePrompt: 'controlTitleSchedule2027', contentPrompt: 'schedule2027' },
+];
 /**
  * Control rows are section headers and the year/showcase sub-headers beneath them. They
  * carry no parentEvent/subEvent, so they must never fall through to the offering and
@@ -946,6 +956,7 @@ const HomeContent = () => {
         audioListByYear = {};
         showcaseMasterList = [];
         eventList = [];
+        scheduleList = [];
 
         // Add control items
         eventList.push({
@@ -1008,16 +1019,19 @@ const HomeContent = () => {
             indent: 0
         });
 
-        scheduleList.push({
-            key: 'schedule',
-            eventname: 'controlTitleSchedule',
-            tag: 'control',
-            control: 'schedule',
-            subEventDisplayName: null,
-            date: '2222-22-22',
-            complete: true,
-            bg: 'gray',
-            indent: 0
+        SCHEDULES.forEach(schedule => {
+            scheduleList.push({
+                key: schedule.control,
+                eventname: schedule.titlePrompt,
+                contentPrompt: schedule.contentPrompt,
+                tag: 'control',
+                control: schedule.control,
+                subEventDisplayName: null,
+                date: '2222-22-22',
+                complete: true,
+                bg: 'gray',
+                indent: 0
+            });
         });
 
         const compareDates = (a: any, b: any) => {
@@ -2075,13 +2089,13 @@ const HomeContent = () => {
         );
     };
 
-    const Schedule = () => {
-        if (!displayControl['schedule']) {
+    const Schedule = (el: any) => {
+        if (!displayControl[el.control]) {
             return null;
         }
         return (
             <>
-                <div className="schedule-content" dangerouslySetInnerHTML={promptLookupHTML('schedule')} />
+                <div className="schedule-content" dangerouslySetInnerHTML={promptLookupHTML(el.contentPrompt)} />
             </>
         );
     };
@@ -2198,8 +2212,12 @@ const HomeContent = () => {
                     : null}
                 <VideoControlWithYears />
                 <AudioControlWithYears />
-                {mediaElementWrapper(scheduleList[0])}
-                {Schedule()}
+                {scheduleList.map((el) => (
+                    <React.Fragment key={el.key}>
+                        {mediaElementWrapper(el)}
+                        {Schedule(el)}
+                    </React.Fragment>
+                ))}
                 {showMantraControl && mantraList[0] && mediaElementWrapper(mantraList[0])}
             </>
         );
