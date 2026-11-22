@@ -936,6 +936,19 @@ const HomeContent = () => {
 
     const isVideoOpen = (videoKey: string) => Boolean(displayVideoControl[videoKey]);
 
+    /**
+     * A video entry tagged with `retreats` (whichRetreatsConfig keys) is only for students
+     * registered for at least one of those retreats. Untagged entries are for everyone.
+     * Presentation only, like the offering check: the ids are in the event record.
+     */
+    const videoEntryVisibleToStudent = (entry: any, eventAid: string): boolean => {
+        const retreats = entry?.retreats;
+        if (!Array.isArray(retreats) || retreats.length === 0) return true;
+        const program = student?.programs?.[eventAid];
+        if (!program || program.withdrawn) return false;
+        return retreats.some((key: string) => Boolean(program.whichRetreats?.[key]));
+    };
+
     const onVideoToggle = (videoKey: string) => {
         Object.keys(displayVideoControl).forEach((controlKey) => {
             if (controlKey !== videoKey) {
@@ -1757,6 +1770,7 @@ const HomeContent = () => {
             return (
                 <>
                     {el.subEvent.embeddedVideoList.map((vid: any, index: number) => (
+                        !videoEntryVisibleToStudent(vid, el.parentEvent.aid) ? null :
                         <EmbeddedVideo
                             key={`${el.key}-video-${index}`}
                             videoKey={`${el.key}-video-${index}`}
