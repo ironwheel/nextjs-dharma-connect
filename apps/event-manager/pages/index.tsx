@@ -2191,7 +2191,7 @@ const Home = () => {
 
             if (perLanguageShowcases && Array.isArray(videoList)) {
                 // Per-language mode: videos are array of {index, language, videoId}, with
-                // index 0 = lowest Vimeo video id (the API orders by ascending id)
+                // index 0 = first video by name (the API orders videos by name, numbers compared numerically)
                 const showcaseVideos = videoList as Array<{ index: number; language: string; videoId: string }>;
                 for (const video of showcaseVideos) {
                     const position = video.index;
@@ -4061,7 +4061,7 @@ const Home = () => {
                             />
                             <Form.Text className="text-muted" style={{ fontSize: '0.85rem', display: 'block', marginBottom: '1rem' }}>
                                 {perLanguageShowcases
-                                    ? 'Each showcase contains all videos for one language. Videos are ordered by ascending Vimeo video id.'
+                                    ? 'Each showcase contains all videos for one language. Videos are ordered by name (e.g. date, then day 1 am, day 1 pm, day 2 am).'
                                     : 'Each showcase contains multiple languages for one day of teaching. Videos will be grouped by language.'}
                             </Form.Text>
                             {subEventFormData.embeddedShowcaseList && subEventFormData.embeddedShowcaseList.length > 0 ? (

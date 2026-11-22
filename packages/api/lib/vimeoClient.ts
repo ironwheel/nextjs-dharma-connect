@@ -161,10 +161,13 @@ export async function getShowcaseVideos(
       }
 
       // All videos get the same language.
-      // Order by ascending Vimeo video id (upload order) rather than showcase order,
-      // which isn't reliable: index 0 = lowest id = first video.
+      // Order by video name, comparing embedded numbers numerically ("2026 07 11 ... day 1 am"
+      // before "day 1 pm" before "day 2 am"; "day 10" after "day 2"). Neither showcase order
+      // nor video id reliably follows teaching order. Ties fall back to ascending id.
+      const videoIdOf = (entry: any) => Number(entry.uri.replace('/videos/', ''));
       const ordered = [...result.data].sort((a: any, b: any) =>
-        Number(a.uri.replace('/videos/', '')) - Number(b.uri.replace('/videos/', '')));
+        String(a.name ?? '').localeCompare(String(b.name ?? ''), undefined, { numeric: true, sensitivity: 'base' })
+        || videoIdOf(a) - videoIdOf(b));
       ordered.forEach((entry: any, index: number) => {
         resultList.push({
           videoId: entry.uri.replace('/videos/', ''),
