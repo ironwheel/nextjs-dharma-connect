@@ -128,7 +128,7 @@ export async function getShowcaseVideos(
     let lastError: any;
     for (const account of VIMEO_ACCOUNTS) {
       try {
-        response = await withRateLimitRetry(() => axios.get(`${VIMEO_API_BASE}${account.albumsBase}/${showcaseId}/videos`, {
+        response = await withRateLimitRetry(() => axios.get(`${VIMEO_API_BASE}${account.albumsBase}/${showcaseId}/videos?per_page=100`, {
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${account.token}`,
@@ -160,19 +160,19 @@ export async function getShowcaseVideos(
         language = detectLanguage(result.data[0].name);
       }
 
-      // All videos get the same language
-      // Index starts from the end and decrements (matching Python script behavior)
-      // Last video in showcase = index 0, first video = highest index
-      let index = result.data.length - 1;
-      for (const entry of result.data) {
-        const videoId = entry.uri.replace('/videos/', '');
+      // All videos get the same language.
+      // Order by ascending Vimeo video id (upload order) rather than showcase order,
+      // which isn't reliable: index 0 = lowest id = first video.
+      const ordered = [...result.data].sort((a: any, b: any) =>
+        Number(a.uri.replace('/videos/', '')) - Number(b.uri.replace('/videos/', '')));
+      ordered.forEach((entry: any, index: number) => {
         resultList.push({
-          videoId,
+          videoId: entry.uri.replace('/videos/', ''),
           name: entry.name,
           language,
-          index: index--,
+          index,
         });
-      }
+      });
     } else {
       // Multi-language mode: one video per day, multiple language tracks
       // Each video name contains language info

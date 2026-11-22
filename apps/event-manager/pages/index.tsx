@@ -612,8 +612,6 @@ const Home = () => {
         embeddedShowcaseList: ['']
     });
     const [perLanguageShowcases, setPerLanguageShowcases] = useState<boolean>(false);
-    // Per-language showcases listed oldest-first (Day 1 on top) rather than newest-first
-    const [oldestFirstShowcases, setOldestFirstShowcases] = useState<boolean>(false);
     // Retreats (whichRetreatsConfig keys) each showcase row is limited to, by row index
     const [showcaseRetreats, setShowcaseRetreats] = useState<Record<number, string[]>>({});
     const [processingShowcaseIndex, setProcessingShowcaseIndex] = useState<number | null>(null);
@@ -2018,7 +2016,6 @@ const Home = () => {
             embeddedShowcaseList: ['']
         });
         setPerLanguageShowcases(false);
-        setOldestFirstShowcases(false);
         setShowcaseRetreats({});
         setProcessingShowcaseIndex(null);
         setVideoTextEdits({});
@@ -2035,7 +2032,6 @@ const Home = () => {
                 : ['']
         });
         setPerLanguageShowcases(false);
-        setOldestFirstShowcases(false);
         setShowcaseRetreats({});
         setProcessingShowcaseIndex(null);
         setVideoTextEdits({});
@@ -2194,13 +2190,11 @@ const Home = () => {
             const retreatTagKey = retreatTag.join(',');
 
             if (perLanguageShowcases && Array.isArray(videoList)) {
-                // Per-language mode: videos are array of {index, language, videoId}.
-                // The API numbers the first video in the showcase highest (newest-first showcases);
-                // for oldest-first showcases (Day 1 on top) flip so position 0 is the first video.
+                // Per-language mode: videos are array of {index, language, videoId}, with
+                // index 0 = lowest Vimeo video id (the API orders by ascending id)
                 const showcaseVideos = videoList as Array<{ index: number; language: string; videoId: string }>;
-                const count = showcaseVideos.length;
                 for (const video of showcaseVideos) {
-                    const position = oldestFirstShowcases ? count - 1 - video.index : video.index;
+                    const position = video.index;
                     let target: number;
                     if (retreatTag.length > 0) {
                         // Tagged showcases fill their own group of entries (same retreats), so separate
@@ -4067,18 +4061,9 @@ const Home = () => {
                             />
                             <Form.Text className="text-muted" style={{ fontSize: '0.85rem', display: 'block', marginBottom: '1rem' }}>
                                 {perLanguageShowcases
-                                    ? 'Each showcase contains all videos for one language. Videos will be indexed by position in showcase.'
+                                    ? 'Each showcase contains all videos for one language. Videos are ordered by ascending Vimeo video id.'
                                     : 'Each showcase contains multiple languages for one day of teaching. Videos will be grouped by language.'}
                             </Form.Text>
-                            {perLanguageShowcases && (
-                                <Form.Check
-                                    type="checkbox"
-                                    label={<span style={{ color: 'white' }}>Showcases list the first video on top (oldest first)</span>}
-                                    checked={oldestFirstShowcases}
-                                    onChange={(e) => setOldestFirstShowcases(e.target.checked)}
-                                    style={{ marginBottom: '1rem' }}
-                                />
-                            )}
                             {subEventFormData.embeddedShowcaseList && subEventFormData.embeddedShowcaseList.length > 0 ? (
                                 subEventFormData.embeddedShowcaseList.map((showcaseId, index) => (
                                     <div key={index} style={{
