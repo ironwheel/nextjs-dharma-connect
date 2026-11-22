@@ -612,6 +612,10 @@ const Home = () => {
         embeddedShowcaseList: ['']
     });
     const [perLanguageShowcases, setPerLanguageShowcases] = useState<boolean>(false);
+    // Per-language showcases listed oldest-first (Day 1 on top) rather than newest-first
+    const [oldestFirstShowcases, setOldestFirstShowcases] = useState<boolean>(false);
+    // Retreats (whichRetreatsConfig keys) each showcase row is limited to, by row index
+    const [showcaseRetreats, setShowcaseRetreats] = useState<Record<number, string[]>>({});
     const [processingShowcaseIndex, setProcessingShowcaseIndex] = useState<number | null>(null);
 
     // Prompt editing state
@@ -2014,6 +2018,8 @@ const Home = () => {
             embeddedShowcaseList: ['']
         });
         setPerLanguageShowcases(false);
+        setOldestFirstShowcases(false);
+        setShowcaseRetreats({});
         setProcessingShowcaseIndex(null);
         setVideoTextEdits({});
         setShowSubEventModal(true);
@@ -2029,6 +2035,8 @@ const Home = () => {
                 : ['']
         });
         setPerLanguageShowcases(false);
+        setOldestFirstShowcases(false);
+        setShowcaseRetreats({});
         setProcessingShowcaseIndex(null);
         setVideoTextEdits({});
         setShowSubEventModal(true);
@@ -2125,6 +2133,15 @@ const Home = () => {
     };
 
     const handleDeleteShowcase = (index: number) => {
+        setShowcaseRetreats(prev => {
+            const next: Record<number, string[]> = {};
+            for (const [key, value] of Object.entries(prev)) {
+                const i = Number(key);
+                if (i < index) next[i] = value;
+                else if (i > index) next[i - 1] = value;
+            }
+            return next;
+        });
         setSubEventFormData(prev => {
             const newList = [...(prev.embeddedShowcaseList || [''])];
             newList.splice(index, 1);
@@ -2169,20 +2186,47 @@ const Home = () => {
 
             let videoIds: string[] = [];
 
+            // Retreats this showcase is limited to, in whichRetreatsConfig order
+            const retreatConfig = (eventFormData.config?.whichRetreatsConfig || {}) as Record<string, { order?: string | number }>;
+            const retreatTag = (showcaseRetreats[index] || [])
+                .filter(key => key in retreatConfig)
+                .sort((a, b) => Number(retreatConfig[a]?.order ?? 0) - Number(retreatConfig[b]?.order ?? 0));
+            const retreatTagKey = retreatTag.join(',');
+
             if (perLanguageShowcases && Array.isArray(videoList)) {
-                // Per-language mode: videos are array of {index, language, videoId}
-                // Place each video at embeddedVideoList[video.index][language] = videoId
-                for (const video of videoList as Array<{ index: number; language: string; videoId: string }>) {
-                    // Ensure the target index exists
-                    while (embeddedVideoList.length <= video.index) {
-                        embeddedVideoList.push({});
+                // Per-language mode: videos are array of {index, language, videoId}.
+                // The API numbers the first video in the showcase highest (newest-first showcases);
+                // for oldest-first showcases (Day 1 on top) flip so position 0 is the first video.
+                const showcaseVideos = videoList as Array<{ index: number; language: string; videoId: string }>;
+                const count = showcaseVideos.length;
+                for (const video of showcaseVideos) {
+                    const position = oldestFirstShowcases ? count - 1 - video.index : video.index;
+                    let target: number;
+                    if (retreatTag.length > 0) {
+                        // Tagged showcases fill their own group of entries (same retreats), so separate
+                        // showcases for different retreats don't overwrite each other
+                        const group = embeddedVideoList
+                            .map((entry, i) => ({ entry, i }))
+                            .filter(({ entry }) => Array.isArray(entry?.retreats) && entry.retreats.join(',') === retreatTagKey)
+                            .map(({ i }) => i);
+                        while (group.length <= position) {
+                            embeddedVideoList.push({ retreats: retreatTag });
+                            group.push(embeddedVideoList.length - 1);
+                        }
+                        target = group[position];
+                    } else {
+                        // Ensure the target index exists
+                        while (embeddedVideoList.length <= position) {
+                            embeddedVideoList.push({});
+                        }
+                        target = position;
                     }
                     // Ensure the object at this index exists
-                    if (!embeddedVideoList[video.index]) {
-                        embeddedVideoList[video.index] = {};
+                    if (!embeddedVideoList[target]) {
+                        embeddedVideoList[target] = {};
                     }
                     // Place the video
-                    embeddedVideoList[video.index][video.language] = video.videoId;
+                    embeddedVideoList[target][video.language] = video.videoId;
                     videoIds.push(video.videoId);
                 }
             } else {
@@ -2191,7 +2235,9 @@ const Home = () => {
                 while (embeddedVideoList.length <= index) {
                     embeddedVideoList.push({});
                 }
-                embeddedVideoList[index] = videoList as Record<string, string>;
+                embeddedVideoList[index] = retreatTag.length > 0
+                    ? { retreats: retreatTag, ...(videoList as Record<string, string>) }
+                    : (videoList as Record<string, string>);
                 videoIds = Object.values(videoList as Record<string, string>);
             }
 
@@ -2228,7 +2274,7 @@ const Home = () => {
     // Per-video title/description prompts.
     // The student dashboard reads entry.title / entry.description as prompt names and looks them
     // up under the event's aid (or its aidAlias), so prompts are written under that aid.
-    const VIDEO_ENTRY_METADATA_KEYS = ['title', 'description', 'password'];
+    const VIDEO_ENTRY_METADATA_KEYS = ['title', 'description', 'password', 'retreats'];
 
     const videoPromptsAid = (): string => {
         const alias = eventFormData.config?.aidAlias;
@@ -4024,10 +4070,20 @@ const Home = () => {
                                     ? 'Each showcase contains all videos for one language. Videos will be indexed by position in showcase.'
                                     : 'Each showcase contains multiple languages for one day of teaching. Videos will be grouped by language.'}
                             </Form.Text>
+                            {perLanguageShowcases && (
+                                <Form.Check
+                                    type="checkbox"
+                                    label={<span style={{ color: 'white' }}>Showcases list the first video on top (oldest first)</span>}
+                                    checked={oldestFirstShowcases}
+                                    onChange={(e) => setOldestFirstShowcases(e.target.checked)}
+                                    style={{ marginBottom: '1rem' }}
+                                />
+                            )}
                             {subEventFormData.embeddedShowcaseList && subEventFormData.embeddedShowcaseList.length > 0 ? (
                                 subEventFormData.embeddedShowcaseList.map((showcaseId, index) => (
                                     <div key={index} style={{
                                         display: 'flex',
+                                        flexWrap: 'wrap',
                                         gap: '0.5rem',
                                         alignItems: 'center',
                                         marginBottom: '0.5rem',
@@ -4065,6 +4121,32 @@ const Home = () => {
                                         >
                                             ×
                                         </Button>
+                                        {eventFormData.config?.whichRetreatsConfig && (
+                                            <div style={{ flexBasis: '100%', display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
+                                                <span style={{ color: '#aaa', fontSize: '0.85rem' }}>Only for retreat:</span>
+                                                {Object.entries(eventFormData.config.whichRetreatsConfig as Record<string, any>)
+                                                    .sort((a, b) => Number(a[1]?.order ?? 0) - Number(b[1]?.order ?? 0))
+                                                    .map(([retreatKey, retreatCfg]) => (
+                                                        <Form.Check
+                                                            key={retreatKey}
+                                                            type="checkbox"
+                                                            inline
+                                                            label={<span style={{ color: 'white', fontSize: '0.85rem' }}>{retreatCfg?.headerName || retreatKey}</span>}
+                                                            checked={(showcaseRetreats[index] || []).includes(retreatKey)}
+                                                            onChange={(e) => setShowcaseRetreats(prev => {
+                                                                const current = prev[index] || [];
+                                                                return {
+                                                                    ...prev,
+                                                                    [index]: e.target.checked
+                                                                        ? [...current, retreatKey]
+                                                                        : current.filter(k => k !== retreatKey)
+                                                                };
+                                                            })}
+                                                        />
+                                                    ))}
+                                                <span style={{ color: '#888', fontSize: '0.8rem' }}>(none selected = all students)</span>
+                                            </div>
+                                        )}
                                     </div>
                                 ))
                             ) : (
@@ -4086,6 +4168,7 @@ const Home = () => {
                                             <div key={index} style={{ fontSize: '0.85rem', color: '#888', marginBottom: '0.75rem' }}>
                                                 Entry {index}: {languages.length} language(s)
                                                 {languages.length > 0 ? ` (${languages.join(', ')})` : ''}
+                                                {Array.isArray(videoEntry.retreats) && videoEntry.retreats.length > 0 ? ` — retreat: ${videoEntry.retreats.join(', ')}` : ''}
                                                 <Form.Control
                                                     size="sm"
                                                     type="text"
