@@ -16,7 +16,8 @@ import {
     getVimeoShowcaseVideos,
     enableVimeoVideoPlayback,
     authGetConfigValue,
-    translatePromptText
+    translatePromptText,
+    orderVideoEntriesByRetreat
 } from 'sharedFrontend';
 
 // Types
@@ -4144,7 +4145,12 @@ const Home = () => {
                                     <div style={{ fontSize: '0.9rem', color: '#aaa', marginBottom: '0.5rem' }}>
                                         Processed Videos ({subEventFormData.embeddedVideoList.length} entries):
                                     </div>
-                                    {subEventFormData.embeddedVideoList.map((videoEntry, index) => {
+                                    {eventFormData.config?.whichRetreatsConfig && subEventFormData.embeddedVideoList.some(e => Array.isArray(e?.retreats) && e.retreats.length > 0) && (
+                                        <div style={{ fontSize: '0.8rem', color: '#888', marginBottom: '0.5rem' }}>
+                                            Shown grouped by retreat (whichRetreatsConfig order), as on the student dashboard.
+                                        </div>
+                                    )}
+                                    {orderVideoEntriesByRetreat(subEventFormData.embeddedVideoList, eventFormData.config?.whichRetreatsConfig).map(({ entry: videoEntry, index }) => {
                                         const languages = getVideoEntryLanguages(videoEntry);
                                         const titleValue = videoTextEdits[index]?.title ?? getPromptEnglishText(videoEntry.title);
                                         const descriptionValue = videoTextEdits[index]?.description ?? getPromptEnglishText(videoEntry.description);
