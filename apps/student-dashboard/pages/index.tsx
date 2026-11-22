@@ -26,6 +26,7 @@ import {
     promptLookupHTMLWithArgsAIDSpecific,
     dbgout,
     checkEligibility,
+    subeventHasOfferingActivity,
     LanguageProvider,
     useLanguage,
     // New cache system imports
@@ -1670,8 +1671,8 @@ const HomeContent = () => {
                         offeringCompleteAID = el.parentEvent.aid;
                     }
                 } else {
-                    if (typeof student.programs[el.parentEvent.aid].offeringHistory.retreat !== 'undefined' &&
-                        typeof student.programs[el.parentEvent.aid].offeringHistory.retreat.offeringSKU !== 'undefined') {
+                    // Installments record payments under retreat.installments, not retreat.offeringSKU
+                    if (subeventHasOfferingActivity(student.programs[el.parentEvent.aid].offeringHistory.retreat)) {
                         offeringComplete = true;
                         offeringCompleteAID = el.parentEvent.aid;
                     }
@@ -2039,8 +2040,8 @@ const HomeContent = () => {
                         offeringCompleteAID = el.parentEvent.aid;
                     }
                 } else {
-                    if (typeof student.programs[el.parentEvent.aid].offeringHistory.retreat !== 'undefined' &&
-                        typeof student.programs[el.parentEvent.aid].offeringHistory.retreat.offeringSKU !== 'undefined') {
+                    // Installments record payments under retreat.installments, not retreat.offeringSKU
+                    if (subeventHasOfferingActivity(student.programs[el.parentEvent.aid].offeringHistory.retreat)) {
                         offeringComplete = true;
                         offeringCompleteAID = el.parentEvent.aid;
                     }
