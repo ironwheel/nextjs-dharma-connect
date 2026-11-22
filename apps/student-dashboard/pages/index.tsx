@@ -27,6 +27,7 @@ import {
     dbgout,
     checkEligibility,
     subeventHasOfferingActivity,
+    orderVideoEntriesByRetreat,
     LanguageProvider,
     useLanguage,
     // New cache system imports
@@ -1770,7 +1771,7 @@ const HomeContent = () => {
 
             return (
                 <>
-                    {el.subEvent.embeddedVideoList.map((vid: any, index: number) => (
+                    {orderVideoEntriesByRetreat(el.subEvent.embeddedVideoList, el.parentEvent.config?.whichRetreatsConfig).map(({ entry: vid, index }) => (
                         !videoEntryVisibleToStudent(vid, el.parentEvent.aid) ? null :
                         <EmbeddedVideo
                             key={`${el.key}-video-${index}`}

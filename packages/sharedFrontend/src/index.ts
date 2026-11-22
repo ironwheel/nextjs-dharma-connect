@@ -10,6 +10,7 @@ export * from './fingerprint';
 export * from './apiActions';
 export * from './eligible';
 export * from './installmentsHelpers';
+export * from './videoOrder';
 export * from './layout';
 export * from './prompts';
 export { default as AuthVerification } from './AuthVerification';
