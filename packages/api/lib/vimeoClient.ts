@@ -128,12 +128,12 @@ export async function getShowcaseVideos(
     let lastError: any;
     for (const account of VIMEO_ACCOUNTS) {
       try {
-        response = await axios.get(`${VIMEO_API_BASE}${account.albumsBase}/${showcaseId}/videos`, {
+        response = await withRateLimitRetry(() => axios.get(`${VIMEO_API_BASE}${account.albumsBase}/${showcaseId}/videos`, {
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${account.token}`,
           },
-        });
+        }));
         break;
       } catch (error: any) {
         lastError = error;
