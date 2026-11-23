@@ -82,7 +82,6 @@ class TableCacheManager:
     def __init__(self, logging_config=None):
         self.cache = {}  # table_name -> {'data': [...], 'last_refresh': timestamp}
         self.last_sqs_invalidation = 0
-        self.last_sleeping_refresh = time.time()  # Initialize to now to avoid huge interval on first use
         self.logging_config = logging_config
     
     def log(self, level, message):
@@ -117,12 +116,13 @@ class TableCacheManager:
             print(f"[CACHE] No cache exists for {table_name}, will refresh (no cache entry)")
             return True
         
-        # If there are sleeping work orders, refresh every CACHE_REFRESH_INTERVAL_SECS
+        # If there are sleeping work orders, refresh every CACHE_REFRESH_INTERVAL_SECS.
+        # Age is tracked per table: a shared timer let the first table scanned after
+        # the interval reset it, so tables scanned later (pools, prompts) stayed stale.
         if has_sleeping_work_orders:
-            time_since_refresh = current_time - self.last_sleeping_refresh
+            time_since_refresh = current_time - self.cache[table_name]['last_refresh']
             if time_since_refresh >= CACHE_REFRESH_INTERVAL_SECS:
                 print(f"[CACHE] Sleeping work orders detected, cache refresh interval reached ({time_since_refresh:.1f}s >= {CACHE_REFRESH_INTERVAL_SECS}s) for {table_name}")
-                self.last_sleeping_refresh = current_time
                 return True
             else:
                 print(f"[CACHE] Using cached data for {table_name} (sleeping work orders, {time_since_refresh:.1f}s < {CACHE_REFRESH_INTERVAL_SECS}s)")
