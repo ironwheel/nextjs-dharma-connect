@@ -28,7 +28,6 @@ def test_cache_manager():
     # Test initial state
     assert len(cache_manager.cache) == 0
     assert cache_manager.last_sqs_invalidation == 0
-    assert cache_manager.last_sleeping_refresh == 0
     
     # Test cache invalidation
     cache_manager.invalidate_all_caches("test")
@@ -84,6 +83,17 @@ def test_cache_refresh_logic():
     should_refresh = cache_manager.should_refresh_cache("test_table", True)
     assert should_refresh == True
     
+    # Test 5: Ages are per table - refreshing one stale table must not make
+    # another stale table look fresh (pools stayed stale behind students before)
+    cache_manager.set_cached_data("students", [{"id": "1"}])
+    cache_manager.set_cached_data("pools", [{"name": "p"}])
+    cache_manager.cache["students"]["last_refresh"] = time.time() - 700
+    cache_manager.cache["pools"]["last_refresh"] = time.time() - 700
+    assert cache_manager.should_refresh_cache("students", True) == True
+    cache_manager.set_cached_data("students", [{"id": "1"}])  # scan_table re-caches after refresh
+    assert cache_manager.should_refresh_cache("pools", True) == True
+    assert cache_manager.should_refresh_cache("students", True) == False
+    
     print("✓ Cache refresh logic tests passed")
 
 def test_aws_client_cache_integration():
@@ -132,7 +142,7 @@ def main():
         print("- Cache refresh logic works for different scenarios")
         print("- AWSClient integrates caching with scan_table()")
         print("- SQS start messages invalidate all caches")
-        print("- Sleeping work orders trigger 10-minute refresh intervals")
+        print("- Sleeping work orders trigger 10-minute refresh intervals, tracked per table")
         print("- Non-sleeping scenarios refresh on every call")
         
     except Exception as e:

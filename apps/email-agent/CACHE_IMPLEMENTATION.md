@@ -29,7 +29,6 @@ class TableCacheManager:
     def __init__(self, logging_config=None):
         self.cache = {}  # table_name -> {'data': [...], 'last_refresh': timestamp}
         self.last_sqs_invalidation = 0
-        self.last_sleeping_refresh = 0
 ```
 
 ### Cache Invalidation Rules
@@ -37,7 +36,7 @@ class TableCacheManager:
 The cache follows these invalidation rules:
 
 1. **SQS Start Messages**: All caches are immediately invalidated when an SQS start message is received
-2. **Sleeping Work Orders**: If sleeping work orders exist, cache refreshes every 10 minutes (configurable)
+2. **Sleeping Work Orders**: If sleeping work orders exist, each table's cache refreshes once it is 10 minutes old (configurable), based on that table's own `last_refresh`
 3. **No Sleeping Work Orders**: Cache refreshes on every call (immediate invalidation)
 
 ### Configuration
